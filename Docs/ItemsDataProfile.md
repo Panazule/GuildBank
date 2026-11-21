@@ -7,7 +7,7 @@
 | Source | Development MariaDB `GuildBank.items`, copied from the collector dump `EQItemList.items` |
 | Scope | Read-only profile of the externally owned item metadata used by GuildBank |
 | Companion documents | `Design.md` v1.6.1, `Docs/DatabaseDesign.md` §4.1, `Docs/ProjectStatus.md` |
-| Status | Development copy loaded and profiled; PD-19/PD-20 approved and implemented in the item repository and mask decoders (2026-11-21) |
+| Status | Development copy loaded and profiled; PD-19/PD-20 approved and implemented through the read-only repository, decoders and Phase 2 metadata resolver (2026-11-21) |
 
 This document records what the development copy actually contains. It does not
 change the logical contract in `DatabaseDesign.md` §4.1 and does not authorize any
@@ -189,7 +189,9 @@ over the externally owned table. Encapsulate physical names and never use
 
 **Status:** Approved 2026-11-21. Implemented by
 `internal/repository/mariadb/items.go`; the application depends on
-`domain.Item` and does not reference the physical source names.
+`domain.Item` and does not reference the physical source names. Single, batch,
+count and keyset-page reads are read-only and covered by the opt-in full-table
+integration test.
 
 ### PD-20 — Out-of-range mask policy
 
@@ -198,10 +200,11 @@ the decoded low-bit result and emit a non-fatal warning when undefined high bits
 are encountered. `MetadataMissingFg` remains reserved for an absent EQUID.
 
 **Status:** Approved 2026-11-21. Implemented by the repository-independent
-`ClassMaskDecoder` and `RaceMaskDecoder` services in `internal/service`. Both
-return a structured `MaskWarning`; the E-14 warning destination remains open,
-so callers decide where to record it. Malformed non-numeric source values are a
-repository parse error rather than an undefined-mask warning.
+`ClassMaskDecoder` and `RaceMaskDecoder` services in `internal/service`.
+`ItemMetadataService` combines those results with EQUID resolution; it returns
+structured warnings and leaves their persistence to E-14. Malformed non-numeric
+source values are a repository parse error rather than an undefined-mask
+warning.
 
 ---
 
@@ -231,5 +234,7 @@ runtime queries belong in the MariaDB repository, not in this profile.
   or race meanings beyond the 16 bits defined by the specification.
 - The collector loader procedure, refresh cadence and production account model
   remain open under E-01.
-- No application decoding or import code has been implemented for this data.
+- The Phase 2 metadata resolver is implemented and tested but has no HTTP route;
+  inventory and import consumers arrive in later phases. Warning persistence is
+  still an E-14 decision.
 - The 5,522 duplicate-name rows were counted, not individually dispositioned.

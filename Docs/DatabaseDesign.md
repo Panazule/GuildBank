@@ -241,9 +241,10 @@ CREATE TABLE IF NOT EXISTS Items (
 > respectively). The defined decoder alone is therefore insufficient for this
 > dataset; PD-20 (approved 2026-11-21) decodes the low 16 bits, maps `65535` to
 > `ALL`, and returns a structured non-fatal warning for undefined high bits
-> without rejecting the row. The warning destination remains dependent on E-14.
-> `MetadataMissingFg` stays reserved for an absent EQUID. See
-> `Docs/ItemsDataProfile.md` for the full profile and evidence.
+> without rejecting the row. `ItemMetadataService` returns those warnings to
+> callers without choosing a persistence sink (E-14); `MetadataMissingFg` stays
+> reserved for an absent EQUID. See `Docs/ItemsDataProfile.md` for the full
+> profile and evidence.
 >
 > The development `guildbank` account currently has `ALL PRIVILEGES` on
 > `GuildBank.*`; read-only access is a code rule there, not a grant. Production

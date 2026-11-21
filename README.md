@@ -5,11 +5,14 @@ specification is [`Design.md`](Design.md) v1.6.1; delivery is tracked in
 [`Docs/ProjectStatus.md`](Docs/ProjectStatus.md) and
 [`Docs/ImplementationPlan.md`](Docs/ImplementationPlan.md).
 
-**Current scope: Phase 1 complete.** The process builds, starts, migrates SQLite,
-serves the four-step setup wizard, creates a bcrypt-hashed administrator,
-issues server-side sessions, enforces CSRF and default-deny admin routes,
-rate-limits login and persists typed settings. Inventory, imports, audit,
-user management and MariaDB business repositories remain later phases.
+**Current scope: Phase 1 complete; Phase 2 item-metadata integration complete.**
+The process builds, starts, migrates SQLite, serves the four-step setup wizard,
+creates a bcrypt-hashed administrator, issues server-side sessions, enforces
+CSRF and default-deny admin routes, rate-limits login and persists typed
+settings. The MariaDB item repository is read-only and resolves EQUIDs into
+decoded class/race metadata, including the approved missing-metadata behavior.
+Inventory, imports, audit, user management and writable MariaDB repositories
+remain later phases; Phase 3 has not started.
 
 ## Requirements
 
@@ -133,6 +136,12 @@ session hashing/expiry/disabled accounts, login failure parity and lockout,
 CSRF rejection, default-deny routes, secure cookie flags, secret redaction and
 settings validation. The four-step flow was also exercised against the Compose
 topology with a live MariaDB 11.4 instance.
+
+The full Items metadata test is opt-in because it requires the provisioned
+144,712-row source. Set `GUILDBANK_INTEGRATION=1` and the
+`GUILDBANK_TEST_MARIADB_HOST`, `_PORT`, `_DATABASE`, `_USERNAME` and `_PASSWORD`
+values, then run `go test ./internal/integration -run ItemMetadataIntegration -v`.
+Normal `go test ./...` skips it. The test is read-only.
 
 Layer boundaries are enforced by tests: `internal/api` and `internal/web`
 fail the build if they import `internal/repository`.
