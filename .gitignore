@@ -1,0 +1,18 @@
+# Build and local runtime output
+/bin/
+/config/
+/tmp/
+/dist/
+*.exe
+*.log
+coverage.out
+
+# SQLite databases must never be committed
+*.db
+*.db-wal
+*.db-shm
+
+# Local secrets and editor state
+.env
+.vscode/
+.idea/

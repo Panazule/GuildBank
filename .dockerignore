@@ -1,0 +1,15 @@
+.git
+.github
+bin
+config
+tmp
+*.db
+*.db-wal
+*.db-shm
+*.log
+.env
+coverage.out
+dist
+README.md
+Docs
+Design.md

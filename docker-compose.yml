@@ -1,0 +1,50 @@
+# Development topology: app + MariaDB (IP §7.1). Credentials below are
+# disposable development values and must not be reused in production.
+name: guildbank
+
+services:
+  guildbank:
+    build:
+      context: .
+      args:
+        VERSION: dev-compose
+    image: guildbank:dev
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      GUILDBANK_PORT: "8080"
+      GUILDBANK_SQLITE_PATH: /config/guildbank.db
+      GUILDBANK_LOG_LEVEL: debug
+      # Bootstrap-only guild store config; Phase 3 moves this to Settings.
+      GUILDBANK_MARIADB_HOST: mariadb
+      GUILDBANK_MARIADB_PORT: "3306"
+      GUILDBANK_MARIADB_DATABASE: GuildBank
+      GUILDBANK_MARIADB_USERNAME: guildbank
+      GUILDBANK_MARIADB_PASSWORD: guildbank-dev-only
+    volumes:
+      - guildbank_config:/config
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: GuildBank
+      MARIADB_USER: guildbank
+      MARIADB_PASSWORD: guildbank-dev-only
+      MARIADB_ROOT_PASSWORD: root-dev-only
+    volumes:
+      - guildbank_mariadb:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  guildbank_config:
+  guildbank_mariadb:
