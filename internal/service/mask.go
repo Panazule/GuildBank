@@ -16,22 +16,27 @@ const (
 	MaskWarningUndefinedHighBits = "undefined_high_bits"
 )
 
-// MaskWarning records a value that decoded successfully but violates the
-// published mask contract. Decoders never fail solely because of this
-// condition; future import and inventory workflows can forward the warning to
-// their chosen sink (E-14).
-type MaskWarning struct {
+// ItemWarning records a non-fatal condition discovered while generating
+// GuildBankItems metadata. Mask decoders emit undefined_high_bits warnings and
+// the metadata service emits metadata_missing when an EQUID is unresolved.
+// Future import and inventory workflows forward these warnings to their chosen
+// sink (E-14).
+type ItemWarning struct {
 	Code     string
 	Field    string
+	EQUID    uint64
 	Mask     uint64
 	HighBits uint64
 	Detail   string
 }
 
+// MaskWarning is the mask-specific name retained for the decoder contract.
+type MaskWarning = ItemWarning
+
 // MaskDecodeResult is the decoded logical string plus any non-fatal warnings.
 type MaskDecodeResult struct {
 	Value    string
-	Warnings []MaskWarning
+	Warnings []ItemWarning
 }
 
 // decodeMask applies the approved PD-20 rules: only the low 16 bits are

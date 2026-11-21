@@ -13,3 +13,11 @@ type Item struct {
 	ClassList uint64
 	RaceList  uint64
 }
+
+// ItemReference is the minimum imported item identity needed to resolve
+// metadata. Name is the imported snapshot and is used only when EQUID is
+// absent from Items (D-08, AM-01/AM-02).
+type ItemReference struct {
+	EQUID uint64
+	Name  string
+}
