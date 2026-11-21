@@ -1,0 +1,548 @@
+Location	Name	ID	Count	Slots
+Charm	Empty	0	0	0
+Ear	Earring of Eradication	26775	1	6
+Ear-Slot1	Empty	0	0	0
+Head	Helmet of Shadow	28986	1	6
+Head-Slot1	Empty	0	0	0
+Head-Slot2	Empty	0	0	0
+Face	Crimson Runed Mask	26773	1	6
+Face-Slot1	Empty	0	0	0
+Ear	Earring of Vigor	28896	1	6
+Ear-Slot1	Empty	0	0	0
+Neck	Talisman of Vah Kerrath	8364	1	6
+Neck-Slot1	Empty	0	0	0
+Shoulders	Pauldrons of Seething Darkness	28997	1	6
+Shoulders-Slot1	Empty	0	0	0
+Arms	Umbral Vambraces	28927	1	6
+Arms-Slot1	Empty	0	0	0
+Arms-Slot2	Empty	0	0	0
+Back	Cloak of Icy Shadows	28887	1	6
+Back-Slot1	Empty	0	0	0
+Wrist	Silver Bracelet of Speed	31461	1	6
+Wrist-Slot1	Empty	0	0	0
+Wrist-Slot2	Empty	0	0	0
+Wrist	Umbracite Bracer	28886	1	6
+Wrist-Slot1	Empty	0	0	0
+Wrist-Slot2	Empty	0	0	0
+Range	Orb of Evasion	28903	1	6
+Range-Slot1	Empty	0	0	0
+Hands	Gloves of the Crimson Sigil	26774	1	6
+Hands-Slot1	Empty	0	0	0
+Hands-Slot2	Empty	0	0	0
+Primary	Bloodfrenzy	28855	1	6
+Primary-Slot1	Wulfenite Gem	51726	1	6
+Primary-Slot2	Empty	0	0	0
+Secondary	Hategiver	28854	1	6
+Secondary-Slot1	Wulfenite Segment	51725	1	6
+Secondary-Slot2	Empty	0	0	0
+Fingers	Ring of Destruction	25211	1	6
+Fingers-Slot1	Empty	0	0	0
+Fingers	Azaliil's Ring of Analogies	26749	1	6
+Fingers-Slot1	Empty	0	0	0
+Chest	Great Shadow Platemail	26770	1	6
+Chest-Slot1	Empty	0	0	0
+Chest-Slot2	Empty	0	0	0
+Legs	Umbracite Plate Leggings	26760	1	6
+Legs-Slot1	Empty	0	0	0
+Legs-Slot2	Empty	0	0	0
+Feet	Boots of the Storm	25197	1	6
+Feet-Slot1	Empty	0	0	0
+Feet-Slot2	Empty	0	0	0
+Waist	Belt of Mastery	26761	1	6
+Waist-Slot1	Empty	0	0	0
+Power Source	Empty	0	0	0
+Ammo	Shissar Fangs	32531	25	6
+General 1	Farseer's Frostpack	89338	1	40
+General 1-Slot1	Batwing Crunchies	13462	55	6
+General 1-Slot2	Cobalt Bracer	4518	1	6
+General 1-Slot2-Slot1	Empty	0	0	0
+General 1-Slot2-Slot2	Empty	0	0	0
+General 1-Slot3	Head of the Inquisitor	7810	1	6
+General 1-Slot4	Feeliux's Cord of Velocity	31235	1	6
+General 1-Slot4-Slot1	Empty	0	0	0
+General 1-Slot5	Sword of Pain	25319	1	6
+General 1-Slot5-Slot1	Empty	0	0	0
+General 1-Slot5-Slot2	Empty	0	0	0
+General 1-Slot6	Tserrina's Whip	29126	1	6
+General 1-Slot6-Slot1	Empty	0	0	0
+General 1-Slot6-Slot2	Empty	0	0	0
+General 1-Slot7	CLASS 1 Bone Point Arrow	8518	11	6
+General 1-Slot8	Cloudy Steel Mask	28942	1	6
+General 1-Slot8-Slot1	Empty	0	0	0
+General 1-Slot9	CLASS 1 Wood Silver Tip Arrow	8512	100	6
+General 1-Slot10	Di'zok Signet of Service	5728	1	6
+General 1-Slot10-Slot1	Empty	0	0	0
+General 1-Slot11	Shissar Venom Sac	32527	1	6
+General 1-Slot12	Fletching Kit	17910	1	8
+General 1-Slot12-Slot1	Empty	0	0	0
+General 1-Slot12-Slot2	Empty	0	0	0
+General 1-Slot12-Slot3	Empty	0	0	0
+General 1-Slot12-Slot4	Empty	0	0	0
+General 1-Slot12-Slot5	Empty	0	0	0
+General 1-Slot12-Slot6	Empty	0	0	0
+General 1-Slot12-Slot7	Empty	0	0	0
+General 1-Slot12-Slot8	Empty	0	0	0
+General 1-Slot13	Ancient: Lcea's Lament	26622	1	6
+General 1-Slot14	Bixie Parts	13499	4	6
+General 1-Slot15	Report to Tilbok	29891	1	6
+General 1-Slot16	Black Sapphire Electrum Earring	14701	1	6
+General 1-Slot16-Slot1	Empty	0	0	0
+General 1-Slot17	Dusty Soriz Worker Pouch	8200	1	6
+General 1-Slot18	Shissar Eggs	32530	2	6
+General 1-Slot19	Ancient Burrower Hide Tunic	8498	1	6
+General 1-Slot19-Slot1	Empty	0	0	0
+General 1-Slot19-Slot2	Empty	0	0	0
+General 1-Slot20	Expedient Delivery Voucher	55249	4	6
+General 1-Slot21	Small Brick of Acrylia Ore	10423	2	6
+General 1-Slot22	Robust Shadow Essence	96911	1	6
+General 1-Slot23	Small Brick of Yttrium Ore	22901	9	6
+General 1-Slot24	Spell: Transon's Phantasmal Protection	7639	1	6
+General 1-Slot25	Shackle Key	1046	1	6
+General 1-Slot26	Tserrina's Key	20039	1	6
+General 1-Slot27	Shissar Blood	22915	6	6
+General 1-Slot28	Empty	0	0	0
+General 1-Slot29	Crystallized Sulfur	16976	5	6
+General 1-Slot30	Ssraeshzian Insignia	19718	1	6
+General 1-Slot31	Testament of Night	63166	1	6
+General 1-Slot32	Grimy Papyrus	97874	1	6
+General 1-Slot33	Girdle of Living Thorns	2510	1	6
+General 1-Slot33-Slot1	Empty	0	0	0
+General 1-Slot34	Empty	0	0	0
+General 1-Slot35	Rune of Crippling	11783	1	6
+General 1-Slot36	Empty	0	0	0
+General 1-Slot37	Empty	0	0	0
+General 1-Slot38	Empty	0	0	0
+General 1-Slot39	Empty	0	0	0
+General 1-Slot40	Autumn Crocus	24092	12	6
+General 2	Backpack	17005	1	8
+General 2-Slot1	Empty	0	0	0
+General 2-Slot2	Ring of the Shissar	19719	1	6
+General 2-Slot2-Slot1	Empty	0	0	0
+General 2-Slot3	Empty	0	0	0
+General 2-Slot4	Empty	0	0	0
+General 2-Slot5	Empty	0	0	0
+General 2-Slot6	Empty	0	0	0
+General 2-Slot7	Empty	0	0	0
+General 2-Slot8	Empty	0	0	0
+General 3	Backpack	17005	1	8
+General 3-Slot1	Empty	0	0	0
+General 3-Slot2	Empty	0	0	0
+General 3-Slot3	Empty	0	0	0
+General 3-Slot4	Empty	0	0	0
+General 3-Slot5	Empty	0	0	0
+General 3-Slot6	Empty	0	0	0
+General 3-Slot7	Empty	0	0	0
+General 3-Slot8	Empty	0	0	0
+General 4	Backpack	17005	1	8
+General 4-Slot1	Empty	0	0	0
+General 4-Slot2	Empty	0	0	0
+General 4-Slot3	Empty	0	0	0
+General 4-Slot4	Empty	0	0	0
+General 4-Slot5	Empty	0	0	0
+General 4-Slot6	Empty	0	0	0
+General 4-Slot7	Empty	0	0	0
+General 4-Slot8	Empty	0	0	0
+General 5	Backpack	17005	1	8
+General 5-Slot1	Empty	0	0	0
+General 5-Slot2	Empty	0	0	0
+General 5-Slot3	Empty	0	0	0
+General 5-Slot4	Empty	0	0	0
+General 5-Slot5	Empty	0	0	0
+General 5-Slot6	Empty	0	0	0
+General 5-Slot7	Empty	0	0	0
+General 5-Slot8	Empty	0	0	0
+General 6	Backpack	17005	1	8
+General 6-Slot1	Empty	0	0	0
+General 6-Slot2	Empty	0	0	0
+General 6-Slot3	Empty	0	0	0
+General 6-Slot4	Empty	0	0	0
+General 6-Slot5	Empty	0	0	0
+General 6-Slot6	Empty	0	0	0
+General 6-Slot7	CLASS 1 Wood Silver Tip Arrow	8512	100	6
+General 6-Slot8	Empty	0	0	0
+General 7	Backpack*	32601	1	8
+General 7-Slot1	CLASS 1 Wood Silver Tip Arrow	8512	100	6
+General 7-Slot2	CLASS 1 Wood Silver Tip Arrow	8512	100	6
+General 7-Slot3	Empty	0	0	0
+General 7-Slot4	Leggings of Fiery Might	28965	1	6
+General 7-Slot4-Slot1	Empty	0	0	0
+General 7-Slot4-Slot2	Empty	0	0	0
+General 7-Slot5	Spell: Foliage Shield	7616	1	6
+General 7-Slot6	Empty	0	0	0
+General 7-Slot7	Empty	0	0	0
+General 7-Slot8	Empty	0	0	0
+General 8	Backpack	17005	1	8
+General 8-Slot1	Orb of the Sky	28975	1	6
+General 8-Slot1-Slot1	Empty	0	0	0
+General 8-Slot2	Orb of Satisfaction	26758	1	6
+General 8-Slot2-Slot1	Empty	0	0	0
+General 8-Slot2-Slot2	Empty	0	0	0
+General 8-Slot3	Empty	0	0	0
+General 8-Slot4	Empty	0	0	0
+General 8-Slot5	Empty	0	0	0
+General 8-Slot6	Empty	0	0	0
+General 8-Slot7	Empty	0	0	0
+General 8-Slot8	Empty	0	0	0
+General 9	Reinforced Medicine Bag	17811	1	10
+General 9-Slot1	Empty	0	0	0
+General 9-Slot2	Empty	0	0	0
+General 9-Slot3	Empty	0	0	0
+General 9-Slot4	Empty	0	0	0
+General 9-Slot5	Empty	0	0	0
+General 9-Slot6	Empty	0	0	0
+General 9-Slot7	Empty	0	0	0
+General 9-Slot8	Empty	0	0	0
+General 9-Slot9	Empty	0	0	0
+General 9-Slot10	Empty	0	0	0
+General 10	Reinforced Medicine Bag	17811	1	10
+General 10-Slot1	Etched Earring of Veracity	29858	1	6
+General 10-Slot1-Slot1	Empty	0	0	0
+General 10-Slot2	Concillium Report	29885	1	6
+General 10-Slot3	Concillium Report	29888	1	6
+General 10-Slot4	Empty	0	0	0
+General 10-Slot5	Empty	0	0	0
+General 10-Slot6	Empty	0	0	0
+General 10-Slot7	Lucid Shard	22192	1	6
+General 10-Slot8	Lucid Shard	22189	1	6
+General 10-Slot9	Lucid Shard	22190	1	6
+General 10-Slot10	Lucid Shard	22185	1	6
+General 11	Empty	0	0	0
+General 12	Empty	0	0	0
+Held	Empty	0	0	0
+Bank1	Backpack	17005	1	8
+Bank1-Slot1	Blood Ember Helm	4522	1	6
+Bank1-Slot1-Slot1	Empty	0	0	0
+Bank1-Slot1-Slot2	Empty	0	0	0
+Bank1-Slot2	Burnished Wooden Stave	6353	1	6
+Bank1-Slot2-Slot1	Empty	0	0	0
+Bank1-Slot2-Slot2	Empty	0	0	0
+Bank1-Slot3	Jarsath Scale Boots	3257	1	6
+Bank1-Slot3-Slot1	Empty	0	0	0
+Bank1-Slot3-Slot2	Empty	0	0	0
+Bank1-Slot4	Strange Green Metal	7966	1	6
+Bank1-Slot5	Chokidai Hide Pauldrons	5706	1	6
+Bank1-Slot5-Slot1	Empty	0	0	0
+Bank1-Slot6	Chitinous Belt	28728	1	6
+Bank1-Slot6-Slot1	Empty	0	0	0
+Bank1-Slot7	Black Ice Sleeves	25550	1	6
+Bank1-Slot7-Slot1	Empty	0	0	0
+Bank1-Slot7-Slot2	Empty	0	0	0
+Bank1-Slot8	Dragonscale Encrusted Veil	29179	1	6
+Bank1-Slot8-Slot1	Empty	0	0	0
+Bank2	Backpack*	32601	1	8
+Bank2-Slot1	Ry`Gorr Battle Mail	30114	1	6
+Bank2-Slot1-Slot1	Empty	0	0	0
+Bank2-Slot1-Slot2	Empty	0	0	0
+Bank2-Slot2	Jagged Chokidai Spine	7253	1	6
+Bank2-Slot2-Slot1	Empty	0	0	0
+Bank2-Slot2-Slot2	Empty	0	0	0
+Bank2-Slot3	Blood Wolf Harness	30249	1	6
+Bank2-Slot3-Slot1	Empty	0	0	0
+Bank2-Slot4	Silken Cat-Fur Girdle	2740	1	6
+Bank2-Slot4-Slot1	Empty	0	0	0
+Bank2-Slot5	Strange Green Metal	7966	1	6
+Bank2-Slot6	Strange Green Metal	7966	1	6
+Bank2-Slot7	Pallid Long Sword	7534	1	6
+Bank2-Slot7-Slot1	Empty	0	0	0
+Bank2-Slot7-Slot2	Empty	0	0	0
+Bank2-Slot8	Gauntlets of the Black	30142	1	6
+Bank2-Slot8-Slot1	Empty	0	0	0
+Bank2-Slot8-Slot2	Empty	0	0	0
+Bank3	Backpack	17005	1	8
+Bank3-Slot1	Sarnak Parrying Blade	5801	1	6
+Bank3-Slot1-Slot1	Empty	0	0	0
+Bank3-Slot1-Slot2	Empty	0	0	0
+Bank3-Slot2	Trakanon Idol	20883	1	6
+Bank3-Slot3	Ant's Potion	14441	10	6
+Bank3-Slot4	Gold Threaded Cloth Gloves	62219	1	6
+Bank3-Slot4-Slot1	Empty	0	0	0
+Bank3-Slot4-Slot2	Empty	0	0	0
+Bank3-Slot5	Revenant Tooth	57500	1	6
+Bank3-Slot6	Collar of the Brood	19700	1	6
+Bank3-Slot6-Slot1	Empty	0	0	0
+Bank3-Slot7	Fatty Walrus Meat	30097	1	6
+Bank3-Slot8	Ball of Velium	25307	1	6
+Bank3-Slot8-Slot1	Empty	0	0	0
+Bank4	Reinforced Medicine Bag	17811	1	10
+Bank4-Slot1	Strange Green Metal	7966	1	6
+Bank4-Slot2	Blood Runed Short Sword	25568	1	6
+Bank4-Slot2-Slot1	Empty	0	0	0
+Bank4-Slot2-Slot2	Empty	0	0	0
+Bank4-Slot3	Tijoely's Dancing Rapier	25346	1	6
+Bank4-Slot3-Slot1	Empty	0	0	0
+Bank4-Slot3-Slot2	Empty	0	0	0
+Bank4-Slot4	Empty	0	0	0
+Bank4-Slot5	Helot Skull Helm	1414	1	6
+Bank4-Slot5-Slot1	Empty	0	0	0
+Bank4-Slot5-Slot2	Empty	0	0	0
+Bank4-Slot6	Holgresh Grand Vizier Beads	24889	1	6
+Bank4-Slot6-Slot1	Empty	0	0	0
+Bank4-Slot7	Black Tome with Silver Runes	13400	1	6
+Bank4-Slot7-Slot1	Empty	0	0	0
+Bank4-Slot8	Scepter of Mastery	25187	1	6
+Bank4-Slot8-Slot1	Empty	0	0	0
+Bank4-Slot8-Slot2	Empty	0	0	0
+Bank4-Slot9	Spider Fur Belt	25294	1	6
+Bank4-Slot9-Slot1	Empty	0	0	0
+Bank4-Slot10	Spider Fur Belt	25294	1	6
+Bank4-Slot10-Slot1	Empty	0	0	0
+Bank5	Large Black Trader's Satchel	108293	1	12
+Bank5-Slot1	Antlered Mask	25084	1	6
+Bank5-Slot1-Slot1	Empty	0	0	0
+Bank5-Slot2	Empty	0	0	0
+Bank5-Slot3	Spider Fur Belt	25294	1	6
+Bank5-Slot3-Slot1	Empty	0	0	0
+Bank5-Slot4	Ball of Velium	25307	1	6
+Bank5-Slot4-Slot1	Empty	0	0	0
+Bank5-Slot5	Sporestrand Shield	1843	1	6
+Bank5-Slot5-Slot1	Empty	0	0	0
+Bank5-Slot5-Slot2	Empty	0	0	0
+Bank5-Slot6	Orc Fang Earring	30110	1	6
+Bank5-Slot6-Slot1	Empty	0	0	0
+Bank5-Slot7	Dragonhide Belt	25049	1	6
+Bank5-Slot7-Slot1	Empty	0	0	0
+Bank5-Slot8	Empty	0	0	0
+Bank5-Slot9	Empty	0	0	0
+Bank5-Slot10	Empty	0	0	0
+Bank5-Slot11	Revenant Tooth	57500	1	6
+Bank5-Slot12	Orc Fang Earring	30110	1	6
+Bank5-Slot12-Slot1	Empty	0	0	0
+Bank6	Reinforced Medicine Bag	17811	1	10
+Bank6-Slot1	Empty	0	0	0
+Bank6-Slot2	Empty	0	0	0
+Bank6-Slot3	Empty	0	0	0
+Bank6-Slot4	Vampyre Blood	2693	1	6
+Bank6-Slot5	Vah Shir Skin Robe	8150	1	6
+Bank6-Slot5-Slot1	Empty	0	0	0
+Bank6-Slot5-Slot2	Empty	0	0	0
+Bank6-Slot6	Clay Guardian Shield	9030	1	6
+Bank6-Slot6-Slot1	Empty	0	0	0
+Bank6-Slot6-Slot2	Empty	0	0	0
+Bank6-Slot7	Empty	0	0	0
+Bank6-Slot8	Empty	0	0	0
+Bank6-Slot9	Velium Fire Wedding Ring	30339	1	6
+Bank6-Slot9-Slot1	Empty	0	0	0
+Bank6-Slot10	Velium Fire Wedding Ring	30339	1	6
+Bank6-Slot10-Slot1	Empty	0	0	0
+Bank7	Large Black Trader's Satchel	108293	1	12
+Bank7-Slot1	Empty	0	0	0
+Bank7-Slot2	Empty	0	0	0
+Bank7-Slot3	Empty	0	0	0
+Bank7-Slot4	Empty	0	0	0
+Bank7-Slot5	Empty	0	0	0
+Bank7-Slot6	Empty	0	0	0
+Bank7-Slot7	Empty	0	0	0
+Bank7-Slot8	Empty	0	0	0
+Bank7-Slot9	Empty	0	0	0
+Bank7-Slot10	Empty	0	0	0
+Bank7-Slot11	Empty	0	0	0
+Bank7-Slot12	Empty	0	0	0
+Bank8	Large Black Trader's Satchel	108293	1	12
+Bank8-Slot1	Empty	0	0	0
+Bank8-Slot2	Empty	0	0	0
+Bank8-Slot3	Empty	0	0	0
+Bank8-Slot4	Empty	0	0	0
+Bank8-Slot5	Empty	0	0	0
+Bank8-Slot6	Empty	0	0	0
+Bank8-Slot7	Empty	0	0	0
+Bank8-Slot8	Empty	0	0	0
+Bank8-Slot9	Empty	0	0	0
+Bank8-Slot10	Empty	0	0	0
+Bank8-Slot11	Empty	0	0	0
+Bank8-Slot12	Empty	0	0	0
+Bank9	Large Black Trader's Satchel	108293	1	12
+Bank9-Slot1	Insignia of the Brood	19704	1	6
+Bank9-Slot1-Slot1	Empty	0	0	0
+Bank9-Slot2	Warblade of the Fallen	8151	1	6
+Bank9-Slot2-Slot1	Empty	0	0	0
+Bank9-Slot2-Slot2	Empty	0	0	0
+Bank9-Slot3	Empty	0	0	0
+Bank9-Slot4	Dusty Soriz Boots	8210	1	6
+Bank9-Slot4-Slot1	Empty	0	0	0
+Bank9-Slot4-Slot2	Empty	0	0	0
+Bank9-Slot5	Shadowy Assassin's Cape	8144	1	6
+Bank9-Slot5-Slot1	Empty	0	0	0
+Bank9-Slot6	Goranga Spear	32330	1	6
+Bank9-Slot6-Slot1	Empty	0	0	0
+Bank9-Slot6-Slot2	Empty	0	0	0
+Bank9-Slot7	Empty	0	0	0
+Bank9-Slot8	Astral Jewel	4494	1	6
+Bank9-Slot9	Guardian Bracer	29076	1	6
+Bank9-Slot9-Slot1	Empty	0	0	0
+Bank9-Slot9-Slot2	Empty	0	0	0
+Bank9-Slot10	Empty	0	0	0
+Bank9-Slot11	Empty	0	0	0
+Bank9-Slot12	Empty	0	0	0
+Bank10	Large Black Trader's Satchel	108293	1	12
+Bank10-Slot1	Empty	0	0	0
+Bank10-Slot2	Empty	0	0	0
+Bank10-Slot3	Empty	0	0	0
+Bank10-Slot4	Empty	0	0	0
+Bank10-Slot5	Empty	0	0	0
+Bank10-Slot6	Empty	0	0	0
+Bank10-Slot7	Empty	0	0	0
+Bank10-Slot8	Empty	0	0	0
+Bank10-Slot9	Empty	0	0	0
+Bank10-Slot10	Empty	0	0	0
+Bank10-Slot11	Empty	0	0	0
+Bank10-Slot12	Empty	0	0	0
+Bank11	Large Black Trader's Satchel	108293	1	12
+Bank11-Slot1	Empty	0	0	0
+Bank11-Slot2	Empty	0	0	0
+Bank11-Slot3	Empty	0	0	0
+Bank11-Slot4	Tainted Totem of the Deep	62217	1	6
+Bank11-Slot4-Slot1	Empty	0	0	0
+Bank11-Slot5	Empty	0	0	0
+Bank11-Slot6	Empty	0	0	0
+Bank11-Slot7	Small Earring of Dire Chanting	62214	1	6
+Bank11-Slot7-Slot1	Empty	0	0	0
+Bank11-Slot8	Scaly Shawl of Precision	62209	1	6
+Bank11-Slot8-Slot1	Empty	0	0	0
+Bank11-Slot9	Empty	0	0	0
+Bank11-Slot10	Empty	0	0	0
+Bank11-Slot11	Empty	0	0	0
+Bank11-Slot12	Empty	0	0	0
+Bank12	Large Black Trader's Satchel	108293	1	12
+Bank12-Slot1	Tribal War Mask	4200	1	6
+Bank12-Slot1-Slot1	Empty	0	0	0
+Bank12-Slot2	Empty	0	0	0
+Bank12-Slot3	Circlet of Tallon	25037	1	6
+Bank12-Slot3-Slot1	Empty	0	0	0
+Bank12-Slot3-Slot2	Empty	0	0	0
+Bank12-Slot4	Fayguard Bladecatcher	5160	1	6
+Bank12-Slot4-Slot1	Empty	0	0	0
+Bank12-Slot4-Slot2	Empty	0	0	0
+Bank12-Slot5	Empty	0	0	0
+Bank12-Slot6	Boots of Concentration	19703	1	6
+Bank12-Slot6-Slot1	Empty	0	0	0
+Bank12-Slot6-Slot2	Empty	0	0	0
+Bank12-Slot7	Crystal Chitin Leggings	25286	1	6
+Bank12-Slot7-Slot1	Empty	0	0	0
+Bank12-Slot7-Slot2	Empty	0	0	0
+Bank12-Slot8	Fist of Iron	26846	1	6
+Bank12-Slot8-Slot1	Empty	0	0	0
+Bank12-Slot8-Slot2	Empty	0	0	0
+Bank12-Slot9	Empty	0	0	0
+Bank12-Slot10	Empty	0	0	0
+Bank12-Slot11	Jarsath Scale Gauntlets	3255	1	6
+Bank12-Slot11-Slot1	Empty	0	0	0
+Bank12-Slot11-Slot2	Empty	0	0	0
+Bank12-Slot12	Piece of a Medallion	19964	1	6
+Bank12-Slot12-Slot1	Empty	0	0	0
+Bank13	Large Black Trader's Satchel	108293	1	12
+Bank13-Slot1	Bracer of Scavenging	11978	1	6
+Bank13-Slot1-Slot1	Empty	0	0	0
+Bank13-Slot1-Slot2	Empty	0	0	0
+Bank13-Slot2	Silver-Plated Leggings	3311	1	6
+Bank13-Slot2-Slot1	Empty	0	0	0
+Bank13-Slot2-Slot2	Empty	0	0	0
+Bank13-Slot3	Empty	0	0	0
+Bank13-Slot4	Medal of Deep Thought	31365	1	6
+Bank13-Slot4-Slot1	Empty	0	0	0
+Bank13-Slot5	Supple Scale Armband	1618	1	6
+Bank13-Slot5-Slot1	Empty	0	0	0
+Bank13-Slot5-Slot2	Empty	0	0	0
+Bank13-Slot6	Empty	0	0	0
+Bank13-Slot7	Empty	0	0	0
+Bank13-Slot8	Spirit Weaver's Coif	25458	1	6
+Bank13-Slot8-Slot1	Empty	0	0	0
+Bank13-Slot8-Slot2	Empty	0	0	0
+Bank13-Slot9	Earring of the Magi'kot	32306	1	6
+Bank13-Slot9-Slot1	Empty	0	0	0
+Bank13-Slot10	Golem's Jawbone	6436	1	6
+Bank13-Slot10-Slot1	Empty	0	0	0
+Bank13-Slot11	Dusty Amulet	8201	1	6
+Bank13-Slot11-Slot1	Empty	0	0	0
+Bank13-Slot12	Empty	0	0	0
+Bank14	Large Black Trader's Satchel	108293	1	12
+Bank14-Slot1	Typhoon, Sword of the Tidalwave	22820	1	6
+Bank14-Slot1-Slot1	Empty	0	0	0
+Bank14-Slot1-Slot2	Empty	0	0	0
+Bank14-Slot2	Amulet of Insight	19721	1	6
+Bank14-Slot2-Slot1	Empty	0	0	0
+Bank14-Slot3	Empty	0	0	0
+Bank14-Slot4	Empty	0	0	0
+Bank14-Slot5	Empty	0	0	0
+Bank14-Slot6	Empty	0	0	0
+Bank14-Slot7	Empty	0	0	0
+Bank14-Slot8	Empty	0	0	0
+Bank14-Slot9	Empty	0	0	0
+Bank14-Slot10	Empty	0	0	0
+Bank14-Slot11	Empty	0	0	0
+Bank14-Slot12	Empty	0	0	0
+Bank15	Strange Green Metal	7966	1	6
+Bank16	Strange Green Metal	7966	1	6
+Bank17	Empty	0	0	0
+Bank18	Empty	0	0	0
+Bank19	Empty	0	0	0
+Bank20	Empty	0	0	0
+Bank21	Empty	0	0	0
+Bank22	Empty	0	0	0
+Bank23	Empty	0	0	0
+Bank24	Empty	0	0	0
+SharedBank1	Large Black Trader's Satchel	108293	1	12
+SharedBank1-Slot1	Velium Encrusted Gauntlets	25201	1	6
+SharedBank1-Slot1-Slot1	Empty	0	0	0
+SharedBank1-Slot1-Slot2	Empty	0	0	0
+SharedBank1-Slot2	Empty	0	0	0
+SharedBank1-Slot3	Empty	0	0	0
+SharedBank1-Slot4	Empty	0	0	0
+SharedBank1-Slot5	Empty	0	0	0
+SharedBank1-Slot6	Empty	0	0	0
+SharedBank1-Slot7	Empty	0	0	0
+SharedBank1-Slot8	Empty	0	0	0
+SharedBank1-Slot9	Empty	0	0	0
+SharedBank1-Slot10	Empty	0	0	0
+SharedBank1-Slot11	Empty	0	0	0
+SharedBank1-Slot12	Empty	0	0	0
+SharedBank2	Large Black Trader's Satchel	108293	1	12
+SharedBank2-Slot1	Helm of Senselessness	61222	1	6
+SharedBank2-Slot1-Slot1	Empty	0	0	0
+SharedBank2-Slot1-Slot2	Empty	0	0	0
+SharedBank2-Slot2	Greaves of Obscurity	61225	1	6
+SharedBank2-Slot2-Slot1	Empty	0	0	0
+SharedBank2-Slot2-Slot2	Empty	0	0	0
+SharedBank2-Slot3	Blade of Carnage	25210	1	6
+SharedBank2-Slot3-Slot1	Empty	0	0	0
+SharedBank2-Slot3-Slot2	Empty	0	0	0
+SharedBank2-Slot4	Juzlix's Mask of Torment	8216	1	6
+SharedBank2-Slot4-Slot1	Empty	0	0	0
+SharedBank2-Slot5	Mantle of Distraction	61228	1	6
+SharedBank2-Slot5-Slot1	Empty	0	0	0
+SharedBank2-Slot6	Small Earring of Dire Chanting	62214	1	6
+SharedBank2-Slot6-Slot1	Empty	0	0	0
+SharedBank2-Slot7	Ring of Lunacy	61224	1	6
+SharedBank2-Slot7-Slot1	Empty	0	0	0
+SharedBank2-Slot8	Gauntlets of Dementia	61226	1	6
+SharedBank2-Slot8-Slot1	Empty	0	0	0
+SharedBank2-Slot8-Slot2	Empty	0	0	0
+SharedBank2-Slot9	Ring of Absurdity	61221	1	6
+SharedBank2-Slot9-Slot1	Empty	0	0	0
+SharedBank2-Slot10	Testament of Night	63166	1	6
+SharedBank2-Slot11	Volatilis Wing Cloak	3998	1	6
+SharedBank2-Slot11-Slot1	Empty	0	0	0
+SharedBank2-Slot12	Empty	0	0	0
+SharedBank3	Empty	0	0	0
+SharedBank4	Empty	0	0	0
+SharedBank5	Empty	0	0	0
+SharedBank6	Empty	0	0	0
+SharedBank7	Empty	0	0	0
+SharedBank8	Empty	0	0	0
+Hoard 1	Crested Spaulders	4302	1	6
+Hoard 1-Slot1	Empty	0	0	0
+Hoard 2	Shimmering Terror Hide Boots	25552	1	6
+Hoard 2-Slot1	Empty	0	0	0
+Hoard 2-Slot2	Empty	0	0	0
+Hoard 3	Iron Scroll of War	25205	1	6
+Hoard 3-Slot1	Empty	0	0	0
+Hoard 3-Slot2	Empty	0	0	0
+
+KeyRing	Name	ID	
+Mount	White Ornate Chain Bridle	21809
+Mount	Frostreaver Sabre-Tooth Cat Mount	109281	STAT
+Equipment	Wavecrasher	24724
+Equipment	Facesmasher	31375
+Equipment	War Bow of Rallos Zek	25208
+Equipment	Yttrium Dagger	22903
+Equipment	Bone Chill Shield	28970
+Equipment	Corrupted Shissar Warsword	7960
