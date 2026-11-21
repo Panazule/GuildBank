@@ -59,7 +59,7 @@ tracks both so neither is reported as complete when it is not.
 | Logging framework | Complete | `slog` JSON/text, request IDs, access log, panic recovery, no secrets |
 | Application startup/shutdown | Complete | Composition root, writable `/config` check, bounded 10 s graceful shutdown |
 | Gin server and health endpoints | Complete | `/healthz` 200 JSON; `/readyz` 200/503 with per-check reasons; JSON 404/405 |
-| Dockerfile / Compose | Complete; image build and container probe verified | Multi-stage, static binary, UID 10001, `/config` writable, `EXPOSE 8080`, healthcheck; Compose app + MariaDB 11.4 |
+| Dockerfile / Compose | Complete; image, container and full Compose topology verified | Multi-stage, static binary, UID 10001, `/config` writable, `EXPOSE 8080`, healthcheck; Compose app + MariaDB 11.4 both healthy, `/readyz` `mariadb: ok` |
 | Build/run instructions | Complete | `README.md`, `Makefile`, CI workflow |
 | Tests | Complete for skeleton | `go build`, `go vet`, `go test ./...` pass; runtime endpoint probes pass |
 | ADRs for D-01–D-13, AM-01–AM-05, E-14–E-16 | **Not started** | Planned under `Docs/decisions/`; no files created |
@@ -265,7 +265,7 @@ Implementation of Phases 2–3 additionally requires E-08/E-10/E-11/E-12 and a p
 1. All statements are derived from `Design.md` v1.6.1; where the specification is silent, the gap is recorded rather than silently resolved.
 2. Line references (`L###`) are valid for the body (L1–L854) and the decisions (L855–L1161) and were re-verified at the cited anchors; the v1.6.1 amendments are cited as `AM-xx` because they are append-only at L1163–L1263. Decisions D-01–D-13 have no per-decision line anchors (IC-26). Any further edit to `Design.md` requires re-checking.
 3. The documents introduce **PROPOSED** schema elements and defaults. These are recommendations, not approved requirements, until the decision log is signed.
-4. No application code, migrations or tests exist; effort estimates are planning ranges, not measured velocity.
+4. Application code is limited to the Phase 0 platform skeleton; no migrations or business-feature tests exist. Effort estimates remain planning ranges, not measured velocity.
 5. The review assumes a single Go service with server-rendered HTMX, Gin and SQLite/MariaDB as specified. Alternative stacks would invalidate the package layout and some mitigation details, but not the findings.
 6. Security findings are design-level. A penetration test and dependency scanning are still required before production use.
 7. Estimates assume one experienced developer and exclude waiting time for external data (`Items`, export files, Unraid access).
@@ -287,6 +287,6 @@ Implementation of Phases 2–3 additionally requires E-08/E-10/E-11/E-12 and a p
 
 The GuildBank specification is **buildable as written**, and the platform skeleton now builds, starts, logs, serves health endpoints and opens both stores. v1.6 closed the audit schema, the selection route, the HTMX/REST layering model, spell merge and item identity, and it defined session storage, the audit table and store separation. v1.6.1 closed the two remaining contradictions: the canonical sample lives at `Docs/Samples/InventoryExport-Sample.txt` with a normative contract (AM-03), and missing metadata is representable by preserving the imported `EQUID` and setting `MetadataMissingFg`, with no sentinel and no enforced FK for unresolved rows (AM-01/AM-02). Setup recovery, audit taxonomy, location vocabulary, selection payload, warning sink and session lifecycle remain soft gaps with recorded recommendations.
 
-Documentation is consistent and the Phase 0 skeleton is implemented and validated (`go build`, `go vet`, `go test ./...`, runtime `/healthz` and `/readyz`, Compose config, container image). No user management, authentication, import, inventory, audit or UI behaviour exists, and no schema migration has been written; those remain Phase 2 onward.
+Documentation is consistent and the Phase 0 skeleton is implemented and validated (`go build`, `go vet`, `go test ./...`, runtime `/healthz` and `/readyz`, live MariaDB readiness, full Compose topology, container image). No user management, authentication, import, inventory, audit or UI behaviour exists, and no schema migration has been written; those remain Phase 2 onward.
 
 The project is not blocked on specification defects. Remaining prerequisites are operational (`Items` provisioning, two real collector exports, a development MariaDB) and product decisions (E-08, E-09, E-11–E-16), not engineering capacity. Approval is required before Phase 1 proceeds, including the provisional MariaDB environment bootstrap (PD-05) and the residual E-14/E-15/E-09 contracts.

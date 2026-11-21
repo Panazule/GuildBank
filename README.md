@@ -87,7 +87,7 @@ Every response carries `X-Request-ID`; logs include the same ID.
 
 ```bash
 make test        # unit tests
-make test-race   # race detector
+make test-race   # race detector (requires CGO_ENABLED=1 and a C toolchain; CI does this)
 make vet
 make lint        # gofmt check + go vet
 make build

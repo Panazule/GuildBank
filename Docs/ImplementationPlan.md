@@ -7,7 +7,7 @@
 | Review date | 2026-11-20 |
 | Revision | 1.2 — 2026-11-20, re-baselined on v1.6.1 |
 | Companion documents | `ArchitectureReview.md`, `DatabaseDesign.md`, `ProjectStatus.md` |
-| Current repository state | Greenfield — only `Design.md` and the `Docs/` set; no code, no build files |
+| Current repository state | Phase 0 platform skeleton present (`cmd/`, `internal/`, build and deployment files; see `ProjectStatus.md` §1.1); no business features or migrations |
 
 This plan assumes the specification is amended per the decisions in `ArchitectureReview.md` §9 and the v1.6/v1.6.1 decision set. Estimates are ranges in engineer-days for one experienced Go developer familiar with Gin, SQLite and MariaDB; they exclude product-decision time and the external inputs in §8.1.
 

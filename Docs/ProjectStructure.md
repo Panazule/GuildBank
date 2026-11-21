@@ -197,6 +197,12 @@ Deliberately absent: user management, authentication, sessions, CSRF, rate
 limiting, setup routes, import processing, inventory, audit, business logic,
 templates beyond placeholders, and SQL migrations.
 
+Known Phase 0 limitation: if MariaDB is configured but unreachable at
+startup, `/readyz` keeps reporting the startup error until the process is
+restarted; Phase 3 adds reconnect and hot-swap. The image build and
+`go test -race` run in Linux CI; a local Windows race run requires
+`CGO_ENABLED=1` and a C toolchain.
+
 ## 6. Validation performed
 
 | Check | Result |
@@ -210,6 +216,7 @@ templates beyond placeholders, and SQL migrations.
 | Unknown route | `404` JSON envelope with request ID |
 | SQLite pragmas | `journal_mode=wal`, `busy_timeout=5000`, `foreign_keys=1` asserted in tests |
 | Docker image | Built successfully; container runs as UID 10001, `/config` writable, `/healthz` 200 and `/readyz` 503 pre-setup |
+| Compose topology | `docker compose up`: app and MariaDB both healthy; `/readyz` reported `mariadb: ok`, overall `503` only for setup pending |
 
 ## 7. Build and run
 
