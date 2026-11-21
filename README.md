@@ -50,8 +50,11 @@ curl -i http://localhost:8080/readyz   # 503 until setup exists (Phase 2)
 
 Compose uses disposable development credentials and two named volumes:
 `guildbank_config` for `/config` and `guildbank_mariadb` for the database.
-The application container runs as UID/GID 10001 and only writes `/config`
-and `/tmp`.
+Both survive container recreation and `docker compose down`; only
+`docker compose down -v` (or deleting the volumes) removes the data. A bare
+`docker run` needs `-v guildbank_config:/config` to persist `guildbank.db`
+the same way. The application container runs as UID/GID 10001 and only
+writes `/config` and `/tmp`.
 
 ## Configuration
 

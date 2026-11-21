@@ -59,7 +59,7 @@ tracks both so neither is reported as complete when it is not.
 | Logging framework | Complete | `slog` JSON/text, request IDs, access log, panic recovery, no secrets |
 | Application startup/shutdown | Complete | Composition root, writable `/config` check, bounded 10 s graceful shutdown |
 | Gin server and health endpoints | Complete | `/healthz` 200 JSON; `/readyz` 200/503 with per-check reasons; JSON 404/405 |
-| Dockerfile / Compose | Complete; image, container and full Compose topology verified | Multi-stage, static binary, UID 10001, `/config` writable, `EXPOSE 8080`, healthcheck; Compose app + MariaDB 11.4 both healthy, `/readyz` `mariadb: ok` |
+| Dockerfile / Compose | Complete; image, container, Compose topology and volume persistence verified | Multi-stage, static binary, UID 10001, `/config` writable, `EXPOSE 8080`, healthcheck; Compose app + MariaDB 11.4 both healthy, `/readyz` `mariadb: ok`; `/config` backed by named volume `guildbank_config` and survives container recreation |
 | Build/run instructions | Complete | `README.md`, `Makefile`, CI workflow |
 | Tests | Complete for skeleton | `go build`, `go vet`, `go test ./...` pass; runtime endpoint probes pass |
 | ADRs for D-01–D-13, AM-01–AM-05, E-14–E-16 | **Not started** | Planned under `Docs/decisions/`; no files created |
@@ -280,6 +280,7 @@ Implementation of Phases 2–3 additionally requires E-08/E-10/E-11/E-12 and a p
 | 1.1 | 2026-11-20 | Re-baselined on `Design.md` v1.6; D-01–D-13 adopted; engineering decisions renumbered E-xx; 4 blockers closed, 4 partial/open, 2 new (B-9, B-10) |
 | 1.2 | 2026-11-20 | Re-baselined on `Design.md` v1.6.1; AM-01–AM-05 adopted; B-2, B-9, B-10 closed; E-13 resolved; 3 blockers remain partial |
 | 1.3 | 2026-11-21 | Phase 0 skeleton implemented: Go module, package layout, config, logging, SQLite/MariaDB layers, health endpoints, Docker/Compose, CI, tests; `ProjectStructure.md` added; ADRs, E-14/E-15/E-09 and real exports remain open |
+| 1.4 | 2026-11-21 | PD-05 approved as temporary MariaDB bootstrap configuration (Settings become authoritative after the Setup Wizard); `/config` named-volume persistence verified across container recreation |
 
 ---
 
@@ -289,4 +290,4 @@ The GuildBank specification is **buildable as written**, and the platform skelet
 
 Documentation is consistent and the Phase 0 skeleton is implemented and validated (`go build`, `go vet`, `go test ./...`, runtime `/healthz` and `/readyz`, live MariaDB readiness, full Compose topology, container image). No user management, authentication, import, inventory, audit or UI behaviour exists, and no schema migration has been written; those remain Phase 2 onward.
 
-The project is not blocked on specification defects. Remaining prerequisites are operational (`Items` provisioning, two real collector exports, a development MariaDB) and product decisions (E-08, E-09, E-11–E-16), not engineering capacity. Approval is required before Phase 1 proceeds, including the provisional MariaDB environment bootstrap (PD-05) and the residual E-14/E-15/E-09 contracts.
+The project is not blocked on specification defects. Remaining prerequisites are operational (`Items` provisioning, two real collector exports, a development MariaDB) and product decisions (E-08, E-09, E-11–E-16), not engineering capacity. PD-05 was approved on 2026-11-21 as temporary bootstrap configuration; `Settings` become authoritative once the Setup Wizard exists. Phase 1 still awaits owner approval, and the residual E-14/E-15/E-09 contracts remain open.

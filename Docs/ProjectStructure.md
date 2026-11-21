@@ -181,7 +181,7 @@ check so operators can distinguish setup-pending from store-unreachable.
 | PD-02 | SQLite driver `modernc.org/sqlite` | Pure Go; satisfies the static, CGO-free, non-root container requirement | Adopted for skeleton |
 | PD-03 | One SQLite connection plus WAL and `busy_timeout(5000)` | Removes writer contention now; dedicated read/write pools can follow with measured need (IC-08) | Adopted for skeleton |
 | PD-04 | MariaDB optional at startup; failure is logged and reported by `/readyz` | Phase 3 requires SQLite-backed login/settings to survive a guild-store outage | Adopted for skeleton |
-| PD-05 | `GUILDBANK_MARIADB_*` environment bootstrap, superseded by Settings | Exercises the connection layer before the wizard exists; E-11 is unresolved, so this must not become the permanent model | **Provisional — needs owner approval** |
+| PD-05 | `GUILDBANK_MARIADB_*` environment bootstrap, superseded by Settings | Exercises the connection layer before the wizard exists; E-11 is unresolved, so this must not become the permanent model | **Approved 2026-11-21 as temporary bootstrap**; Settings become authoritative after the Setup Wizard |
 | PD-06 | Setup readiness is a real `Users`-table probe (missing table = pending) | Implements D-02 early and flips to ready after Phase 2 creates the administrator; disabled admins still count so setup cannot reopen | Adopted for skeleton |
 | PD-07 | `/readyz` returns `503` until Phase 2 creates an administrator and MariaDB is reachable | Follows IP Phase 1 acceptance and §7.5; container health uses `/healthz` | Adopted for skeleton |
 | PD-08 | Gin release mode, custom recovery/request-ID/access-log middleware | Avoids Gin's unstructured defaults; matches IC-20 order and IC-24 logging | Adopted for skeleton |
@@ -217,6 +217,7 @@ restarted; Phase 3 adds reconnect and hot-swap. The image build and
 | SQLite pragmas | `journal_mode=wal`, `busy_timeout=5000`, `foreign_keys=1` asserted in tests |
 | Docker image | Built successfully; container runs as UID 10001, `/config` writable, `/healthz` 200 and `/readyz` 503 pre-setup |
 | Compose topology | `docker compose up`: app and MariaDB both healthy; `/readyz` reported `mariadb: ok`, overall `503` only for setup pending |
+| Volume persistence | `/config` is the named volume `guildbank_config`; `guildbank.db` and a sentinel survived `--force-recreate` and a `docker compose down`/`up` cycle |
 
 ## 7. Build and run
 
