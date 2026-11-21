@@ -2,8 +2,8 @@
 // repository and API layers. It contains no I/O and imports no other
 // application package.
 //
-// Phase 0 defines only setup state; inventory, import and audit types arrive
-// with the phases that own them.
+// Phase 1 defines setup state plus identity, session and setting models.
+// Inventory, import and audit types arrive with the phases that own them.
 package domain
 
 // SetupState is the D-02 first-run state derived from the SQLite Users table.

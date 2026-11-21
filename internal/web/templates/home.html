@@ -1,0 +1,19 @@
+{{define "home.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card">
+    <h1>Aeternus Guild Bank</h1>
+    <p>The public inventory read path arrives in Phase 4. Phase 1 provides setup, authentication and settings persistence.</p>
+    {{if .User}}
+      <p><a class="primary link" href="/admin/settings">Open settings</a></p>
+    {{else}}
+      <p><a class="primary link" href="/login">Administrator sign in</a></p>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

@@ -48,6 +48,7 @@ func TestLoadEnvironment(t *testing.T) {
 		"GUILDBANK_SQLITE_PATH":      "/config/test.db",
 		"GUILDBANK_LOG_FORMAT":       "text",
 		"GUILDBANK_TRUSTED_PROXIES":  "10.0.0.0/8, 192.168.1.5",
+		"GUILDBANK_SECURE_COOKIES":   "true",
 		"GUILDBANK_MARIADB_HOST":     "db.internal",
 		"GUILDBANK_MARIADB_PORT":     "3307",
 		"GUILDBANK_MARIADB_DATABASE": "GuildBank",
@@ -63,6 +64,9 @@ func TestLoadEnvironment(t *testing.T) {
 	}
 	if len(cfg.TrustedProxies) != 2 {
 		t.Fatalf("trusted proxies: %+v", cfg.TrustedProxies)
+	}
+	if !cfg.SecureCookies {
+		t.Fatal("GUILDBANK_SECURE_COOKIES was not applied")
 	}
 	if !cfg.MariaDB.Configured() || cfg.MariaDB.Port != 3307 {
 		t.Fatalf("mariadb env not applied: %+v", cfg.MariaDB)
@@ -85,6 +89,7 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"bad level", []string{"-log-level", "verbose"}, nil, "log level"},
 		{"bad format", []string{"-log-format", "xml"}, nil, "log format"},
 		{"bad proxy", nil, map[string]string{"GUILDBANK_TRUSTED_PROXIES": "not-a-cidr"}, "trusted proxy"},
+		{"bad secure cookies", nil, map[string]string{"GUILDBANK_SECURE_COOKIES": "sometimes"}, "not a boolean"},
 		{"mariadb without user", nil, map[string]string{"GUILDBANK_MARIADB_HOST": "db"}, "username"},
 		{"mariadb bad port", nil, map[string]string{"GUILDBANK_MARIADB_HOST": "db", "GUILDBANK_MARIADB_PORT": "70000", "GUILDBANK_MARIADB_USERNAME": "u"}, "MariaDB port"},
 		{"positional args", []string{"serve"}, nil, "unexpected arguments"},

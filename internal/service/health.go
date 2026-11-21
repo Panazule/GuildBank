@@ -1,7 +1,7 @@
-// Package service implements business logic. Phase 0 contains only the
-// readiness aggregation; inventory, import and audit services arrive with
-// their phases. Handlers talk to services, services talk to interfaces that
-// repositories implement (Design.md L109-L120).
+// Package service implements business logic for setup, identity, sessions
+// and settings. Inventory, import and audit services arrive with later phases.
+// Handlers talk to services, services talk to interfaces that repositories
+// implement (Design.md L109-L120).
 package service
 
 import (

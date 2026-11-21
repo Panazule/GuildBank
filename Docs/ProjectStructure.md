@@ -5,7 +5,7 @@
 | Document ID | PS-002 |
 | As-of date | 2026-11-21 |
 | Source specification | `Design.md` v1.6.1 |
-| Scope | Phase 0 skeleton (platform layer only; no business features) |
+| Scope | Phase 1: platform skeleton plus setup, identity, sessions and settings (no inventory/import/audit) |
 | Related | `Docs/ProjectStatus.md`, `Docs/ImplementationPlan.md` §Phase 1, `README.md` |
 
 This document maps every generated directory and major file to its
@@ -20,30 +20,47 @@ GuildBank/
 │       └── main.go              Process entrypoint: flags, logging, signals, exit codes
 ├── internal/
 │   ├── domain/
-│   │   └── setup.go             Shared specification types (D-02 setup state)
+│   │   ├── setup.go              D-02 setup state
+│   │   └── identity.go           User/session/setting models, sentinel and validation errors
 │   ├── service/
-│   │   ├── health.go            Readiness aggregation over injected interfaces
-│   │   └── health_test.go
+│   │   ├── health.go             Readiness aggregation over injected interfaces
+│   │   ├── password.go           bcrypt hashing, policy and timing equalizer
+│   │   ├── auth.go               Login, session issuance/validation, logout, revocation
+│   │   ├── rate_limit.go         D-12 IP+username login lockout
+│   │   ├── setup.go              Wizard validation, DB test and atomic commit
+│   │   ├── settings.go           Typed setting allowlist, validation and session policy
+│   │   └── *_test.go
 │   ├── repository/
 │   │   ├── sqlite/
-│   │   │   ├── store.go         SQLite open/pragmas/setup probe/checkpoint
-│   │   │   └── store_test.go
+│   │   │   ├── store.go          Open/pragmas/setup probe/checkpoint
+│   │   │   ├── migrate.go        Forward-only PRAGMA user_version runner
+│   │   │   ├── migrations/       0001_phase1.sql (Users, Settings, Sessions)
+│   │   │   ├── users.go          Account lookup, LastLogin, admin count
+│   │   │   ├── sessions.go       Hashed-token CRUD, touch, expiry purge
+│   │   │   ├── settings.go       Typed settings list/upsert
+│   │   │   ├── setup.go          Atomic administrator + settings transaction
+│   │   │   └── *_test.go
 │   │   └── mariadb/
-│   │       ├── store.go         MariaDB pool + bounded ping
+│   │       ├── store.go          MariaDB pool, bounded ping and connection test
 │   │       └── store_test.go
 │   ├── api/
-│   │   ├── router.go            Gin engine, route table, JSON error envelope
-│   │   ├── middleware.go        Request ID, access log, panic recovery
-│   │   ├── health.go            /healthz and /readyz handlers
-│   │   ├── health_test.go
-│   │   └── importguard_test.go  Fails if api imports a repository
+│   │   ├── router.go             Route groups, middleware order, JSON 404/405
+│   │   ├── auth.go               Login/logout/session/csrf handlers
+│   │   ├── setup.go              Setup page and step handlers
+│   │   ├── settings.go           Settings page and REST handlers
+│   │   ├── views.go              Embedded template rendering
+│   │   ├── csrf.go               Signed double-submit CSRF
+│   │   ├── cookies.go            Session/CSRF cookie flags and redirect safety
+│   │   ├── middleware.go          Request ID, access log, panic recovery
+│   │   ├── middleware_auth.go    Setup gate, default-deny auth, admin check, headers
+│   │   ├── errors.go             Domain-error to HTTP status mapping
+│   │   ├── health.go             /healthz and /readyz handlers
+│   │   └── *_test.go
 │   ├── web/
-│   │   ├── embed.go             Embedded template/static filesystems
-│   │   ├── embed_test.go        Import guard + embed checks
-│   │   ├── templates/
-│   │   │   └── placeholder.html  Phase 2 replaces with setup/login templates
-│   │   └── static/
-│   │       └── placeholder.css   Phase 2 vendors Bootstrap 5 and HTMX here
+│   │   ├── embed.go              Embedded template/static filesystems
+│   │   ├── embed_test.go         Import guard + embed checks
+│   │   ├── templates/            setup, login, settings, home, error, partials
+│   │   └── static/               app.css and setup wizard script
 │   └── platform/
 │       ├── config/
 │       │   ├── config.go        Defaults -> env -> flags, validation, redaction
@@ -82,28 +99,34 @@ calling `platform/app.Run` directly.
 
 ### `internal/domain`
 
-Pure specification types shared across layers. Phase 0 defines
-`SetupState` (unknown/pending/complete), derived from the `Users` table per
-D-02. No I/O, no imports of other application packages. Inventory, import and
-audit types arrive with their phases.
+Pure specification types shared across layers. Defines `SetupState`
+(unknown/pending/complete) per D-02 plus `User`, `Session`, `Setting`,
+sentinel errors and field validation errors. No I/O, no imports of other
+application packages. Inventory, import and audit types arrive with their
+phases.
 
 ### `internal/service`
 
-Business logic and orchestration. Phase 0 has only `HealthService`, which
-combines a SQLite pinger, a setup probe and a MariaDB pinger behind
-interfaces declared in this package. It never imports a repository: the
-concrete stores are injected by `platform/app`. This is the boundary that
-later phases extend with settings, inventory, import and audit services.
+Business logic and orchestration. Phase 1 contains the health aggregation,
+setup validation/commit, bcrypt password helpers, authentication and session
+lifecycle, the D-12 login limiter and typed settings. The package never imports
+a repository: concrete stores are injected by `platform/app` through the
+interfaces declared here.
 
 ### `internal/repository/sqlite`
 
-Owns `/config/guildbank.db` (application data: Users, Settings, Sessions,
-AuditOutbox in later phases). It opens the file, creates the parent
-directory, applies `busy_timeout(5000)`, `journal_mode(WAL)`,
-`synchronous(NORMAL)` and `foreign_keys(1)`, caps the pool at one connection
-to avoid writer contention (IC-08), exposes `SetupStatus` and checkpoints the
-WAL on `Close`. It contains no schema migrations yet: Phase 2 adds them under
-`PRAGMA user_version`.
+Owns `/config/guildbank.db` (application data: Users, Settings, Sessions). It
+opens the file, creates the parent directory, applies `busy_timeout(5000)`,
+`journal_mode(WAL)`, `synchronous(NORMAL)` and `foreign_keys(1)`, caps the pool
+at one connection to avoid writer contention (IC-08), runs forward-only
+migrations under `PRAGMA user_version`, exposes `SetupStatus` and checkpoints
+the WAL on `Close`.
+
+`0001_phase1.sql` creates the Phase 1 tables and seeds the documented settings.
+`CompleteSetup` inserts the first administrator and every wizard setting in one
+transaction; the administrator row is the D-02 switch. A missing `Users` table
+after migration is treated as corruption: `SetupStatus` fails closed instead of
+offering setup.
 
 ### `internal/repository/mariadb`
 
@@ -117,17 +140,21 @@ contract columns.
 
 ### `internal/api`
 
-HTTP entry layer. It depends on `service` interfaces and must not import
-`repository` — a rule enforced by `importguard_test.go`. It installs the
-middleware order required by IC-20 today (recovery → request ID → access log)
-and reserves the later chain (rate limit → session → CSRF → authorization)
-for Phase 2. JSON errors use `{"error":{"code","message","request_id"}}`.
+HTTP entry layer. It depends on `service` types and must not import
+`repository` — a rule enforced by `importguard_test.go`. Middleware order is
+recovery → request ID → access log → security headers → setup gate, then
+public CSRF or, for admin routes, session → CSRF → administrator check. JSON
+errors use `{"error":{"code","message","fields","request_id"}}`. Setup and
+login HTML forms post to the same REST handlers as JSON clients; POST settings
+is a thin HTML adapter for PUT.
 
 ### `internal/web`
 
 Server-side rendering assets, embedded with `embed.FS` so the container needs
-no asset files on disk. Phase 0 contains placeholders only; Phase 2 vendors
-Bootstrap 5 and HTMX locally (no CDN) and adds setup/login templates.
+no asset files on disk. Phase 1 adds setup, login, settings, home and error
+templates plus `app.css` and a small vanilla setup script. No CDN is used.
+Bootstrap/HTMX adoption for later inventory screens remains a recorded decision
+(PD-12).
 
 ### `internal/platform/config`
 
@@ -146,11 +173,12 @@ package carries request IDs in `context.Context`.
 ### `internal/platform/app`
 
 The composition root and startup framework. It verifies the data directory is
-writable, opens SQLite, attempts MariaDB when configured, wires the services
-and router, serves HTTP with bounded timeouts, and on shutdown stops accepting
-connections, drains for at most ten seconds, checkpoints SQLite and closes
-both pools. A MariaDB failure is logged and surfaced through `/readyz` rather
-than preventing startup; Phase 3 makes the pool hot-swappable.
+writable, opens and migrates SQLite, attempts MariaDB when configured, wires
+the services/router and the hourly session purge, serves HTTP with bounded
+timeouts, and on shutdown stops accepting connections, drains for at most ten
+seconds, checkpoints SQLite and closes both pools. A MariaDB failure is logged
+and surfaced through `/readyz` rather than preventing startup; Phase 3 makes
+the pool Settings-backed and hot-swappable.
 
 ## 3. Request and startup flow
 
@@ -161,9 +189,11 @@ main
  └─ app.Run
      ├─ ensureWritableDir(/config)
      ├─ sqlite.Open  ── pragmas, ping, single writer
+     ├─ sqlite.Migrate ── PRAGMA user_version = 1 (Users, Settings, Sessions)
      ├─ mariadb.Open ── OPTIONAL: pool + 5s ping (failure = degraded)
      ├─ service.NewHealthService(sqlite, setup, mariadb)
-     ├─ api.NewRouter(recovery -> requestID -> accessLog, /healthz, /readyz)
+     ├─ setup/auth/settings services + hourly session purge
+     ├─ api.NewRouter(setup gate -> public CSRF or session -> CSRF -> admin)
      └─ http.Server.ListenAndServe
          └─ on SIGTERM: Shutdown(10s) -> sqlite wal_checkpoint(TRUNCATE) -> close
 ```
@@ -172,36 +202,59 @@ main
 returns `200` only when SQLite responds, an administrator exists and MariaDB
 is configured and reachable; otherwise it returns `503` with one entry per
 check so operators can distinguish setup-pending from store-unreachable.
+Once an administrator exists, `/setup` and all setup routes return `410`;
+while setup is pending, other HTML routes redirect to `/setup` and other API
+routes return `503 setup_required`.
 
-## 4. Implementation decisions recorded at Phase 0
+## 4. Implementation decisions
+
+### 4.1 Phase 0 decisions
 
 | # | Decision | Rationale | Status |
 |---|---|---|---|
 | PD-01 | Module path `github.com/Panazule/guildbank` (from the git remote, lowercase) | Stable import paths; easy to change before publishing | Provisional |
-| PD-02 | SQLite driver `modernc.org/sqlite` | Pure Go; satisfies the static, CGO-free, non-root container requirement | Adopted for skeleton |
-| PD-03 | One SQLite connection plus WAL and `busy_timeout(5000)` | Removes writer contention now; dedicated read/write pools can follow with measured need (IC-08) | Adopted for skeleton |
-| PD-04 | MariaDB optional at startup; failure is logged and reported by `/readyz` | Phase 3 requires SQLite-backed login/settings to survive a guild-store outage | Adopted for skeleton |
-| PD-05 | `GUILDBANK_MARIADB_*` environment bootstrap, superseded by Settings | Exercises the connection layer before the wizard exists; E-11 is unresolved, so this must not become the permanent model | **Approved 2026-11-21 as temporary bootstrap**; Settings become authoritative after the Setup Wizard |
-| PD-06 | Setup readiness is a real `Users`-table probe (missing table = pending) | Implements D-02 early and flips to ready after Phase 2 creates the administrator; disabled admins still count so setup cannot reopen | Adopted for skeleton |
-| PD-07 | `/readyz` returns `503` until Phase 2 creates an administrator and MariaDB is reachable | Follows IP Phase 1 acceptance and §7.5; container health uses `/healthz` | Adopted for skeleton |
-| PD-08 | Gin release mode, custom recovery/request-ID/access-log middleware | Avoids Gin's unstructured defaults; matches IC-20 order and IC-24 logging | Adopted for skeleton |
-| PD-09 | Schema migrations absent from Phase 0 | Migrations belong to Phases 2/3 and require approval of the DD DDL; no table is invented early | Deferred |
+| PD-02 | SQLite driver `modernc.org/sqlite` | Pure Go; satisfies the static, CGO-free, non-root container requirement | Adopted |
+| PD-03 | One SQLite connection plus WAL and `busy_timeout(5000)` | Removes writer contention now; dedicated read/write pools can follow with measured need (IC-08) | Adopted |
+| PD-04 | MariaDB optional at startup; failure is logged and reported by `/readyz` | SQLite-backed login/settings must survive a guild-store outage | Adopted |
+| PD-05 | `GUILDBANK_MARIADB_*` environment bootstrap, superseded by Settings | Exercises the connection layer before Phase 3; E-11 is unresolved, so this must not become the permanent model | **Approved 2026-11-21 as temporary bootstrap**; Phase 1 persists wizard values but runtime adoption is Phase 3 |
+| PD-06 | Setup readiness is a real `Users`-table probe | Implements D-02; disabled admins still count so setup cannot reopen | Superseded by PD-14 (missing table fails closed) |
+| PD-07 | `/readyz` returns `503` until an administrator exists and MariaDB is reachable | Follows IP acceptance and §7.5; container health uses `/healthz` | Adopted |
+| PD-08 | Gin release mode, custom recovery/request-ID/access-log middleware | Avoids Gin's unstructured defaults; matches IC-20/IC-24 | Adopted |
+| PD-09 | Schema migrations deferred from Phase 0 | Required DD DDL approval before inventing tables | Closed in Phase 1 |
+
+### 4.2 Phase 1 decisions requiring approval
+
+| # | Decision | Rationale | Status |
+|---|---|---|---|
+| PD-10 | Migration `0001` creates only `Users`, `Settings`, `Sessions`; no `AuditOutbox` | Owner Phase 1 scope forbids audit; outbox arrives with the audit recorder | Proposed |
+| PD-11 | bcrypt cost 10; password policy 12–72 bytes, not equal to username; usernames 3–64 of `[A-Za-z0-9._-]` | Closes the minimum for MR-11; composition rules and admin reset flow still need E-07 approval | Proposed |
+| PD-12 | Custom embedded CSS and vanilla JS instead of Bootstrap 5/HTMX in Phase 1 | Required screens are small plain forms; no CDN; framework adoption can follow with inventory UI (E-16) | Proposed |
+| PD-13 | Signed double-submit CSRF cookie (HMAC, process-local secret); `SameSite=Lax`, `HttpOnly`, `Secure` via explicit config | Covers login/setup and all writes without a pre-session token store; restart invalidates outstanding forms | Proposed |
+| PD-14 | Missing `Users` table after migration fails closed; setup is pending only when the table exists and has zero admins | DD §3.5/DC-24; prevents corruption from reopening unauthenticated setup | Proposed |
+| PD-15 | Session lifecycle 30-minute idle / 8-hour absolute, sliding refresh throttled to once per minute, hourly purge | Implements E-08 defaults; no refresh-token or rotation beyond login | Proposed |
+| PD-16 | In-process login limiter keyed IP+username: 5 failures → 15-minute lockout; fifth failure returns `429` with `Retry-After` | Implements D-12 defaults for a single instance; multi-instance needs a shared store | Proposed |
+| PD-17 | `GUILDBANK_SECURE_COOKIES` (flag/env) explicitly enables `Secure`; no automatic `X-Forwarded-Proto` inference | Avoids trusting spoofable headers; operator must enable behind TLS. Public exposure without it needs approval | Proposed |
+| PD-18 | Wizard persists MariaDB settings but runtime pool still uses `GUILDBANK_MARIADB_*` until Phase 3 | Keeps Phase 1 free of MariaDB business wiring; the wizard requires a successful test before committing the admin (PD-05 remains runtime bootstrap) | Proposed |
 
 ## 5. Scope boundaries
 
 Implemented: module, layout, configuration, logging, both connection layers,
-startup/shutdown, Gin server, middleware, health endpoints, embedded asset
-scaffolding, container and CI.
+startup/shutdown, Gin server, security middleware, health endpoints, SQLite
+migration runner and Phase 1 schema, four-step setup wizard, administrator
+creation with bcrypt, login/logout, server-side sessions, CSRF, login lockout,
+default-deny admin routes, typed settings read/update and embedded UI.
 
-Deliberately absent: user management, authentication, sessions, CSRF, rate
-limiting, setup routes, import processing, inventory, audit, business logic,
-templates beyond placeholders, and SQL migrations.
+Deliberately absent: user management, audit/outbox, inventory, imports,
+MariaDB business repositories/schema, dashboard, public inventory UI, and
+Settings-backed MariaDB pool adoption.
 
-Known Phase 0 limitation: if MariaDB is configured but unreachable at
-startup, `/readyz` keeps reporting the startup error until the process is
-restarted; Phase 3 adds reconnect and hot-swap. The image build and
-`go test -race` run in Linux CI; a local Windows race run requires
-`CGO_ENABLED=1` and a C toolchain.
+Known Phase 1 limitations: if MariaDB is configured but unreachable at startup,
+`/readyz` keeps reporting the startup error until the process is restarted;
+Phase 3 adds reconnect and hot-swap. The wizard persists MariaDB settings but
+the running process still uses the environment bootstrap (PD-18). The login
+limiter is in-process, so multiple replicas do not share lockouts (PD-16). The
+image build and `go test -race` run in Linux CI; a local Windows race run
+requires `CGO_ENABLED=1` and a C toolchain.
 
 ## 6. Validation performed
 
@@ -210,14 +263,19 @@ restarted; Phase 3 adds reconnect and hot-swap. The image build and
 | `go build ./...` | Pass |
 | `go vet ./...` | Pass, no findings |
 | `go test ./...` | Pass (config, logging, app, sqlite, mariadb, service, api, web) |
-| Runtime `/healthz` | `200` with `{"status":"ok","version":"dev","uptime_seconds":...}` |
-| Runtime `/readyz` | `503` with sqlite `ok`, setup `pending`, mariadb `not_configured` |
-| MariaDB connectivity | Live MariaDB 11.4 container: check reported `mariadb: ok`; overall `503` only because setup is pending |
+| Migration tests | Fresh DB reaches `user_version=1`; tables/seeds present; rerun idempotent; newer schema refused; failed setup transaction rolls back |
+| Service tests | bcrypt round trip/policy, setup atomicity, DB-failure no-write, login parity, fifth-failure `429`, idle expiry, disabled revocation, logout/revoke-all, settings validation |
+| API tests | Setup wizard and 410 closure, CSRF 403, default-deny 401/redirect, cookie flags, raw token absent from SQLite, secret redaction, settings persistence |
+| Runtime `/healthz` | `200` |
+| Runtime `/readyz` before setup | `503` with sqlite `ok`, setup `pending`, mariadb `ok` |
+| Runtime `/readyz` after setup | `200` with sqlite/setup/mariadb all `ok` |
+| Live setup | Four-step payload completed against Compose MariaDB; one `Admin` row, 60-byte bcrypt hash, settings persisted, session issued |
+| Live auth | Login `200`; `HttpOnly` `SameSite=Lax` session cookie; `/api/v1/auth/session` `200`; logout `204`; session afterward `401` |
+| Live setup closure | `GET /setup` after completion returns `410` with only the closure body |
+| Live settings | `PUT /api/v1/settings` `200`; GuildName/open-days persisted; secret value returned empty with `isSecret=true` |
+| SQLite state (copied from volume with WAL) | `user_version=1`; `Users`, `Settings`, `Sessions`; session `TokenHash` length 64; raw cookie absent |
 | Unknown route | `404` JSON envelope with request ID |
-| SQLite pragmas | `journal_mode=wal`, `busy_timeout=5000`, `foreign_keys=1` asserted in tests |
-| Docker image | Built successfully; container runs as UID 10001, `/config` writable, `/healthz` 200 and `/readyz` 503 pre-setup |
-| Compose topology | `docker compose up`: app and MariaDB both healthy; `/readyz` reported `mariadb: ok`, overall `503` only for setup pending |
-| Volume persistence | `/config` is the named volume `guildbank_config`; `guildbank.db` and a sentinel survived `--force-recreate` and a `docker compose down`/`up` cycle |
+| Docker/Compose | Image built; app and MariaDB healthy; restart retained administrator/settings and returned ready `200` |
 
 ## 7. Build and run
 
@@ -237,7 +295,7 @@ docker compose up --build
 2. Every new configuration value is added to `config.Config`, validation,
    `Usage()`, `README.md` and this table.
 3. Every new route is added to the route table and to the default-deny
-   authorization matrix when Phase 2 introduces auth.
+   authorization matrix.
 4. Migrations are forward-only and versioned with `PRAGMA user_version`
    (SQLite) / `schema_migrations` (MariaDB), never edited after release.
 5. This document and `ProjectStatus.md` are updated at the end of every phase.

@@ -3,8 +3,8 @@
 //
 // Precedence, highest first: command-line flags, environment variables,
 // built-in defaults. MariaDB settings loaded here are a development
-// bootstrap only: once the setup wizard exists they are read from the
-// SQLite Settings table (Design.md L147-L164, E-11).
+// bootstrap only: the setup wizard persists credentials in SQLite, but the
+// live pool adopts them in Phase 3 (PD-18, E-11).
 package config
 
 import (
@@ -33,6 +33,7 @@ type Config struct {
 	LogLevel       string
 	LogFormat      string
 	TrustedProxies []string
+	SecureCookies  bool
 	MariaDB        MariaDB
 }
 
@@ -86,6 +87,7 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.StringVar(&cfg.SQLitePath, "sqlite-path", cfg.SQLitePath, "SQLite database file")
 	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn, error")
 	fs.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log format: json or text")
+	fs.BoolVar(&cfg.SecureCookies, "secure-cookies", cfg.SecureCookies, "mark session and CSRF cookies Secure (enable behind HTTPS)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return Config{}, flag.ErrHelp
@@ -121,6 +123,13 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	}
 	if v := strings.TrimSpace(getenv("GUILDBANK_TRUSTED_PROXIES")); v != "" {
 		cfg.TrustedProxies = splitList(v)
+	}
+	if v := strings.TrimSpace(getenv("GUILDBANK_SECURE_COOKIES")); v != "" {
+		secure, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("GUILDBANK_SECURE_COOKIES: %q is not a boolean", v)
+		}
+		cfg.SecureCookies = secure
 	}
 
 	// Development bootstrap only; Phase 3 replaces this with Settings.
@@ -206,10 +215,11 @@ Flags:
   -sqlite-path string  SQLite database file (default /config/guildbank.db)
   -log-level string    debug, info, warn or error (default info)
   -log-format string   json or text (default json)
+  -secure-cookies      mark cookies Secure; enable when served over HTTPS
 
 Environment (flags override environment):
   GUILDBANK_PORT, GUILDBANK_SQLITE_PATH, GUILDBANK_LOG_LEVEL,
-  GUILDBANK_LOG_FORMAT, GUILDBANK_TRUSTED_PROXIES
+  GUILDBANK_LOG_FORMAT, GUILDBANK_TRUSTED_PROXIES, GUILDBANK_SECURE_COOKIES
 
 Development bootstrap only, superseded by Settings in Phase 3:
   GUILDBANK_MARIADB_HOST, GUILDBANK_MARIADB_PORT,

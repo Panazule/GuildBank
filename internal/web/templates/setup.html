@@ -1,0 +1,129 @@
+{{define "setup.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body class="auth-page">
+  <header class="site-header">
+    <span class="brand">Aeternus <span>Guild Bank</span></span>
+  </header>
+  <main class="card setup-card">
+    <p class="eyebrow">First run</p>
+    <h1>Setup wizard</h1>
+    <p class="muted">Create the administrator, describe the guild, verify MariaDB, then commit. No account is created until the final step succeeds.</p>
+
+    <ol class="steps" aria-label="Setup progress">
+      <li data-step-label="1">Administrator</li>
+      <li data-step-label="2">Guild</li>
+      <li data-step-label="3">Database</li>
+      <li data-step-label="4">Complete</li>
+    </ol>
+
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <form method="post" action="/setup/complete" class="stack" id="setup-form" novalidate>
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+
+      <section class="wizard-step" data-step="1">
+        <h2>1. Administrator</h2>
+        <label>
+          Username
+          <input name="UserName" value="{{.Form.UserName}}" autocomplete="username" required minlength="3" maxlength="64">
+        </label>
+        {{with index .ErrorFields "UserName"}}<p class="field-error">{{.}}</p>{{end}}
+        <label>
+          Password
+          <input name="Password" type="password" autocomplete="new-password" required minlength="12" maxlength="72">
+        </label>
+        {{with index .ErrorFields "Password"}}<p class="field-error">{{.}}</p>{{end}}
+        <label>
+          Confirm password
+          <input name="ConfirmPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="72">
+        </label>
+        {{with index .ErrorFields "ConfirmPassword"}}<p class="field-error">{{.}}</p>{{end}}
+        <p class="help">At least 12 characters. The password is stored only as a bcrypt hash.</p>
+        <div class="wizard-actions"><button type="button" class="primary" data-next>Continue</button></div>
+      </section>
+
+      <section class="wizard-step" data-step="2">
+        <h2>2. Guild</h2>
+        <label>
+          Guild name
+          <input name="GuildName" value="{{.Form.GuildName}}" required maxlength="64">
+        </label>
+        {{with index .ErrorFields "GuildName"}}<p class="field-error">{{.}}</p>{{end}}
+        <div class="field-row">
+          <label>
+            Guild open days
+            <input name="GuildOpenDays" type="number" min="0" max="3650" value="{{.Form.GuildOpenDays}}" required>
+          </label>
+          {{with index .ErrorFields "GuildOpenDays"}}<p class="field-error">{{.}}</p>{{end}}
+          <label>
+            Bazaar days
+            <input name="BazaarDays" type="number" min="0" max="3650" value="{{.Form.BazaarDays}}" required>
+          </label>
+          {{with index .ErrorFields "BazaarDays"}}<p class="field-error">{{.}}</p>{{end}}
+        </div>
+        <label>
+          EQResource base URL
+          <input name="EQResourceBaseUrl" type="url" value="{{.Form.EQResourceBaseURL}}" required>
+        </label>
+        {{with index .ErrorFields "EQResourceBaseUrl"}}<p class="field-error">{{.}}</p>{{end}}
+        <div class="wizard-actions">
+          <button type="button" class="secondary" data-back>Back</button>
+          <button type="button" class="primary" data-next>Continue</button>
+        </div>
+      </section>
+
+      <section class="wizard-step" data-step="3">
+        <h2>3. MariaDB</h2>
+        <p class="help">The guild store is validated now. Runtime use of these settings begins in Phase 3; the current environment bootstrap remains in effect until then.</p>
+        <label>
+          Host
+          <input name="MariaDbHost" value="{{.Form.MariaDBHost}}" required>
+        </label>
+        {{with index .ErrorFields "MariaDbHost"}}<p class="field-error">{{.}}</p>{{end}}
+        <div class="field-row">
+          <label>
+            Port
+            <input name="MariaDbPort" type="number" min="1" max="65535" value="{{.Form.MariaDBPort}}" required>
+          </label>
+          {{with index .ErrorFields "MariaDbPort"}}<p class="field-error">{{.}}</p>{{end}}
+          <label>
+            Database
+            <input name="MariaDbDatabase" value="{{.Form.MariaDBDatabase}}" required maxlength="64">
+          </label>
+          {{with index .ErrorFields "MariaDbDatabase"}}<p class="field-error">{{.}}</p>{{end}}
+        </div>
+        <label>
+          Username
+          <input name="MariaDbUsername" value="{{.Form.MariaDBUsername}}" autocomplete="username" required>
+        </label>
+        {{with index .ErrorFields "MariaDbUsername"}}<p class="field-error">{{.}}</p>{{end}}
+        <label>
+          Password
+          <input name="MariaDbPassword" type="password" autocomplete="new-password" required>
+        </label>
+        {{with index .ErrorFields "MariaDbPassword"}}<p class="field-error">{{.}}</p>{{end}}
+        <div id="database-test-result" class="test-result" role="status" aria-live="polite"></div>
+        <div class="wizard-actions">
+          <button type="button" class="secondary" data-back>Back</button>
+          <button type="button" class="secondary" id="test-database">Test connection</button>
+          <button type="button" class="primary" data-next>Continue</button>
+        </div>
+      </section>
+
+      <section class="wizard-step" data-step="4">
+        <h2>4. Complete setup</h2>
+        <p>The administrator account and all settings are written in one SQLite transaction. Setup closes immediately afterwards; sign in with the credentials from Step 1.</p>
+        <div class="wizard-actions">
+          <button type="button" class="secondary" data-back>Back</button>
+          <button type="submit" class="primary">Create administrator and finish</button>
+        </div>
+      </section>
+    </form>
+  </main>
+  <script src="/static/setup.js" defer></script>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

@@ -1,6 +1,6 @@
 // Package sqlite owns the application store (/config/guildbank.db): Users,
-// Settings, Sessions and AuditOutbox. No guild data is written here
-// (Design.md L78-L91, D-13).
+// Settings and Sessions in Phase 1; AuditOutbox arrives with the audit phase.
+// No guild data is written here (Design.md L78-L91, D-13).
 package sqlite
 
 import (
@@ -86,7 +86,8 @@ func (s *Store) PingContext(ctx context.Context) error { return s.db.PingContext
 
 // SetupStatus implements the D-02 probe: setup exists exactly while the
 // Users table contains no administrator. A missing Users table means the
-// first-run schema has not been installed yet, so setup is still pending.
+// schema is absent or corrupt, not a first run, so startup/readiness fails
+// closed instead of reopening unauthenticated setup (DD §3.5, DC-24).
 // Administrators are counted regardless of DisabledFg so disabling every
 // account cannot reopen unauthenticated setup (B-6).
 func (s *Store) SetupStatus(ctx context.Context) (domain.SetupState, error) {
@@ -97,7 +98,7 @@ func (s *Store) SetupStatus(ctx context.Context) (domain.SetupState, error) {
 		return domain.SetupUnknown, fmt.Errorf("sqlite: inspect schema: %w", err)
 	}
 	if tables == 0 {
-		return domain.SetupPending, nil
+		return domain.SetupUnknown, errors.New("sqlite: Users table is missing; schema is not initialized")
 	}
 	var admins int
 	err = s.db.QueryRowContext(ctx,

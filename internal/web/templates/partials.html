@@ -1,0 +1,30 @@
+{{define "head"}}
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{.CSRF}}">
+  <title>{{.Title}} · Aeternus Guild Bank</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+{{end}}
+
+{{define "nav"}}
+<header class="site-header">
+  <a class="brand" href="/">Aeternus <span>Guild Bank</span></a>
+  {{if .User}}
+  <nav aria-label="Administration">
+    <a href="/admin/settings">Settings</a>
+    <form method="post" action="/api/v1/auth/logout" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button type="submit" class="link-button">Sign out</button>
+    </form>
+  </nav>
+  {{end}}
+</header>
+{{end}}
+
+{{define "footer"}}
+<footer class="site-footer">
+  <span>Application data stays in SQLite. Guild data stays in MariaDB.</span>
+</footer>
+{{end}}

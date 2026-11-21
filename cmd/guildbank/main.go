@@ -1,8 +1,9 @@
 // Command guildbank is the Aeternus Guild Bank server.
 //
-// Phase 0 scope: process skeleton, configuration, stores, structured logging,
-// health endpoints and graceful shutdown. No authentication, import,
-// inventory or UI behaviour is implemented yet.
+// Phase 1 scope: process skeleton, configuration, stores, structured logging,
+// health endpoints, SQLite migrations, first-run setup, authentication,
+// sessions and settings persistence. Inventory, imports and audit are not
+// implemented yet.
 package main
 
 import (

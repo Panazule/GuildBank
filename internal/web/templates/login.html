@@ -1,0 +1,28 @@
+{{define "login.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body class="auth-page">
+  {{template "nav" .}}
+  <main class="card narrow">
+    <h1>Sign in</h1>
+    <p class="muted">Administrator access is required to manage settings.</p>
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+    <form method="post" action="/api/v1/auth/login" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="next" value="{{.Next}}">
+      <label>
+        Username
+        <input name="UserName" autocomplete="username" required autofocus>
+      </label>
+      <label>
+        Password
+        <input name="Password" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="primary">Sign in</button>
+    </form>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

@@ -34,10 +34,14 @@ func TestNoRepositoryImports(t *testing.T) {
 }
 
 func TestEmbeddedAssetsExist(t *testing.T) {
-	if _, err := Templates.ReadFile("templates/placeholder.html"); err != nil {
-		t.Fatalf("template not embedded: %v", err)
+	for _, name := range []string{"templates/setup.html", "templates/login.html", "templates/settings.html", "templates/home.html", "templates/error.html"} {
+		if _, err := Templates.ReadFile(name); err != nil {
+			t.Fatalf("template %s not embedded: %v", name, err)
+		}
 	}
-	if _, err := Static.ReadFile("static/placeholder.css"); err != nil {
-		t.Fatalf("static asset not embedded: %v", err)
+	for _, name := range []string{"static/app.css", "static/setup.js"} {
+		if _, err := Static.ReadFile(name); err != nil {
+			t.Fatalf("asset %s not embedded: %v", name, err)
+		}
 	}
 }

@@ -53,33 +53,20 @@ func TestOpenAppliesPragmas(t *testing.T) {
 }
 
 func TestSetupStatusFollowsUsersTable(t *testing.T) {
-	store := openTestStore(t)
+	store := migratedStore(t)
 	ctx := context.Background()
 
 	state, err := store.SetupStatus(ctx)
 	if err != nil {
-		t.Fatalf("SetupStatus on empty store: %v", err)
+		t.Fatalf("SetupStatus on migrated store: %v", err)
 	}
 	if state != domain.SetupPending {
 		t.Fatalf("state = %v, want pending", state)
 	}
 
-	if _, err := store.DB().ExecContext(ctx, `
-		CREATE TABLE Users (
-			UserID      INTEGER PRIMARY KEY AUTOINCREMENT,
-			UserName    TEXT NOT NULL,
-			AccessLevel TEXT NOT NULL,
-			DisabledFg  INTEGER NOT NULL DEFAULT 0
-		)`); err != nil {
-		t.Fatalf("create Users: %v", err)
-	}
-	state, err = store.SetupStatus(ctx)
-	if err != nil || state != domain.SetupPending {
-		t.Fatalf("empty Users: state=%v err=%v, want pending/nil", state, err)
-	}
-
 	if _, err := store.DB().ExecContext(ctx,
-		`INSERT INTO Users (UserName, AccessLevel) VALUES ('admin', 'Admin')`); err != nil {
+		`INSERT INTO Users (UserName, PasswordHash, AccessLevel, ModAt, CreatedAt)
+		 VALUES ('admin', 'hash', 'Admin', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`); err != nil {
 		t.Fatalf("insert admin: %v", err)
 	}
 	state, err = store.SetupStatus(ctx)
@@ -93,6 +80,14 @@ func TestSetupStatusFollowsUsersTable(t *testing.T) {
 	state, err = store.SetupStatus(ctx)
 	if err != nil || state != domain.SetupComplete {
 		t.Fatalf("disabled admin must not reopen setup: state=%v err=%v", state, err)
+	}
+}
+
+func TestSetupStatusFailsClosedWithoutUsersTable(t *testing.T) {
+	store := openTestStore(t)
+	state, err := store.SetupStatus(context.Background())
+	if err == nil || state != domain.SetupUnknown {
+		t.Fatalf("missing Users: state=%v err=%v, want unknown/error", state, err)
 	}
 }
 

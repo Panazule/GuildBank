@@ -156,6 +156,11 @@ CREATE INDEX ix_sessions_absolute ON Sessions (AbsoluteExpiresAt);
 
 ### 3.4 `AuditOutbox` **PROPOSED**
 
+> **Phase 1 implementation note:** the owner's Phase 1 scope excludes audit, so
+> migration `0001` creates `Users`, `Settings` and `Sessions` but not
+> `AuditOutbox`. The table below remains the approved target for the audit
+> phase; settings/user writes currently have no audit side effect.
+
 Required by DC-03: settings and user changes live in SQLite, while audit lives in MariaDB. If MariaDB is unavailable, the write must still succeed and the audit must not be lost. An outbox is the minimal reliable pattern.
 
 ```sql

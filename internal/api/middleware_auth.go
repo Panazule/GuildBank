@@ -1,0 +1,159 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/Panazule/guildbank/internal/domain"
+	"github.com/Panazule/guildbank/internal/service"
+)
+
+const (
+	principalKey = "principal"
+)
+
+// SetupGate enforces D-02 before any application route: while no administrator
+// exists only setup, health, static assets and the CSRF bootstrap are reachable.
+// Once one exists, every /setup route returns 410.
+func SetupGate(setup *service.SetupService, logger *slog.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if exemptFromSetupGate(path) {
+			c.Next()
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		state, err := setup.Status(ctx)
+		cancel()
+		if err != nil {
+			logger.Error("setup gate probe failed", "path", path, "error", err)
+			writeError(c, http.StatusInternalServerError, "internal_error", "setup state unavailable")
+			return
+		}
+		if state == domain.SetupComplete {
+			if path == "/setup" || strings.HasPrefix(path, "/setup/") {
+				if wantsHTML(c) {
+					writeHTMLStatus(c, http.StatusGone, "Setup complete", "An administrator account already exists; the setup wizard is permanently closed.")
+				} else {
+					writeError(c, http.StatusGone, "setup_closed", "setup is already complete")
+				}
+				return
+			}
+			c.Next()
+			return
+		}
+		if state != domain.SetupPending {
+			writeError(c, http.StatusInternalServerError, "internal_error", "setup state unknown")
+			return
+		}
+		if path == "/setup" || strings.HasPrefix(path, "/setup/") || path == "/api/v1/auth/csrf" {
+			c.Next()
+			return
+		}
+		if strings.HasPrefix(path, "/api/") {
+			writeError(c, http.StatusServiceUnavailable, "setup_required", "the application is in setup mode")
+			return
+		}
+		c.Redirect(http.StatusFound, "/setup")
+		c.Abort()
+	}
+}
+
+func exemptFromSetupGate(path string) bool {
+	return path == "/healthz" || path == "/readyz" || strings.HasPrefix(path, "/static/")
+}
+
+// RequireAuth resolves the session cookie, attaches the principal and clears
+// invalid cookies. It never authorizes; RequireAdmin follows it.
+func RequireAuth(auth *service.AuthService, secure bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := sessionToken(c)
+		if token == "" {
+			unauthorized(c)
+			return
+		}
+		session, err := auth.Authenticate(c.Request.Context(), token)
+		if err != nil {
+			if errors.Is(err, domain.ErrUnauthorized) {
+				clearSessionCookie(c, secure)
+				unauthorized(c)
+				return
+			}
+			_ = c.Error(err)
+			writeError(c, http.StatusInternalServerError, "internal_error", "session validation failed")
+			return
+		}
+		c.Set(principalKey, session)
+		c.Next()
+	}
+}
+
+// RequireAdmin enforces the only access level defined by the specification.
+func RequireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session, ok := CurrentSession(c)
+		if !ok || !session.User.IsAdmin() {
+			if wantsHTML(c) {
+				c.Redirect(http.StatusSeeOther, "/login")
+				c.Abort()
+				return
+			}
+			writeError(c, http.StatusForbidden, "forbidden", "administrator access required")
+			return
+		}
+		c.Next()
+	}
+}
+
+func unauthorized(c *gin.Context) {
+	if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+		writeError(c, http.StatusUnauthorized, "unauthenticated", "authentication required")
+		return
+	}
+	next := safeNext(c.Request.URL.RequestURI())
+	target := "/login"
+	if next != "" && next != "/login" {
+		target += "?next=" + urlQueryEscape(next)
+	}
+	c.Redirect(http.StatusSeeOther, target)
+	c.Abort()
+}
+
+func urlQueryEscape(s string) string {
+	return url.QueryEscape(s)
+}
+
+// CurrentSession returns the authenticated principal attached by RequireAuth.
+func CurrentSession(c *gin.Context) (service.AuthenticatedSession, bool) {
+	v, ok := c.Get(principalKey)
+	if !ok {
+		return service.AuthenticatedSession{}, false
+	}
+	session, ok := v.(service.AuthenticatedSession)
+	return session, ok
+}
+
+// SecurityHeaders applies conservative defaults to every application route.
+// Embedded static assets are registered before this middleware and may cache;
+// application pages and APIs are never stored.
+func SecurityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("Referrer-Policy", "no-referrer")
+		c.Header("Content-Security-Policy",
+			"default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'")
+		c.Header("Cache-Control", "no-store")
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		}
+		c.Next()
+	}
+}

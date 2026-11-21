@@ -1,7 +1,7 @@
-// Package web owns the server-side rendered assets. Phase 2 adds the setup
-// and login templates; Phase 4+ adds inventory screens. Bootstrap 5 and HTMX
-// are served from this embedded filesystem, never from a CDN (IP Phase 1
-// task 6).
+// Package web owns the server-side rendered assets. Phase 1 adds the setup,
+// login and settings screens with embedded CSS and a small vanilla script.
+// Phase 4+ adds inventory screens. All assets are embedded, never loaded from
+// a CDN (IP Phase 1 task 6).
 package web
 
 import "embed"

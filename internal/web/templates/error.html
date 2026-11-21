@@ -1,0 +1,16 @@
+{{define "error.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card narrow">
+    <p class="eyebrow">HTTP {{.Status}}</p>
+    <h1>{{.Title}}</h1>
+    <div class="alert alert-error" role="alert">{{.Error}}</div>
+    <p><a href="/">Return home</a></p>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

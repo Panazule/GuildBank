@@ -51,6 +51,12 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 
+	version, err := appStore.Migrate(ctx)
+	if err != nil {
+		return fmt.Errorf("app: migrate sqlite: %w", err)
+	}
+	logger.Info("sqlite schema ready", "user_version", version, "path", cfg.SQLitePath)
+
 	var guildStore *mariadb.Store
 	var guildErr error
 	if cfg.MariaDB.Configured() {
@@ -62,7 +68,7 @@ func Run(ctx context.Context, opts Options) error {
 			Password: cfg.MariaDB.Password,
 		})
 		if guildErr != nil {
-			// Phase 3 makes the guild store hot-swappable; Phase 0 keeps
+			// Phase 3 makes the guild store hot-swappable; Phase 1 keeps
 			// serving and reports the failure through /readyz.
 			logger.Warn("guild store unreachable; continuing in degraded mode",
 				"target", cfg.MariaDB.Redacted(), "error", guildErr)
@@ -86,11 +92,43 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	health := service.NewHealthService(healthDeps)
 
+	settingsService := service.NewSettingsService(appStore)
+	setupService := service.NewSetupService(appStore, appStore, guildConnectionTester{})
+	authService := service.NewAuthService(appStore, appStore, settingsService)
+
+	purgeCtx, stopPurge := context.WithCancel(ctx)
+	defer stopPurge()
+	if n, err := authService.PurgeExpired(ctx); err != nil {
+		logger.Warn("initial session purge failed", "error", err)
+	} else if n > 0 {
+		logger.Info("purged expired sessions", "count", n)
+	}
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-purgeCtx.Done():
+				return
+			case <-ticker.C:
+				if n, err := authService.PurgeExpired(purgeCtx); err != nil {
+					logger.Warn("session purge failed", "error", err)
+				} else if n > 0 {
+					logger.Info("purged expired sessions", "count", n)
+				}
+			}
+		}
+	}()
+
 	router, err := api.NewRouter(api.Deps{
 		Logger:         logger,
 		Health:         health,
+		Setup:          setupService,
+		Auth:           authService,
+		Settings:       settingsService,
 		Version:        opts.Version,
 		TrustedProxies: cfg.TrustedProxies,
+		SecureCookies:  cfg.SecureCookies,
 	})
 	if err != nil {
 		return fmt.Errorf("app: build router: %w", err)
@@ -111,6 +149,7 @@ func Run(ctx context.Context, opts Options) error {
 		"sqlite_path", cfg.SQLitePath,
 		"guild_store", cfg.MariaDB.Redacted(),
 		"trusted_proxies", len(cfg.TrustedProxies),
+		"secure_cookies", cfg.SecureCookies,
 		"log_level", cfg.LogLevel,
 	)
 
@@ -144,6 +183,20 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	logger.Info("application stopped")
 	return nil
+}
+
+// guildConnectionTester adapts the MariaDB repository to the setup service
+// without exposing the repository package to the API or service layers.
+type guildConnectionTester struct{}
+
+func (guildConnectionTester) TestDatabase(ctx context.Context, cfg service.DatabaseConfig) error {
+	return mariadb.Test(ctx, mariadb.Config{
+		Host:     cfg.Host,
+		Port:     cfg.Port,
+		Database: cfg.Database,
+		Username: cfg.Username,
+		Password: cfg.Password,
+	})
 }
 
 // ensureWritableDir fails fast with an actionable error when /config is not

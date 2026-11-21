@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Panazule/guildbank/internal/repository/sqlite"
 	"github.com/Panazule/guildbank/internal/service"
 )
 
@@ -18,12 +20,35 @@ type fakeHealth struct{ result service.Readiness }
 
 func (f fakeHealth) Ready(context.Context) service.Readiness { return f.result }
 
+func newTestServices(t *testing.T) (service.SetupService, *service.AuthService, *service.SettingsService) {
+	t.Helper()
+	store, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "guildbank.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if _, err := store.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if _, err := store.DB().Exec(`
+		INSERT INTO Users (UserName, PasswordHash, AccessLevel, ModAt, CreatedAt)
+		VALUES ('admin', 'unused-test-hash', 'Admin', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("seed admin: %v", err)
+	}
+	settings := service.NewSettingsService(store)
+	return *service.NewSetupService(store, store, nil), service.NewAuthService(store, store, settings), settings
+}
+
 func newTestRouter(t *testing.T, result service.Readiness) *gin.Engine {
 	t.Helper()
+	setup, auth, settings := newTestServices(t)
 	r, err := NewRouter(Deps{
-		Logger:  slog.New(slog.NewJSONHandler(&strings.Builder{}, nil)),
-		Health:  fakeHealth{result: result},
-		Version: "test",
+		Logger:   slog.New(slog.NewJSONHandler(&strings.Builder{}, nil)),
+		Health:   fakeHealth{result: result},
+		Setup:    &setup,
+		Auth:     auth,
+		Settings: settings,
+		Version:  "test",
 	})
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)

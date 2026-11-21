@@ -10,6 +10,8 @@ tmp
 .env
 coverage.out
 dist
+*.exe
+guildbank
 README.md
 Docs
 Design.md

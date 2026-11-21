@@ -35,7 +35,7 @@ type Store struct {
 
 // Open builds a bounded pool, pings the server and returns an error when it
 // is unreachable. The caller decides whether an unreachable store is fatal
-// (Phase 0: not fatal, readiness reports it).
+// (Phase 1: not fatal, readiness reports it).
 func Open(ctx context.Context, cfg Config) (*Store, error) {
 	if cfg.Host == "" || cfg.Database == "" || cfg.Username == "" {
 		return nil, errors.New("mariadb: host, database and username are required")
@@ -76,6 +76,16 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 		return nil, fmt.Errorf("mariadb: ping %s: %w", my.Addr, err)
 	}
 	return &Store{db: db}, nil
+}
+
+// Test opens a bounded connection, pings it and closes. It is used by the
+// setup wizard to validate credentials without persisting anything.
+func Test(ctx context.Context, cfg Config) error {
+	store, err := Open(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	return store.Close()
 }
 
 // DB exposes the pool to repositories in this package only.

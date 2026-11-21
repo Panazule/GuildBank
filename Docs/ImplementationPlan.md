@@ -97,6 +97,14 @@ Critical path: Phase 0 → 2 → 3 → 4 → 6 → 8. Phases 5 and 7 have slack.
 
 ### Phase 2 — Setup, identity and sessions
 
+> **Delivery note (2026-11-21):** the owner's Phase 1 directive implemented
+> this identity scope: migrations for `Users`/`Settings`/`Sessions`, setup gate,
+> four-step wizard, sessions, CSRF, login lockout, login/logout, purge and
+> tests. `AuditOutbox`/audit emission (tasks 1 and 6) were explicitly deferred
+> with audit logging. The limiter is in-process; Bootstrap/HTMX were replaced by
+> embedded CSS/vanilla JS for these small forms (PD-12). See
+> `ProjectStatus.md` §1.2 and `ProjectStructure.md` §4.2.
+
 **Goal:** a first-run wizard that produces a working administrator and session, with security controls in place from the first form.
 
 **Tasks**
@@ -129,6 +137,8 @@ Critical path: Phase 0 → 2 → 3 → 4 → 6 → 8. Phases 5 and 7 have slack.
 **Tasks**
 1. MariaDB pool built from `Settings` values; connect timeout, `Ping` on startup, hot-swap on settings change (E-11). Pool configured with explicit max open/idle and connection lifetime.
 2. MariaDB migrations: `GuildBankItems`, `ImportBatch`, `ImportList`, `Audit` (the D-10 field set), `schema_migrations`; `GET_LOCK` guard; no destructive steps.
+> **Status note:** Phase 1 persists MariaDB settings but the runtime pool still
+> uses `GUILDBANK_MARIADB_*` until this task lands (PD-18).
 3. `Items` loader contract documented and a development seed/fixture provided (not production data). Application queries only the contract columns; `SELECT *` prohibited.
 4. Settings service: typed accessors, validation ranges, cache with invalidation, `GET /api/settings` (secrets redacted) and `PUT /api/settings`.
 5. Audit recorder in the service layer: closed `EventType` allowlist built from D-10, `OldValues`/`NewValues` snapshots, `TableName`/`RecordID`, `UserID`/`UserName` snapshots, redaction of `PasswordHash` and `IsSecret`, correlation ID, insert-only repository.
