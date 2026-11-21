@@ -225,6 +225,30 @@ CREATE TABLE IF NOT EXISTS Items (
 - `65535` in either mask means `ALL`; the decoder treats `ALL` as matching every class or race (L294–L307, IC-09).
 - The loader may add columns; the application must tolerate unknown columns and must not use `SELECT *`.
 
+> **Development dataset note (2026-11-21).** The development copy is now
+> provisioned as `GuildBank.items` — lowercase, because the server reports
+> `lower_case_table_names=0`, and with 144,712 rows. Its physical columns are
+> `id` (`BIGINT` primary key), `name`, `classes` and `races`; the table has 315
+> columns in total and the remaining 311 are nullable `LONGTEXT` collector
+> fields. `ClassList`/`RaceList` and `MetadataMissingFg` do not exist in the
+> source. The repository must map `id`→`EQUID`, `name`→`Name`,
+> `classes`→`ClassList` and `races`→`RaceList` and isolate the physical names
+> (PD-19, approved 2026-11-21).
+>
+> `classes` and `races` are decimal strings, not integer columns. All 144,712
+> values are numeric, but 570 class masks and 628 race masks exceed the
+> specified 16-bit range (maximum `4,211,081,216` and `251,658,240`
+> respectively). The defined decoder alone is therefore insufficient for this
+> dataset; PD-20 (approved 2026-11-21) decodes the low 16 bits, maps `65535` to
+> `ALL`, and returns a structured non-fatal warning for undefined high bits
+> without rejecting the row. The warning destination remains dependent on E-14.
+> `MetadataMissingFg` stays reserved for an absent EQUID. See
+> `Docs/ItemsDataProfile.md` for the full profile and evidence.
+>
+> The development `guildbank` account currently has `ALL PRIVILEGES` on
+> `GuildBank.*`; read-only access is a code rule there, not a grant. Production
+> must enforce `SELECT`-only access for this table (E-01, SR-13).
+
 ### 4.2 `GuildBankItems`
 
 Spec fields (L266–L374): `GuildBankItemID` (PK), `ItemType` (`Item`|`Spell`), `EQUID`, `Name`, `ClassString`, `RaceString`, `DateAdded`, `DateOpen`, `DateBazaar`, `Quantity`, `SourceLocation`, `GivenTo`, `DeletedFg`, `ModAt`, `ModBy`, plus `MetadataMissingFg` (AM-02).
@@ -436,7 +460,7 @@ Because SQLite and MariaDB cannot share a transaction, these rules are the contr
 
 ```
 BEGIN;
-  SELECT EQUID, Name, ClassList, RaceList FROM Items WHERE EQUID = ?;   -- must exist
+  SELECT id, name, classes, races FROM items WHERE id = ?;  -- must exist; logical names mapped per §4.1
   -- decode masks; compute today's date; compute DateOpen/DateBazaar from settings
   INSERT INTO GuildBankItems (
       ItemType, EQUID, Name, ClassString, RaceString,

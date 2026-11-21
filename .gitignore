@@ -16,3 +16,6 @@ coverage.out
 .env
 .vscode/
 .idea/
+
+# Large collector dumps used only to provision the development database
+Docs/Samples/*.sql

@@ -5,9 +5,9 @@
 | Document ID | PS-001 |
 | As-of date | 2026-11-21 |
 | Source specification | `Design.md` v1.6.1 (1,263 lines: body L1–L854, decisions D-01–D-13 at L855–L1161, amendments AM-01–AM-05 at L1163–L1263) |
-| Repository state | Phase 1: SQLite schema, four-step setup wizard, bcrypt administrator, login/logout, server-side sessions, CSRF, rate limiting, default-deny admin routes and settings persistence; inventory/imports/audit/MariaDB business features absent |
-| Documents issued | `ArchitectureReview.md` (AR-001), `DatabaseDesign.md` (DD-001), `ImplementationPlan.md` (IP-001), `ProjectStructure.md` (PS-002), this status report |
-| Overall status | **v1.6.1 published; Phase 0 skeleton and Phase 1 identity/settings layer complete; inventory, imports and audit remain later phases** |
+| Repository state | Phase 1: SQLite schema, four-step setup wizard, bcrypt administrator, login/logout, server-side sessions, CSRF, rate limiting, default-deny admin routes and settings persistence. Phase 2 item-metadata slice: read-only item repository plus class/race mask decoders. Inventory/imports/audit remain absent |
+| Documents issued | `ArchitectureReview.md` (AR-001), `DatabaseDesign.md` (DD-001), `ImplementationPlan.md` (IP-001), `ProjectStructure.md` (PS-002), `ItemsDataProfile.md` (DP-001), this status report |
+| Overall status | **v1.6.1 published; Phase 0 skeleton, Phase 1 identity/settings layer and the approved PD-19/PD-20 item-metadata slice complete; inventory, imports and audit remain later phases** |
 
 ---
 
@@ -21,8 +21,8 @@
 | Delivery plan | Complete | IP-001: 9 phases, estimates, test and deployment strategy |
 | Source code | Phase 1 application layer present | `cmd/guildbank`, `internal/{domain,service,repository,api,web,platform}`; setup, auth, sessions, settings; no inventory/import/audit |
 | Build/CI | Complete for the current scope | `go.mod`/`go.sum` (Go 1.27.3), `Makefile`, `.github/workflows/ci.yml`, `Dockerfile`, `docker-compose.yml` |
-| Environments | Development topology defined | Compose app + MariaDB 11.4; disposable credentials; no production environment |
-| Test assets | Canonical import sample plus Phase 0/1 unit and API tests | `Docs/Samples/InventoryExport-Sample.txt` (548 rows); tests for config, logging, app, sqlite migrations/repositories, mariadb, service, api, web |
+| Environments | Development topology defined; item metadata provisioned | Compose app + MariaDB 11.4; 144,712-row read-only `items` copy in `GuildBank`; disposable credentials; no production environment |
+| Test assets | Canonical import sample, development item metadata plus Phase 0/1 and decoder/mapping tests | `Docs/Samples/InventoryExport-Sample.txt` (548 rows); `GuildBank.items` profile in DP-001; tests for config, logging, app, sqlite migrations/repositories, mariadb item mapping, mask decoders, service, api, web |
 | Deployment | Configured, not deployed | Multi-stage static image, non-root UID 10001, `/config` volume, `EXPOSE 8080`, healthcheck `/healthz` |
 | Operations | Health/logs and session purge implemented; backup/support pending | `/healthz`, `/readyz`, JSON logs with request IDs, hourly session purge, graceful shutdown with WAL checkpoint |
 
@@ -33,8 +33,8 @@
 | Setup wizard | Partial — gate/order implemented; recovery undefined | **Implemented** for the four-step flow | E-02 offline recovery |
 | Authentication/sessions | Partial — lifecycle implemented to E-08 defaults; approval open | **Implemented** (login/logout, hashed sessions, expiry, CSRF, lockout) | E-08, PD-11–PD-17 approval |
 | Public inventory browsing | Defined | Not started | E-10, E-12 |
-| Class/race decoding | Defined with one fixture | Not started | — |
-| Inventory administration | Partial — provisioning unowned | Not started | E-01 |
+| Class/race decoding | Defined with two published fixtures; PD-19/PD-20 approved | **Implemented** repository-independent `ClassMaskDecoder` and `RaceMaskDecoder` with fixture tests and non-fatal high-bit warnings | E-14 warning sink |
+| Inventory administration | Partial — dev metadata loaded; loader procedure/freshness open | Read-only item lookup implemented; inventory/import UI not started | E-01 |
 | Import pipeline | **Specified** — D-04/AM-03 contract, D-08/AM-01/AM-02 metadata rule | Not started | B-4 (edge cases only) |
 | Spell merge/lifecycle dates | Defined by D-06; provenance open | Not started | DC-21 |
 | Settings | Partial — typed/secrets implemented; policy approval open | **Implemented** (read/update/redaction) | E-11, PD-11 |
@@ -103,6 +103,50 @@ tables in this phase, password-policy values, custom CSS/JS rather than
 Bootstrap/HTMX, explicit secure-cookie configuration, and MariaDB runtime
 continuing on the environment bootstrap until Phase 3.
 
+### 1.3 Items metadata provisioning record (2026-11-21)
+
+The development MariaDB now contains the production collector copy at
+`GuildBank.items` (the logical name is `Items`; the server is case-sensitive).
+It is available for read-only validation and testing. The approved PD-19/PD-20
+item-metadata slice now reads it through one repository mapping.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Row count and identity | 144,712 rows; 144,712 distinct `id`; 1,001–178,976; no non-positive ids | DP-001 §1 |
+| Physical schema | Lowercase `items`; 315 columns; `id BIGINT` primary key; `name`, `classes`, `races` and 311 other nullable `LONGTEXT` fields | DP-001 §2 |
+| Logical mapping gap | No `ClassList`, `RaceList` or `MetadataMissingFg` columns; repository must map `classes`/`races` (PD-19) | DP-001 §2, F1 |
+| Names | No null/empty names; 139,190 distinct; 3–50 characters; none exceed `VARCHAR(128)`; names are not unique | DP-001 §3.1 |
+| Masks | All values numeric text; `classes` 0–4,211,081,216; `races` 0–251,658,240; 60,948/104,340 are `65535` (`ALL`) | DP-001 §3.2 |
+| Mask contract gap | 570 class masks and 628 race masks exceed the 16-bit specification; 16-bit-only decoding is insufficient (PD-20) | DP-001 §3.2, F3 |
+| Published fixture | `Blade of Carnage` (`id=25210`) → `classes=157` = `WAR,PAL,RNG,SHD,BRD`; `races=65535` = `ALL` | DP-001 §4 |
+| Lookup plan | Primary-key lookup by `id` uses `PRIMARY`; names are display data, not identity | DP-001 §2, §4 |
+| Access | All validation was `SELECT`; the dev account still has `ALL PRIVILEGES`, so production must enforce read-only grants | DP-001 §5, F4 |
+| Source artifact | `Docs/Samples/EQItemList-items.sql` (218,230,768 bytes) is local, contains `DROP TABLE`, and is ignored by Git | DP-001 §1, F5 |
+
+The collector loader procedure, refresh cadence, ownership and production
+`SELECT`-only grants remain open (E-01). PD-19 and PD-20 were approved on
+2026-11-21 and the scoped Phase 2 item-metadata implementation is recorded below.
+
+### 1.4 Phase 2 item-metadata slice (2026-11-21)
+
+The owner approved PD-19 and PD-20 and authorized the two decoder services plus
+the repository mapping. This is a scoped slice, not the full Phase 2 go/no-go.
+
+| Deliverable | State | Evidence |
+|---|---|---|
+| Logical item contract | Complete | `domain.Item` exposes `EQUID`, `Name`, `ClassList`, `RaceList`; callers do not use physical names |
+| Physical-to-logical mapping | Complete | `mariadb.Store.GetItemByEQUID` selects only `id, name, classes, races` from lowercase `items`; not-found maps to `domain.ErrNotFound` |
+| Source mask parsing | Complete | `classes`/`races` LONGTEXT decimals parsed in Go; NULL/blank becomes 0; malformed values return an error |
+| `ClassMaskDecoder` | Complete | Repository-independent service; low 16 bits; `65535`→`ALL`; `0`→blank; stable `WAR…BER` order |
+| `RaceMaskDecoder` | Complete | Repository-independent service; low 16 bits; `65535`→`ALL`; `0`→blank; stable `Human…Drakkin` order |
+| Undefined high bits | Complete | `MaskDecodeResult.Warnings` carries `undefined_high_bits` with field, original mask and high-bit value; decoding does not fail |
+| Published fixtures | Complete | Automated tests cover `25210 Blade of Carnage` (`157`→`WAR,PAL,RNG,SHD,BRD`; `65535`→`ALL`) and `10802 Flayed Skin Cap` (`1040`→`SHD,NEC`; `5`→`Human,Erudite`) |
+| Warning destination | Open | E-14 still decides where warning results are persisted/reported |
+
+`go test ./...` and `go vet ./...` pass with the new decoder and repository
+mapping tests. Full Phase 2 remains gated by PD-10–PD-18 approval, the written
+go/no-go and the open items listed in §8.
+
 ---
 
 ## 2. Documents produced in this review
@@ -112,6 +156,7 @@ continuing on the environment bootstrap until Phase 3.
 | `Docs/ArchitectureReview.md` | Conformance assessment, findings, decisions, v1.6 disposition | MR-01–MR-22, DC-01–DC-25, SR-01–SR-22, IC-01–IC-28, A-01–A-12, E-01–E-16, D-01–D-13 mapping |
 | `Docs/DatabaseDesign.md` | Physical schema, constraints, transactions, grants, retention | SQLite DDL (Users, Settings, Sessions, AuditOutbox), MariaDB DDL (Items, GuildBankItems, ImportBatch, ImportList, Audit), 9 workflow specifications, D-01–D-13 conformance |
 | `Docs/ImplementationPlan.md` | Phased delivery, API surface, audit taxonomy, testing, deployment | 9 phases (58–84 engineer-days with contingency), route table, D-10 event taxonomy, fixtures, DoD, risk register |
+| `Docs/ItemsDataProfile.md` | Read-only profile of the development item metadata | 144,712-row inventory, physical/logical mapping, mask distribution, decoding fixture, PD-19/PD-20 |
 | `Docs/ProjectStatus.md` | This report | Traceability, blockers, next actions |
 
 No application functionality beyond the platform skeleton and Phase 1
@@ -245,7 +290,7 @@ No requirement is classed **Missing** after v1.6.1. The former contradictions ar
 
 | ID | Subject | Status | Default |
 |---|---|---|---|
-| E-01 | `Items` provisioning/freshness | Open | Loader-owned, documented, `SELECT`-only |
+| E-01 | `Items` provisioning/freshness | Partial | Dev `items` copy loaded 2026-11-21; loader procedure, refresh cadence and production `SELECT`-only grants remain open |
 | E-05 | Spell merge provenance/concurrency | Open | Row lock; record merged-into row in audit |
 | E-06 | Unknown location patterns/vocabulary | Open | Preserve raw; one group per unknown pattern; `Hoard` |
 | E-07 | Authorization matrix/projections | Partial | Admin-only routes enforced; public inventory projection still open |
@@ -270,14 +315,18 @@ D-01–D-13 are specification decisions and do not require engineering approval.
 | 1 | Review and approve/reject Phase 1 decisions PD-10–PD-18 | Product owner | 0.5 d | — | Signed Phase 1 decision record |
 | 2 | Review Phase 1 implementation and authorize the next phase | Product owner | — | #1 | Written go/no-go |
 | 3 | Add two real collector exports beside the canonical sample | Guild admin + dev | external | — | Import fixtures (closes E-04) |
-| 4 | Define the `Items` loader procedure and load a development dataset | Operator | 1–2 d | — | Populated `Items`, runbook |
+| 4 | Turn the loaded development `items` copy into a documented loader/freshness procedure and production `SELECT`-only grants (PD-19/PD-20 are approved and implemented) | Operator + dev | 0.5–1 d | — | Loader runbook, verified least-privilege access |
 | 5 | Close the audit taxonomy (E-09) and define the warning sink (E-14) | Dev + product | 0.5 d | #1 | Closed allowlist, warning field |
 | 6 | Resolve selection payload (E-15) and HTMX error semantics (E-16) | Dev + product | 0.5 d | #1 | API/UI contract for imports |
 | 7 | Decide when Settings become the authoritative MariaDB configuration (PD-18) | Product + dev | 0.5 d | #1 | Phase 3 entry condition |
 | 8 | Write ADRs for D-01–D-13, AM-01–AM-05, E-14–E-16 | Dev | 1 d | #1, #5, #6 | `Docs/decisions/` records |
 | 9 | Provision the target MariaDB and Unraid template | Operator + ops | 0.5 d | #4 | Deployment artifacts |
 
-**Immediate next three:** approve/reject PD-10–PD-18 (#1), review and authorize the next phase (#2), and add the two real exports (#3). Phase 2 will not start until the owner reviews this delivery.
+**Immediate next:** approve/reject PD-10–PD-18 (#1), review and authorize the
+next phase (#2), add the two real exports (#3), and close the loader/freshness
+and production-grant work under E-01 (#4). PD-19/PD-20 are approved and the
+scoped decoder/repository slice is implemented; broader Phase 2 work still
+requires the written go/no-go.
 
 ---
 
@@ -292,13 +341,18 @@ Before the next phase starts:
 
 - Review and approve/reject PD-10–PD-18.
 - Review the Phase 1 implementation and record a go/no-go.
-- Keep the two real collector exports and `Items` provisioning on the critical
-  path for imports/inventory; they are not Phase 1 prerequisites.
+- Add the two real collector exports; the development `items` copy now exists
+  but is not a substitute for the inventory fixtures required by imports.
+- PD-19/PD-20 are approved and implemented; close the remaining production
+  loader/freshness and `SELECT`-only grant requirements under E-01 before
+  inventory/import code depends on the source table.
 - For `ImplementationPlan` Phase 3 (MariaDB guild store, audit and settings
   adoption), resolve E-09/E-11/E-14/E-15 and decide PD-18.
 - `Design.md` v1.6.1 and the D-04 sample remain the published baseline.
 
-No Phase 2 work will start until the owner completes the review.
+The owner authorized only the PD-19/PD-20 decoder and repository slice. No
+broader Phase 2 work starts until the owner completes the review and records a
+written go/no-go.
 
 ---
 
@@ -324,6 +378,8 @@ No Phase 2 work will start until the owner completes the review.
 | 1.3 | 2026-11-21 | Phase 0 skeleton implemented: Go module, package layout, config, logging, SQLite/MariaDB layers, health endpoints, Docker/Compose, CI, tests; `ProjectStructure.md` added; ADRs, E-14/E-15/E-09 and real exports remain open |
 | 1.4 | 2026-11-21 | PD-05 approved as temporary MariaDB bootstrap configuration (Settings become authoritative after the Setup Wizard); `/config` named-volume persistence verified across container recreation |
 | 1.5 | 2026-11-21 | Phase 1 implemented: SQLite migrations (Users, Settings, Sessions), four-step setup, bcrypt administrator, login/logout, hashed server-side sessions, CSRF, login lockout, default-deny admin middleware, settings persistence/redaction and embedded screens; live Compose/MariaDB flow and restart verified; PD-10–PD-18 await approval |
+| 1.6 | 2026-11-21 | Development `items` copy loaded and profiled read-only (144,712 rows); DP-001 added; physical lowercase/column mapping and wide-mask handling registered as PD-19/PD-20; E-01 changed to partial |
+| 1.7 | 2026-11-21 | PD-19/PD-20 approved; added repository-independent `ClassMaskDecoder`/`RaceMaskDecoder`, `domain.Item`, read-only `mariadb.Store.GetItemByEQUID` mapping and fixture tests for 25210 and 10802; documented the scoped Phase 2 item-metadata slice |
 
 ---
 
@@ -333,4 +389,6 @@ The GuildBank specification is **buildable as written**. v1.6 closed the audit s
 
 The platform skeleton and the owner-approved Phase 1 identity/settings layer are implemented and validated: `go build`, `go vet`, `go test ./...`, SQLite migration/rollback tests, service security tests, API flow tests, live Compose app + MariaDB, four-step setup, login/logout, settings update, `410` setup closure, `401` after logout and restart persistence. Users, Settings and Sessions exist under `user_version=1`; passwords are bcrypt hashes and only session-token hashes are stored.
 
-No inventory, import, audit, user-management, dashboard or MariaDB business functionality exists. Phase 1 decisions PD-10–PD-18 require owner approval. PD-05 remains the runtime MariaDB bootstrap until Phase 3; the wizard persists those settings but does not yet swap the live pool. Phase 2 will not begin until the owner completes the Phase 1 review.
+No inventory, import, audit, user-management, dashboard or writable MariaDB business functionality exists. The read-only item metadata repository and mask decoders are the only Phase 2 slice implemented so far. Phase 1 decisions PD-10–PD-18 require owner approval. PD-05 remains the runtime MariaDB bootstrap until Phase 3; the wizard persists those settings but does not yet swap the live pool. Broader Phase 2 will not begin until the owner completes the Phase 1 review and records a written go/no-go.
+
+A development copy of the item metadata is now available as `GuildBank.items` (144,712 rows, read-only in use). The profile in DP-001 confirms both published decoding fixtures (`Blade of Carnage` and `Flayed Skin Cap`), even though the physical table is lowercase with `classes`/`races` text columns and contains 570 class / 628 race masks above the specified 16-bit range. PD-19 (repository mapping) and PD-20 (wide-mask policy) are approved and implemented; the E-14 warning destination and production `SELECT`-only grants remain open.

@@ -136,7 +136,8 @@ ImportList, Audit). It builds a DSN with `go-sql-driver/mysql` (UTF-8,
 lifetime, 5-minute idle timeout), and pings with a five-second bound. The
 password exists only in the driver configuration and is never logged.
 `Items` remains externally owned and read-only; this layer will only query the
-contract columns.
+contract columns. The development source is physically lowercase `items` with
+`classes`/`races` text masks; the repository will map those names under PD-19.
 
 ### `internal/api`
 
@@ -236,6 +237,16 @@ routes return `503 setup_required`.
 | PD-17 | `GUILDBANK_SECURE_COOKIES` (flag/env) explicitly enables `Secure`; no automatic `X-Forwarded-Proto` inference | Avoids trusting spoofable headers; operator must enable behind TLS. Public exposure without it needs approval | Proposed |
 | PD-18 | Wizard persists MariaDB settings but runtime pool still uses `GUILDBANK_MARIADB_*` until Phase 3 | Keeps Phase 1 free of MariaDB business wiring; the wizard requires a successful test before committing the admin (PD-05 remains runtime bootstrap) | Proposed |
 
+### 4.3 Pre-Phase 2 data-source decisions
+
+These decisions arise from the development `Items` copy and are separate from
+the Phase 1 approval set. Both were approved by the owner on 2026-11-21.
+
+| # | Decision | Rationale | Status |
+|---|---|---|---|
+| PD-19 | Map `GuildBank.items` physical columns `id`, `name`, `classes`, `races` to the logical `EQUID`, `Name`, `ClassList`, `RaceList` inside the read-only item repository; do not rename, alter or view-wrap the external table | The actual source is lowercase with different column names; one repository must isolate that contract (`Docs/ItemsDataProfile.md` §2) | **Approved 2026-11-21**; implemented in `internal/repository/mariadb/items.go` behind `domain.Item` |
+| PD-20 | Decode only defined low 16 bits; treat `65535` as `ALL`, `0` as blank, and preserve the row with a non-fatal warning for undefined high bits; do not reuse `MetadataMissingFg` | 570 class and 628 race values exceed the specified 16-bit masks; rejecting them would fail otherwise valid metadata, while silently dropping high bits needs explicit approval | **Approved 2026-11-21**; implemented by repository-independent `ClassMaskDecoder`/`RaceMaskDecoder`; E-14 sink remains open |
+
 ## 5. Scope boundaries
 
 Implemented: module, layout, configuration, logging, both connection layers,
@@ -264,7 +275,8 @@ requires `CGO_ENABLED=1` and a C toolchain.
 | `go vet ./...` | Pass, no findings |
 | `go test ./...` | Pass (config, logging, app, sqlite, mariadb, service, api, web) |
 | Migration tests | Fresh DB reaches `user_version=1`; tables/seeds present; rerun idempotent; newer schema refused; failed setup transaction rolls back |
-| Service tests | bcrypt round trip/policy, setup atomicity, DB-failure no-write, login parity, fifth-failure `429`, idle expiry, disabled revocation, logout/revoke-all, settings validation |
+| Service tests | bcrypt round trip/policy, setup atomicity, DB-failure no-write, login parity, fifth-failure `429`, idle expiry, disabled revocation, logout/revoke-all, settings validation, class/race decoder fixtures and undefined-high-bit warnings |
+| Repository mapping tests | `items.id/name/classes/races` → `EQUID/Name/ClassList/RaceList`, blank masks → 0, malformed masks rejected, missing row → `domain.ErrNotFound` |
 | API tests | Setup wizard and 410 closure, CSRF 403, default-deny 401/redirect, cookie flags, raw token absent from SQLite, secret redaction, settings persistence |
 | Runtime `/healthz` | `200` |
 | Runtime `/readyz` before setup | `503` with sqlite `ok`, setup `pending`, mariadb `ok` |
@@ -276,6 +288,7 @@ requires `CGO_ENABLED=1` and a C toolchain.
 | SQLite state (copied from volume with WAL) | `user_version=1`; `Users`, `Settings`, `Sessions`; session `TokenHash` length 64; raw cookie absent |
 | Unknown route | `404` JSON envelope with request ID |
 | Docker/Compose | Image built; app and MariaDB healthy; restart retained administrator/settings and returned ready `200` |
+| Development `Items` profile (read-only) | `GuildBank.items`: 144,712 rows, 144,712 distinct `id`; both published fixtures (`Blade of Carnage`, `Flayed Skin Cap`) decode as specified; 570/628 masks exceed 16 bits and now produce non-fatal warnings under approved PD-20 |
 
 ## 7. Build and run
 
