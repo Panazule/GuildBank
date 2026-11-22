@@ -1,8 +1,8 @@
 # Phase 4 Implementation Plan — Public Inventory Read Path
 
-**Status:** **PROPOSED FOR REVIEW — NOT APPROVED. NO PHASE 4 CODE HAS BEEN IMPLEMENTED.**
+**Status:** **APPROVED AND IMPLEMENTED.** PD4-01–PD4-17 approved by the owner on 2026-11-21 subject to the documented performance, indexing and validation conditions. Phase 4 implementation was authorized and completed on 2026-11-22 UTC. Evidence is in `Docs/Phase4Validation.md`; Phase 5 remains unauthorized.
 **Date:** 2026-11-21
-**Revision:** 1.0 — initial plan submitted for owner review; no implementation
+**Revision:** 1.1 — approval record and implementation status added; no contract changes from revision 1.0
 **Scope owner:** single developer
 **Implementation-plan mapping:** this is the user's "Phase 4" (public inventory read path). It corresponds to `Docs/ImplementationPlan.md` Phase 4 and depends on the approved Phase 3 import pipeline and the implemented `GuildBankItems` schema.
 **Companion documents:** `Design.md` v1.6.1, `Docs/ArchitectureReview.md`, `Docs/DatabaseDesign.md`, `Docs/ImplementationPlan.md`, `Docs/ProjectStatus.md`, `Docs/ProjectStructure.md`, `Docs/Phase3ImplementationPlan.md`.
@@ -1059,4 +1059,5 @@ If any item is changed, list it by PD4 ID. Do not begin implementation on an imp
 
 This document is a **plan only**. It does not modify code, schema, runtime configuration or the approved Phase 3 baseline. It creates no Phase 4 route, migration, template or test. The intent is to obtain a reviewed, explicit decision set so that implementation can proceed as one vertical slice without inventing public behavior while coding.
 
-**Current status: awaiting review. Phase 4 implementation has not started. Phase 5 is not authorized.**
+**Current status: approved, implemented and live-validated on 2026-11-22 UTC.
+Phase 5 is not authorized.**

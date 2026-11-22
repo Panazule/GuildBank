@@ -5,10 +5,10 @@
 | Document ID | DD-001 |
 | Source specification | `Design.md` v1.6.1 (authoritative; body L1–L854, decisions L855–L1161, amendments AM-01–AM-05 at L1163–L1263, informational status at L1265–L1274) |
 | Review date | 2026-11-20 |
-| Revision | 1.3 — 2026-11-21, implementation status aligned with PD-10–PD-20, PD3-01–PD3-14 and migration `0001_guild_store` |
-| Companion documents | `ArchitectureReview.md`, `ImplementationPlan.md`, `ProjectStatus.md`, `Phase3ImplementationPlan.md` |
+| Revision | 1.4 — 2026-11-22, implementation status aligned with PD4-01–PD4-17 and migration `0002_public_inventory_indexes` |
+| Companion documents | `ArchitectureReview.md`, `ImplementationPlan.md`, `ProjectStatus.md`, `Phase3ImplementationPlan.md`, `Phase4ImplementationPlan.md`, `Phase4Validation.md` |
 | Scope | Logical and physical schema for the SQLite application store and the MariaDB guild store |
-| Implementation status | SQLite §§3.1–3.3 and MariaDB §§4.1–4.5 are implemented for Phases 1–3; §3.4 `AuditOutbox` and the general audit UI remain later-phase work |
+| Implementation status | SQLite §§3.1–3.3 and MariaDB §§4.1–4.5 are implemented for Phases 1–4; migrations `0001_guild_store` and `0002_public_inventory_indexes` are applied; §3.4 `AuditOutbox` and the general audit UI remain later-phase work |
 
 This document is an implementation-ready data design derived from `Design.md`. Columns marked **SPEC** are mandated by the specification; columns marked **SPEC-V1.6** are mandated by decisions D-01–D-13; columns marked **SPEC-V1.6.1** are mandated by amendments AM-01–AM-05. Columns, tables, constraints and indexes marked **PROPOSED** are engineering additions required to make the specification implementable; each is cross-referenced to a finding in `ArchitectureReview.md`. The additions used by Phases 1–3 were approved through PD-10–PD-20 and PD3-01–PD3-14 and are implemented in the migrations; remaining proposals such as `AuditOutbox` await a later phase. v1.6.1 resolves the two conflicts this design previously recorded (the `-1` sentinel and the sample path), so the physical model now conforms to the specification without a blocking deviation.
 
@@ -281,6 +281,11 @@ CREATE TABLE GuildBankItems (
     KEY ix_gbi_name_sort (DeletedFg, NameSort),
     KEY ix_gbi_dates     (DeletedFg, DateBazaar, DateOpen),
     KEY ix_gbi_given     (GivenTo),
+    -- Added by approved index-only migration 0002_public_inventory_indexes.
+    KEY ix_gbi_public_type_name_sort (DeletedFg, ItemType, NameSort, GuildBankItemID),
+    KEY ix_gbi_public_added (DeletedFg, DateAdded, GuildBankItemID),
+    KEY ix_gbi_public_open  (DeletedFg, DateOpen, GuildBankItemID),
+    KEY ix_gbi_public_bazaar (DeletedFg, DateBazaar, GuildBankItemID),
     CONSTRAINT ck_gbi_quantity  CHECK (Quantity >= 1),
     CONSTRAINT ck_gbi_item_one  CHECK (ItemType = 'Spell' OR Quantity = 1),
     CONSTRAINT ck_gbi_deleted   CHECK (DeletedFg IN (0,1)),
@@ -298,7 +303,8 @@ CREATE TABLE GuildBankItems (
 - `DateOpen`/`DateBazaar` are computed at insert time from settings (L314–L330). The CHECKs prevent inverted windows but cannot detect later settings changes (DC-06).
 - The physical FK to `Items` is intentionally **not enforced** (AM-01). An unresolved `EQUID` is by definition absent from `Items` at import time, so a foreign key would reject exactly the rows D-08 requires. `EQUID` still denotes the collector's item identifier (D-01), is never rewritten, and is validated in the service whenever the referenced `Items` row becomes available. `MetadataMissingFg = 1` marks the unresolved state and `ix_gbi_equid` keeps lookups cheap. An index is not a constraint, so the identifier remains the single key with no sentinel or shadow column. `Name` is copied at insert (L281–L283), so an `Items` rename never rewrites inventory (intended by L296/L309/L321).
 - No `ON DELETE` path exists: the runtime user has no `DELETE` grant (principle 2). Soft delete is the only removal.
-- `NameSort` is a zero-padded, case-folded natural sort key maintained by the service (IC-11). It is nullable only so the migration can backfill; production writes always set it.
+- `NameSort` is a zero-padded, case-folded natural sort key maintained by the service (IC-11). It is nullable only so the migration can backfill; production writes always set it. Public reads use the `NameSort` index; the nulls-last expression is applied only when a filtered snapshot actually contains null keys.
+- `0002_public_inventory_indexes` is index-only: it adds `ix_gbi_public_type_name_sort`, `ix_gbi_public_added`, `ix_gbi_public_open` and `ix_gbi_public_bazaar` and retains all prior indexes. `EXPLAIN` and 250k/1M performance evidence are in `Phase4Validation.md`. Class/race membership (`FIND_IN_SET`) and leading-wildcard name search remain scan predicates.
 
 ### 4.3 `ImportBatch`
 

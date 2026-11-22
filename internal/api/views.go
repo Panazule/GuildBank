@@ -70,8 +70,35 @@ type settingsPageData struct {
 	Form     map[string]string
 }
 
-type homePageData struct {
+type inventoryListPageData struct {
 	pageData
+	Ready           bool
+	Items           []inventoryItemView
+	Filter          inventoryFilterView
+	ClassOptions    []inventorySelectOption
+	RaceOptions     []inventorySelectOption
+	ItemTypeOptions []inventorySelectOption
+	SortOptions     []inventorySortOption
+	Total           int
+	Page            int
+	PageSize        int
+	TotalPages      int
+	HasFilters      bool
+	EmptyInventory  bool
+	EmptyFiltered   bool
+	BeyondLast      bool
+	ClearFiltersURL string
+	PrevURL         string
+	NextURL         string
+	FirstURL        string
+	LastURL         string
+	LastPageURL     string
+	PageLinks       []inventoryPageLink
+}
+
+type inventoryDetailPageData struct {
+	pageData
+	Item inventoryItemView
 }
 
 type errorPageData struct {
@@ -119,8 +146,12 @@ func (v *views) settings(c *gin.Context, status int, data settingsPageData) {
 	v.render(c, status, "settings.html", data)
 }
 
-func (v *views) home(c *gin.Context, data homePageData) {
-	v.render(c, http.StatusOK, "home.html", data)
+func (v *views) inventoryList(c *gin.Context, status int, data inventoryListPageData) {
+	v.render(c, status, "inventory_list.html", data)
+}
+
+func (v *views) inventoryDetail(c *gin.Context, status int, data inventoryDetailPageData) {
+	v.render(c, status, "inventory_detail.html", data)
 }
 
 func (v *views) errorPage(c *gin.Context, status int, message string) {

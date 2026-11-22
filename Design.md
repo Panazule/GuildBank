@@ -1271,4 +1271,6 @@ This section records delivery status only; it does not modify the normative spec
 - Phase 3 (import upload, staging, selection and atomic commit) is approved and implemented. PD3-01 through PD3-14 and all six Phase 3 plan defaults are approved. The authenticated Compose workflow (setup/login, canonical 548-line sample, subset commit, spell merge and audit) passed on 2026-11-22 UTC; see `Docs/ProjectStatus.md` §1.5.1.
 - PD-10 through PD-20 are approved. PD-19 and PD-20 are implemented.
 - The development GuildBank.items table was imported and validated with 144,712 rows; the approved Hoard normalization (AM-04) is implemented, including every Hoard<n> variant collapsing to Hoard.
-- Phase 4 has not started.
+- Phase 4 (public inventory list, detail, search/filter/sort, pagination, UTC availability and `/api/v1/items`) is approved and implemented. PD4-01 through PD4-17 are approved with UTC day boundaries; `DateAdded` and `metadataMissing` are public fields. The 250,000-row design and 1,000,000-row stress performance gates and the live Compose public/restart/outage/recovery checks passed on 2026-11-22 UTC; see `Docs/Phase4Validation.md` and `Docs/PublicInventoryAPI.md`.
+- Phase 5 has not started. When authorized, Phase 5 must validate `DateOpen <= DateBazaar` for all new writes.
+- A future GuildTimezone setting may supersede the current UTC date behavior in a later phase.

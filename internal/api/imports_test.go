@@ -228,7 +228,8 @@ func newImportHarness(t *testing.T, store *fakeImportStore) *harness {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	router, err := NewRouter(Deps{
 		Logger: logger, Health: fakeHealth{result: service.Readiness{Ready: true}},
-		Setup: setup, Auth: auth, Settings: settings, Imports: imports, Version: "test",
+		Setup: setup, Auth: auth, Settings: settings, Imports: imports,
+		Inventory: service.NewInventoryService(nil, settings, nil, nil), Version: "test",
 	})
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)

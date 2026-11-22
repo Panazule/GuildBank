@@ -43,13 +43,14 @@ func newTestRouter(t *testing.T, result service.Readiness) *gin.Engine {
 	t.Helper()
 	setup, auth, settings := newTestServices(t)
 	r, err := NewRouter(Deps{
-		Logger:   slog.New(slog.NewJSONHandler(&strings.Builder{}, nil)),
-		Health:   fakeHealth{result: result},
-		Setup:    &setup,
-		Auth:     auth,
-		Settings: settings,
-		Imports:  service.NewImportService(nil, nil, settings, nil, nil),
-		Version:  "test",
+		Logger:    slog.New(slog.NewJSONHandler(&strings.Builder{}, nil)),
+		Health:    fakeHealth{result: result},
+		Setup:     &setup,
+		Auth:      auth,
+		Settings:  settings,
+		Imports:   service.NewImportService(nil, nil, settings, nil, nil),
+		Inventory: service.NewInventoryService(nil, settings, nil, nil),
+		Version:   "test",
 	})
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)

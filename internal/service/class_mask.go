@@ -1,5 +1,7 @@
 package service
 
+import "strings"
+
 // classMaskLabels is ordered by bit value so decoded strings follow the
 // specification's stable order (Design.md L423-L453).
 var classMaskLabels = [...]string{
@@ -26,6 +28,24 @@ var classMaskLabels = [...]string{
 // no repository dependency and can be reused by import and inventory
 // workflows.
 type ClassMaskDecoder struct{}
+
+// ClassValues returns a copy of the canonical class abbreviations in decoder
+// order. Inventory filter validation and UI select lists share this source.
+func ClassValues() []string {
+	return append([]string(nil), classMaskLabels[:]...)
+}
+
+// CanonicalClass maps a case-insensitive class abbreviation to its canonical
+// uppercase form. The blank string and ALL are handled by the caller as
+// "no predicate"; this function accepts only the sixteen defined classes.
+func CanonicalClass(value string) (string, bool) {
+	for _, label := range classMaskLabels {
+		if strings.EqualFold(value, label) {
+			return label, true
+		}
+	}
+	return "", false
+}
 
 // NewClassMaskDecoder builds the class-mask decoder.
 func NewClassMaskDecoder() *ClassMaskDecoder {

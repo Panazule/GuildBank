@@ -34,7 +34,7 @@ func TestNoRepositoryImports(t *testing.T) {
 }
 
 func TestEmbeddedAssetsExist(t *testing.T) {
-	for _, name := range []string{"templates/setup.html", "templates/login.html", "templates/settings.html", "templates/home.html", "templates/error.html"} {
+	for _, name := range []string{"templates/setup.html", "templates/login.html", "templates/settings.html", "templates/inventory_list.html", "templates/inventory_detail.html", "templates/error.html"} {
 		if _, err := Templates.ReadFile(name); err != nil {
 			t.Fatalf("template %s not embedded: %v", name, err)
 		}

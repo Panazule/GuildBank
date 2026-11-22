@@ -7,7 +7,8 @@ specification is [`Design.md`](Design.md) v1.6.1; delivery is tracked in
 
 **Current scope: Phase 0 approved; Phase 1 approved and complete; Phase 2
 item-metadata integration approved and complete; Phase 3 import pipeline
-approved, complete and live-validated.**
+approved, complete and live-validated; Phase 4 public inventory read path
+approved, complete and live-validated. Phase 5 is not started.**
 The process builds, starts, migrates SQLite and MariaDB, serves the four-step
 setup wizard, creates a bcrypt-hashed administrator, issues server-side
 sessions, enforces CSRF and default-deny admin routes, rate-limits login and
@@ -18,11 +19,14 @@ and validated with 144,712 rows; PD-10 through PD-20 are approved. Phase 3 adds
 the admin import pipeline: upload, parsing, normalized staging, selection and
 atomic commit into `GuildBankItems`, with import-scoped audit writes and the
 `/admin/imports` screens. PD3-01 through PD3-14 and all six Phase 3 plan
-defaults are approved. The authenticated Compose upload → selection → commit
-workflow has passed, including durable staging, warnings, inventory, spell
-merges and audit records (`Docs/ProjectStatus.md` §1.5.1). Public/manual
-inventory, the general audit UI/outbox and user management remain later phases;
-Phase 4 has not started.
+defaults are approved. Phase 4 adds the anonymous inventory list, item detail
+and `/api/v1/items` API with name search, class/race/type filters, natural/date
+sorts, deterministic pagination, UTC availability states and EQResource links.
+The authenticated Compose upload → selection → commit workflow and the public
+list/detail/API, restart, outage and recovery paths have passed
+(`Docs/Phase4Validation.md`). Manual inventory administration, the general
+audit UI/outbox and user management remain later phases; Phase 5 has not
+started.
 
 ## Requirements
 
@@ -116,6 +120,10 @@ settings takes effect after a restart (PD-05/PD-18 remain in force).
 | GET | `/setup` | Four-step wizard while no administrator exists; `410` afterwards |
 | POST | `/setup/admin`, `/setup/guild`, `/setup/database/test` | Validate a wizard step; no persistence except the connection test's transient probe |
 | POST | `/setup/complete` | Atomically create the administrator and settings, then start a session |
+| GET | `/` | Public inventory list; search, class/race/type filters, sort and pagination |
+| GET | `/inventory/:id` | Public item detail for one active `GuildBankItemID`; absent/deleted `404` |
+| GET | `/api/v1/items` | Public paginated inventory JSON with the same filters and sort contract |
+| GET | `/api/v1/items/:id` | Public item-detail JSON; absent/deleted `404` |
 | GET | `/login` | Login page (redirects to setup while setup is pending) |
 | POST | `/api/v1/auth/login` | Verify credentials, set the session cookie, return JSON or redirect for HTML |
 | POST | `/api/v1/auth/logout` | Revoke the session; requires authentication and CSRF |
@@ -161,18 +169,25 @@ topology with a live MariaDB 11.4 instance.
 Phase 3 adds the parser golden test for the 548-line sample, natural-sort and
 `LocationGroup` normalization tests, commit-plan expansion/merge tests, and
 handler tests for multipart CSRF, upload, selection and rendered import pages.
-The guild migration has been applied against the Compose MariaDB 11.4 instance
-and the app starts healthy with the new schema. The authenticated live workflow
-was also executed: setup and login, the canonical sample (548 physical lines,
-197 accepted and 348 discarded rows, 30 groups with one `Hoard`, 723 item units,
-3 spell units), a persisted 8-group subset commit and a second batch that merged
-spells; see `Docs/ProjectStatus.md` §1.5.1.
+Phase 4 adds filter/availability/EQResource unit tests, repository predicate and
+allowlist tests, public JSON/HTML contract tests, forbidden-field and XSS tests,
+and the live Compose public list/detail/restart/outage/recovery checks. Phase 3
+and Phase 4 workflows have been executed against Compose MariaDB 11.4; see
+`Docs/ProjectStatus.md` §1.5.1 and `Docs/Phase4Validation.md`.
 
 The full Items metadata test is opt-in because it requires the provisioned
 144,712-row source. Set `GUILDBANK_INTEGRATION=1` and the
 `GUILDBANK_TEST_MARIADB_HOST`, `_PORT`, `_DATABASE`, `_USERNAME` and `_PASSWORD`
 values, then run `go test ./internal/integration -run ItemMetadataIntegration -v`.
 Normal `go test ./...` skips it. The test is read-only.
+
+The Phase 4 inventory benchmark is also opt-in and refuses to run unless the
+database is the disposable `GuildBankPhase4Perf` schema. Provision that schema,
+set `GUILDBANK_PHASE4_PERF=1` plus the same `GUILDBANK_TEST_MARIADB_*` values,
+then run `go test ./internal/integration -run Phase4PublicInventoryPerformance -v`.
+Set `GUILDBANK_PHASE4_PERF_ROWS=1000000` for the stress run; the default is
+250,000 active rows plus 10% deleted noise. Results are recorded in
+`Docs/Phase4Validation.md`.
 
 Layer boundaries are enforced by tests: `internal/api` and `internal/web`
 fail the build if they import `internal/repository`.

@@ -5,7 +5,7 @@
 | Document ID | PS-002 |
 | As-of date | 2026-11-21 |
 | Source specification | `Design.md` v1.6.1 |
-| Scope | Phases 0–2 approved; Phase 3 approved, implemented and live-validated: identity/settings, item-metadata integration and import pipeline (no public/manual inventory, general audit UI or user management) |
+| Scope | Phases 0–4 approved; Phase 1 identity/settings, Phase 2 item metadata, Phase 3 import pipeline and Phase 4 public inventory read path implemented (no manual inventory, general audit UI or user management) |
 | Related | `Docs/ProjectStatus.md`, `Docs/ImplementationPlan.md` §Phase 1, `README.md` |
 
 This document maps every generated directory and major file to its
@@ -23,7 +23,8 @@ GuildBank/
 │   │   ├── setup.go              D-02 setup state
 │   │   ├── identity.go           User/session/setting models, sentinel and validation errors
 │   │   ├── item.go               Logical Item and ItemReference contracts
-│   │   └── import.go             Import batch/row/location/warning/commit contracts
+│   │   ├── import.go             Import batch/row/location/warning/commit contracts
+│   │   └── inventory.go          Public inventory sort/filter/projection/page contracts
 │   ├── service/
 │   │   ├── health.go             Readiness aggregation over injected interfaces
 │   │   ├── mask.go               Shared mask decoding and structured warnings
@@ -42,9 +43,11 @@ GuildBank/
 │   │   ├── import_commit.go      Selection, summary and atomic commit planning
 │   │   ├── import_service.go     Import service wiring, reads and lifecycle
 │   │   ├── import_warning.go     Structured warning encoding for WarningText
+│   │   ├── inventory.go          Public filter validation, UTC availability, EQResource URL, mapping
 │   │   └── *_test.go
 │   ├── integration/
-│   │   └── items_test.go        Opt-in full-source Items metadata test
+│   │   ├── items_test.go        Opt-in full-source Items metadata test
+│   │   └── inventory_perf_test.go Opt-in 250k/1M public-inventory performance test
 │   ├── repository/
 │   │   ├── sqlite/
 │   │   │   ├── store.go          Open/pragmas/setup probe/checkpoint
@@ -58,10 +61,11 @@ GuildBank/
 │   │   └── mariadb/
 │   │       ├── store.go          MariaDB pool, bounded ping and connection test
 │   │       ├── migrate.go        Embedded guild-store migration runner (GET_LOCK)
-│   │       ├── migrations/       0001_guild_store.sql (imports, inventory, audit)
+│   │       ├── migrations/       0001_guild_store.sql and 0002_public_inventory_indexes.sql
 │   │       ├── items.go          Read-only physical→logical Items repository
 │   │       ├── imports.go        Batch/row/location/selection reads and staging
 │   │       ├── imports_commit.go Advisory-locked atomic import commit and audit
+│   │       ├── inventory.go      Explicit public inventory projection/count/page/detail
 │   │       ├── errors.go         MariaDB error classification
 │   │       └── *_test.go
 │   ├── api/
@@ -70,6 +74,7 @@ GuildBank/
 │   │   ├── setup.go              Setup page and step handlers
 │   │   ├── settings.go           Settings page and REST handlers
 │   │   ├── imports.go            Import upload, review, selection and commit handlers
+│   │   ├── inventory.go          Public list/detail HTML and JSON handlers, DTO/view models
 │   │   ├── views.go              Embedded template rendering
 │   │   ├── ui.go                 Shared HTML page helpers
 │   │   ├── csrf.go               Signed double-submit CSRF
@@ -82,7 +87,7 @@ GuildBank/
 │   ├── web/
 │   │   ├── embed.go              Embedded template/static filesystems
 │   │   ├── embed_test.go         Import guard + embed checks
-│   │   ├── templates/            setup, login, settings, imports, import_detail, home, error, partials
+│   │   ├── templates/            setup, login, settings, imports, import_detail, inventory_list, inventory_detail, error, partials
 │   │   └── static/               app.css, setup.js and imports.js
 │   └── platform/
 │       ├── config/
@@ -171,11 +176,14 @@ write method. Production grants must still enforce `SELECT` only (E-01).
 
 `migrate.go` applies embedded forward-only migrations under a per-database
 `GET_LOCK` and records them in `schema_migrations`; `0001_guild_store.sql`
-creates `ImportBatch`, `ImportList`, `GuildBankItems` and `Audit`.
-`imports.go` owns durable batch/staging writes, paged review reads and
-full-replacement selection. `imports_commit.go` owns the advisory-locked atomic
-commit, item-unit expansion, spell merge into the lowest active target and
-transactional import audit. `errors.go` classifies deadlocks and unavailable
+creates `ImportBatch`, `ImportList`, `GuildBankItems` and `Audit`, and
+`0002_public_inventory_indexes.sql` adds the four approved public order indexes
+without changing columns or data. `imports.go` owns durable batch/staging writes,
+paged review reads and full-replacement selection. `imports_commit.go` owns the
+advisory-locked atomic commit, item-unit expansion, spell merge into the lowest
+active target and transactional import audit. `inventory.go` owns the explicit
+public projection, active count/page snapshot and active-only detail; it has no
+write method. `errors.go` classifies deadlocks and unavailable
 store errors for the service layer.
 
 ### `internal/api`
@@ -190,17 +198,25 @@ is a thin HTML adapter for PUT. Phase 3 adds the admin-only import routes for
 upload, history, detail, locations, rows, row IDs, selection, summary and commit.
 The multipart upload uses the path-aware body limit and multipart CSRF support;
 `imports.go` maps parse, selection, terminal-state, duplicate-commit and
-unavailable-store errors to `409`/`413`/`422`/`503`.
+unavailable-store errors to `409`/`413`/`422`/`503`. Phase 4 adds the public
+inventory group: `/`, `/inventory/:id`, `/api/v1/items` and
+`/api/v1/items/:id` are registered after the setup gate without `RequireAuth`.
+`inventory.go` owns query parsing, explicit JSON DTOs, HTML view models,
+pagination/sort link rebuilding, a five-second read deadline and 404/422/503
+mapping. Authentication may change only navigation; it never changes the item
+payload.
 
 ### `internal/web`
 
 Server-side rendering assets, embedded with `embed.FS` so the container needs
-no asset files on disk. Phase 1 adds setup, login, settings, home and error
-templates plus `app.css` and a small vanilla setup script. Phase 3 adds the
-import history/upload page, the batch review page (location filter available in
+no asset files on disk. Phase 1 adds setup, login, settings and error templates
+plus `app.css` and a small vanilla setup script. Phase 3 adds the import
+history/upload page, the batch review page (location filter available in
 read-only terminator states), and `imports.js` for upload state, paged rows,
-location toggles, debounced selection saves and commit. No CDN is used.
-Bootstrap/HTMX adoption for later inventory screens remains a recorded decision
+location toggles, debounced selection saves and commit. Phase 4 replaces the
+placeholder home page with the public inventory list and adds the item-detail
+template; both are full-page, JavaScript-free renders with the same embedded
+CSS. No CDN is used. Bootstrap/HTMX adoption remains a recorded decision
 (PD-12); the import UI deliberately uses vanilla `fetch` (PD3-09).
 
 ### `internal/platform/config`
@@ -343,9 +359,16 @@ embedded `0001_guild_store.sql`, `api/imports.go`, the import templates,
 `ImportList`, `GuildBankItems` and import-scoped `Audit` rows, and is implemented
 and live-migrated in Compose.
 
+Phase 4 adds `domain/inventory.go`, `service/inventory.go`,
+`repository/mariadb/inventory.go`, `api/inventory.go`, the two public templates,
+`0002_public_inventory_indexes.sql`, the opt-in 250k/1M performance test and
+public contract/security tests. It exposes active `GuildBankItems` records
+anonymously without changing the Phase 3 write model.
+
 Deliberately absent: user management, general audit/outbox, manual inventory
-CRUD, dashboard, public inventory UI, HTTP item-metadata routes, and
-Settings-backed MariaDB pool adoption.
+CRUD, admin inventory grid/DTO, dashboard, location/availability filtering,
+HTTP item-metadata routes, in-app anonymous rate limiting, Phase 5 date-window
+write validation, and Settings-backed MariaDB pool adoption.
 
 Remaining limitations: if MariaDB is configured but unreachable at startup,
 `/readyz` keeps reporting the startup error until the process is restarted;
@@ -371,9 +394,13 @@ toolchain.
 | Item metadata tests | Found EQUIDs use source `Name` and decoded strings; absent EQUIDs preserve imported name, blank class/race, set `MetadataMissing`, and emit one `metadata_missing` warning; batch order, validation, source errors and warning propagation covered |
 | Repository mapping tests | `items.id/name/classes/races` → `EQUID/Name/ClassList/RaceList`, blank masks → 0, malformed masks rejected, missing row → `domain.ErrNotFound` |
 | Repository batch/page tests | Duplicate EQUIDs collapsed; invalid page sizes rejected; repository source contains no write statement |
-| API tests | Setup wizard and 410 closure, CSRF 403, default-deny 401/redirect, cookie flags, raw token absent from SQLite, secret redaction, settings persistence; import multipart CSRF, upload, selection, `LocationGroup` locations and rendered pages |
+| API tests | Setup wizard and 410 closure, CSRF 403, default-deny 401/redirect, cookie flags, raw token absent from SQLite, secret redaction, settings persistence; import multipart CSRF, upload, selection, `LocationGroup` locations and rendered pages; public JSON/HTML contracts, anonymous/auth projection parity, forbidden-field absence, XSS escaping, 404/405/422/503 and invalid-cookie handling |
+| Public inventory tests | Filter normalization, 128-rune search boundary, UTC availability boundaries/inverted windows, EQResource validation, pagination math, repository predicate/order allowlists, explicit projection and no `SELECT *` |
+| Public performance gates | 250k active + 25k deleted and 1M active + 100k deleted disposable MariaDB runs; all list/detail p95 gates passed; natural order `1, 2, 10, 11`; EXPLAIN captured. See `Phase4Validation.md` |
+| Guild migration (live Compose) | Rebuilt image; startup logged `guild store schema ready schema_version=0002_public_inventory_indexes`; all five guild-store tables, the new public indexes and both version rows exist; `/healthz` healthy |
+| Public live paths | Anonymous `/` and `/api/v1/items` `200`; search/class/race/type counts, natural/reverse sorts, page metadata, detail/list parity and EQResource attributes verified; invalid `422`, absent `404`; restart preserved 706 records |
+| Public outage/recovery | MariaDB stop: item API `503 dependency_unavailable`, `/readyz` `503`; MariaDB start: `/readyz` and item API `200` |
 | Import parser/commit tests | Golden sample 548/197/348/2/1, 30 groups with one `Hoard`, 723 item units and 3 spells; natural sort and normalization cases; item expansion, spell aggregation, lowest active target, missing metadata and warning cap |
-| Guild migration (live Compose) | Rebuilt image; startup logged `guild store schema ready schema_version=0001_guild_store`; all five guild-store tables and the version row exist; `/healthz` healthy |
 | Runtime `/healthz` | `200` |
 | Runtime `/readyz` before setup | `503` with sqlite `ok`, setup `pending`, mariadb `ok` |
 | Runtime `/readyz` after setup | `200` with sqlite/setup/mariadb all `ok` |

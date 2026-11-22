@@ -3,11 +3,11 @@
 | Field | Value |
 |---|---|
 | Document ID | PS-001 |
-| As-of date | 2026-11-21 |
+| As-of date | 2026-11-22 |
 | Source specification | `Design.md` v1.6.1 (1,274 lines: body L1–L854, decisions D-01–D-13 at L855–L1161, amendments AM-01–AM-05 at L1163–L1263, informational implementation status at L1265–L1274) |
-| Repository state | Phase 1 identity/settings layer, Phase 2 item-metadata integration and Phase 3 import pipeline. Import batches, normalized staging, selection and atomic inventory commit are implemented; public inventory browsing, inventory administration and the general audit UI remain later phases |
-| Documents issued | `ArchitectureReview.md` (AR-001), `DatabaseDesign.md` (DD-001), `ImplementationPlan.md` (IP-001), `ProjectStructure.md` (PS-002), `ItemsDataProfile.md` (DP-001), `Phase3ImplementationPlan.md`, this status report |
-| Overall status | **v1.6.1 published; Phases 0–2 approved and complete; Phase 3 approved, implemented and live-validated; Phase 4 is not started** |
+| Repository state | Phase 1 identity/settings layer, Phase 2 item-metadata integration, Phase 3 import pipeline and Phase 4 public inventory read path. Public browsing, item detail and the public API are implemented; inventory administration, the general audit UI and user management remain later phases |
+| Documents issued | `ArchitectureReview.md` (AR-001), `DatabaseDesign.md` (DD-001), `ImplementationPlan.md` (IP-001), `ProjectStructure.md` (PS-002), `ItemsDataProfile.md` (DP-001), `Phase3ImplementationPlan.md`, `Phase4ImplementationPlan.md`, `Phase4Validation.md`, `PublicInventoryAPI.md`, this status report |
+| Overall status | **v1.6.1 published; Phases 0–2 approved and complete; Phase 3 approved, implemented and live-validated; Phase 4 approved, implemented and live-validated; Phase 5 is not started** |
 
 ---
 
@@ -17,9 +17,9 @@
 |---|---|---|
 | Requirements | Written; v1.6.1 amendments appended; canonical import sample at its declared path | `Design.md` v1.6.1 |
 | Architecture review | Complete, revised | AR-001 rev 1.3: 22 missing requirements, 25 conflicts, 22 security risks, 28 implementation concerns, D-01–D-13 and AM-01–AM-05 adopted, E-01–E-16 registered, Phase 3 dispositions recorded |
-| Data design | Complete and approved for the implemented scope | DD-001: DDL for 4 SQLite tables (`AuditOutbox` remains a later-phase addition), 5 MariaDB tables (`Audit` specified by D-10, `MetadataMissingFg` by AM-02); the guild-store tables match migration `0001_guild_store` |
+| Data design | Complete and approved for the implemented scope | DD-001: DDL for 4 SQLite tables (`AuditOutbox` remains a later-phase addition), 5 MariaDB tables (`Audit` specified by D-10, `MetadataMissingFg` by AM-02); the guild-store tables match migrations `0001_guild_store` and the index-only `0002_public_inventory_indexes` |
 | Delivery plan | Complete | IP-001: 9 phases, estimates, test and deployment strategy |
-| Source code | Phase 1, Phase 2 and Phase 3 are present | `cmd/guildbank`, `internal/{domain,service,repository,api,web,platform}`; setup, auth, sessions, settings, read-only item metadata, import parser/staging/selection/commit, MariaDB migrations and import UI/API |
+| Source code | Phase 1, Phase 2, Phase 3 and Phase 4 are present | `cmd/guildbank`, `internal/{domain,service,repository,api,web,platform}`; setup, auth, sessions, settings, read-only item metadata, import parser/staging/selection/commit, public inventory list/detail/API, MariaDB migrations and import/public UI |
 | Build/CI | Complete for the current scope | `go.mod`/`go.sum` (Go 1.27.3), `Makefile`, `.github/workflows/ci.yml`, `Dockerfile`, `docker-compose.yml` |
 | Environments | Development topology defined; item metadata provisioned | Compose app + MariaDB 11.4; 144,712-row read-only `items` copy in `GuildBank`; disposable credentials; no production environment |
 | Test assets | Canonical import sample, development item metadata plus Phase 0/1/2/3 tests | `Docs/Samples/InventoryExport-Sample.txt` (548 physical lines); `GuildBank.items` profile in DP-001; tests for config, logging, app, sqlite migrations/repositories, mariadb item mapping/batch/page reads, mask decoders, metadata resolution, parser/natural sort/location normalization, commit planning, multipart CSRF and import handlers; opt-in full-table Items test |
@@ -32,7 +32,7 @@
 |---|---|---|---|
 | Setup wizard | Partial — gate/order implemented; recovery undefined | **Implemented** for the four-step flow | E-02 offline recovery |
 | Authentication/sessions | Defined — lifecycle approved as PD-15 | **Implemented** (login/logout, hashed sessions, expiry, CSRF, lockout) | — |
-| Public inventory browsing | Defined | Not started | E-10, E-12 |
+| Public inventory browsing | Defined; PD4-01–PD4-17 approved | **Implemented** — public list/detail/API, search, class/race/type filters, eight sorts, pagination, UTC availability, EQResource links and public DTO | Proxy-level anonymous rate limiting remains operational; no in-app limiter |
 | Class/race decoding | Defined with permanent fixtures; PD-19/PD-20 approved | **Implemented** repository-independent decoders plus service metadata generation; import warnings persist to `ImportList.WarningText` | — |
 | Inventory administration | Partial — dev metadata loaded; loader procedure/freshness open | Read-only item lookup, metadata resolution and import-driven inventory creation implemented; manual inventory CRUD not started | E-01 |
 | Import pipeline | Approved by `Phase3ImplementationPlan.md`; D-04/AM-03 contract, D-08/AM-01/AM-02 metadata rule | **Implemented** — upload, durable failures, normalized staging, `LocationGroup` selector, persisted selection, unit-aware summary, atomic commit, `409` terminal state and admin UI/API | Production grants and real collector exports remain operational follow-ups |
@@ -243,8 +243,42 @@ environment observation is that this Compose volume was uninitialised, so setup
 had to be completed before validation; that is expected fresh-volume behavior,
 not a defect. No corrective implementation change is recommended.
 
-`Phase3ImplementationPlan.md` remains the design record for these choices.
-Phase 4 has not started, per the owner's instruction.
+### 1.6 Phase 4 public inventory read path (completed 2026-11-22 UTC)
+
+The owner approved PD4-01–PD4-17 subject to the documented performance,
+indexing and validation conditions, and authorized Phase 4 implementation.
+PD4-11 is approved with UTC day boundaries; `DateAdded` and `metadataMissing`
+are public fields. Phase 5 was explicitly not authorized. Phase 5 must later
+validate `DateOpen <= DateBazaar` for all new writes.
+
+| Deliverable | State | Evidence |
+|---|---|---|
+| Public routes | Complete | Anonymous `/`, `/inventory/:id`, `/api/v1/items` and `/api/v1/items/:id`; no authentication and no admin item route |
+| Public projection | Complete | Dedicated DTO exposes `id`, `equid`, `name`, `itemType`, `quantity`, `classString`, `raceString`, `metadataMissing`, three dates, `availability` and nullable `eqResourceUrl`; forbidden internal fields are absent |
+| Search/filter/sort | Complete | Trimmed 128-rune name search with literal `%`, `_`, `!`; canonical class/race membership including stored `ALL`; item type; eight-value sort allowlist with ID tie-breaker |
+| Availability | Complete | One UTC date per request; inclusive open/bazaar boundaries; inverted windows never report open |
+| EQResource | Complete | Server-side exact setting revalidation, positive decimal EQUID, nullable on invalid setting, no external request |
+| Query/index safety | Complete | Explicit projection, parameterized predicates, enum-switch `ORDER BY`, active-only count/page/detail, repeatable-read read-only snapshot, page cap 10,000 and size cap 100 |
+| Migration | Complete | `0002_public_inventory_indexes.sql` applied live; version `0002_public_inventory_indexes`; existing indexes retained |
+| UI | Complete | Responsive list/detail templates, public navigation, labels/caption, availability text plus color, external-link attributes, empty/no-match/beyond-end/unavailable states, embedded CSS |
+| Error contract | Complete | `422` field-keyed validation, `404` absent/deleted detail, `503` unavailable/deadline, `405` public method rejection, strict security headers and `no-store` |
+| Validation | Complete | `go test ./...`, `go vet ./...`, `gofmt` and `git diff --check` pass; service/repository/API/HTML/security tests added; live Compose checks passed |
+| Performance | Complete | 250k design target and 1M stress target passed after two measured optimizations (index-friendly null handling and skipping a provably redundant count on empty page 1); full results in `Phase4Validation.md` |
+| Live migration/outage | Complete | Rebuilt image observed `schema_version=0002_public_inventory_indexes`; anonymous API/HTML `200`; restart preserved 706 records; MariaDB stop produced `503`/`503`; restore produced `200`/`200` |
+
+Natural sorting is verified against MariaDB with `Phase4 Order 1, 2, 10, 11`.
+Class/race and leading-wildcard search remain scan predicates; they pass the
+1M gates. The documented escalation to a normalized search column or membership
+tables was not required for this phase. No content fixture was left in the
+development guild database. Full evidence is in `Docs/Phase4Validation.md` and
+the contract is in `Docs/PublicInventoryAPI.md`.
+
+Phase 4 does not implement admin inventory data, item mutation, location
+filtering/normalization, availability-date filtering, in-app anonymous rate
+limiting or the Phase 5 write validation. Those remain later-phase or
+operational work.
+`Phase3ImplementationPlan.md` remains the design record for Phase 3 choices.
+Phase 4 is implemented and live-validated; Phase 5 was not started.
 
 ---
 
@@ -294,12 +328,12 @@ Status legend: **Defined** = implementable as written; **Partial** = exists but 
 
 | ID | Requirement | Spec refs | Spec status | Implementation | Covered in |
 |---|---|---|---|---|---|
-| FR-01 | Public inventory browsing without login | L20–L22 | Defined | Not started | IP Phase 4 |
-| FR-02 | Display item details incl. stats/restrictions | L24–L27 | Defined | Not started | IP Phase 4 |
-| FR-03 | Display availability dates | L28 | Partial (semantics) | Not started | DD §4.2, IP Phase 4 |
-| FR-04 | Class and race filtering | L25–L26, L821–L824 | Partial (ALL/lookup) | Not started | DD §9.1, §9.6 |
-| FR-05 | Search, sort, natural sort, pagination | L699–L728, L817–L824 | Partial (contract) | Not started | DD §9.5, IP Phase 4 |
-| FR-06 | EQResource links in new tab | L30, L784–L795 | Partial (URL safety) | Not started | AR SR-08, IP Phase 4 |
+| FR-01 | Public inventory browsing without login | L20–L22 | Defined | **Implemented** | IP Phase 4, `Docs/PublicInventoryAPI.md` |
+| FR-02 | Display item details incl. stats/restrictions | L24–L27 | Defined | **Implemented** for stored restrictions, type, quantity and dates; raw item-stat fields are not stored in `GuildBankItems` | IP Phase 4, DD §4.2 |
+| FR-03 | Display availability dates | L28 | Resolved by PD4-11 | **Implemented** with UTC states | DD §4.2, `Phase4Validation.md` |
+| FR-04 | Class and race filtering | L25–L26, L821–L824 | Resolved by PD4-07/08 | **Implemented** | DD §9.1, §9.6, `Docs/PublicInventoryAPI.md` |
+| FR-05 | Search, sort, natural sort, pagination | L699–L728, L817–L824 | Resolved by PD4-05/06/10/13 | **Implemented**; 250k/1M gates passed | DD §9.5, `Phase4Validation.md` |
+| FR-06 | EQResource links in new tab | L30, L784–L795 | Resolved by PD4-12 | **Implemented** with server-side URL revalidation | AR SR-08, `Phase4Validation.md` |
 | FR-07 | Admin add inventory | L37–L39, L741–L745 | Partial (validation) | Not started | DD §7.2, IP Phase 5 |
 | FR-08 | Admin update inventory | L37, L744 | Partial (mutable fields) | Not started | DD §7.3, IP Phase 5 |
 | FR-09 | Admin remove inventory (soft delete) | L38, L359–L368 | Defined | Not started | DD §7.3, IP Phase 5 |
@@ -413,15 +447,15 @@ D-01–D-13 are specification decisions and do not require engineering approval.
 |---|---|---|---|---|---|
 | 1 | Add two real collector exports beside the canonical sample | Guild admin + dev | external | — | Import fixtures (closes E-04) |
 | 2 | Turn the loaded development `items` copy into a documented loader/freshness procedure and production `SELECT`-only grants | Operator + dev | 0.5–1 d | — | Loader runbook, verified least-privilege access (E-01) |
-| 3 | Close the general audit taxonomy (E-09), secret-at-rest review (E-11) and public API/pagination contract (E-12) before their phases | Dev + product | 0.5–1 d | — | Approved records; no Phase 3 dependency |
+| 3 | Close the general audit taxonomy (E-09) and secret-at-rest review (E-11) before their phases; the public API/pagination contract (E-12) is closed by Phase 4 | Dev + product | 0.5–1 d | — | Approved records |
 | 4 | Decide when Settings become the authoritative MariaDB configuration, including whether to hot-swap the pool (PD-18) | Product + dev | 0.5 d | — | Separate approved change; PD-05/PD-18 remain runtime behavior until then |
-| 5 | Write ADRs for D-01–D-13, AM-01–AM-05, PD-10–PD-20 and PD3-01–PD3-14 | Dev | 1 d | — | `Docs/decisions/` records |
+| 5 | Write ADRs for D-01–D-13, AM-01–AM-05, PD-10–PD-20, PD3-01–PD3-14 and PD4-01–PD4-17 | Dev | 1 d | — | `Docs/decisions/` records |
 | 6 | Provision the target MariaDB and Unraid template | Operator + ops | 0.5 d | #2 | Deployment artifacts |
 
-**Immediate next:** Phase 3 is approved, implemented and its authenticated
-Compose upload → selection → commit workflow has passed (§1.5.1). The remaining
-items are operational or later-phase work (#1–#6); none is a Phase 3 approval
-blocker. Phase 4 has not been authorized and is not started.
+**Immediate next:** Phase 4 is approved, implemented and live-validated
+(§1.6, `Phase4Validation.md`). The remaining items are operational or
+later-phase work (#1–#6). Phase 5 is not authorized; when authorized, its first
+validation condition is `DateOpen <= DateBazaar` for all new writes.
 
 ---
 
@@ -451,14 +485,14 @@ Remaining deployment and later-phase checks, none of which reopens Phase 3:
   fixture, not proof against production exports.
 - Close the production loader/freshness and `SELECT`-only grant requirements
   under E-01.
-- Resolve the general audit taxonomy (E-09), secret-at-rest review (E-11), public
-  API/pagination contract (E-12) and any future HTMX contract (E-16) before their
-  phases.
+- The general audit taxonomy (E-09), secret-at-rest review (E-11) and future
+  HTMX contract (E-16) remain later-phase work. The public API/pagination
+  contract (E-12) is closed by Phase 4.
 - PD-18 remains in force: the wizard persists MariaDB settings, but the runtime
   pool still uses the environment bootstrap and is not hot-swapped.
 - `Design.md` v1.6.1 and the D-04 sample remain the published baseline.
 
-Phase 4 has not started and is not authorized by this report.
+Phase 4 is complete and live-validated. Phase 5 has not started.
 
 ---
 
@@ -467,7 +501,7 @@ Phase 4 has not started and is not authorized by this report.
 1. All statements are derived from `Design.md` v1.6.1; where the specification is silent, the gap is recorded rather than silently resolved.
 2. Line references (`L###`) are valid for the body (L1–L854) and the decisions (L855–L1161) and were re-verified at the cited anchors; the v1.6.1 amendments are cited as `AM-xx` at L1163–L1263. The non-normative implementation-status block at L1265–L1274 does not change any requirement. Decisions D-01–D-13 have no per-decision line anchors (IC-26). Any further edit to `Design.md` requires re-checking.
 3. The documents introduced **PROPOSED** schema elements and defaults. The decisions used by Phases 1–3 were approved on 2026-11-21 (PD-10–PD-20, PD3-01–PD3-14); the remaining `AuditOutbox` and general-audit additions are later-phase proposals, not current implementation requirements.
-4. Application code covers the Phase 0 skeleton, Phase 1 identity/settings layer, Phase 2 item metadata and Phase 3 import pipeline, including migrations, parser/commit tests, security tests and API tests. Public/manual inventory, general audit UI/outbox and user-management tests do not yet exist; effort estimates remain planning ranges, not measured velocity.
+4. Application code covers the Phase 0 skeleton, Phase 1 identity/settings layer, Phase 2 item metadata, Phase 3 import pipeline and Phase 4 public inventory read path, including migrations, parser/commit tests, public service/repository/API/template tests, security tests and performance gates. Manual inventory administration, general audit UI/outbox and user-management tests do not yet exist; effort estimates remain planning ranges, not measured velocity.
 5. The review assumes a single Go service with server-rendered UI, Gin and SQLite/MariaDB as specified. Phase 1 used plain embedded forms and vanilla JS rather than HTMX/Bootstrap (PD-12), and Phase 3 uses JSON endpoints with vanilla `fetch` (PD3-09); the layer boundaries still match the specification.
 6. Security findings are design-level. A penetration test and dependency scanning are still required before production use.
 7. Estimates assume one experienced developer and exclude waiting time for external data (`Items`, export files, Unraid access).
@@ -490,6 +524,7 @@ Phase 4 has not started and is not authorized by this report.
 | 1.9 | 2026-11-21 | PD3-01–PD3-14 and all six §14.1 defaults approved; Phase 3 import pipeline implemented: guild-store migration, parser/normalization/natural sort, durable staging, `LocationGroup` selector (all `Hoard<n>`→`Hoard`), selection, unit-aware summary, advisory-locked atomic commit, import-scoped transactional audit, REST API, admin UI and tests; Phase 4 not started |
 | 2.0 | 2026-11-21 | Documentation consistency audit: removed stale pending-approval language; recorded PD-10–PD-20 and PD3-01–PD3-14 as approved; closed resolved blockers and decisions; corrected Phase 3 gate/next-action text; aligned DatabaseDesign import DDL and ProjectStructure with the implemented migration and files; Phase 4 remains not started |
 | 2.1 | 2026-11-21 | Authenticated live Compose validation passed: fresh-volume setup, admin login, canonical sample (548/197/348), 30 normalized groups including one `Hoard`, 8-group subset selection (77 rows, 471 item units, 3 spells), atomic commit (474 records), durable warnings and missing-metadata fallback, `409` re-commit, and a second batch proving 2 spell merges and `ITEM_UPDATED` audit; no Phase 3 defects; Phase 4 remains not started |
+| 2.2 | 2026-11-22 | Phase 4 approved and completed: PD4-01–PD4-17 with UTC availability, public `DateAdded`/`metadataMissing`, public list/detail/API, search/class/race/type filters, eight sorts, pagination, EQResource revalidation, index-only `0002` migration, public templates/CSS and security tests; 250k design and 1M stress performance gates passed; live Compose restart/outage/recovery validation passed; Phase 5 not started |
 
 ---
 
@@ -498,24 +533,27 @@ Phase 4 has not started and is not authorized by this report.
 The GuildBank specification is **buildable as written**. v1.6 closed the audit schema, the selection route, the HTMX/REST layering model, spell merge and item identity, and defined session storage, the audit table and store separation. v1.6.1 closed the two remaining contradictions: the canonical sample lives at `Docs/Samples/InventoryExport-Sample.txt` with a normative contract (AM-03), and missing metadata is representable by preserving the imported `EQUID` and setting `MetadataMissingFg`, with no sentinel and no enforced FK for unresolved rows (AM-01/AM-02). The import location vocabulary, selection payload, warning sink and spell-merge provenance are resolved by the approved PD3 decisions. Remaining soft gaps are setup recovery (E-02), Items loader ownership/freshness and production grants (E-01), general audit taxonomy/UI (E-09), secret-at-rest review (E-11) and future HTMX semantics if that UI is adopted (E-16).
 
 The platform skeleton, the owner-approved Phase 1 identity/settings layer, the
-Phase 2 item-metadata integration and the Phase 3 import pipeline are
-implemented and validated: `go build`, `go vet`, `go test ./...`, SQLite
-migration/rollback tests, parser golden tests against the 548-line sample,
-commit-plan and summary tests, multipart CSRF and import handler tests, service
-security tests, API flow tests, and the earlier live Compose app + MariaDB
-identity/settings flow. Users, Settings and Sessions exist under
-`user_version=1`; passwords are bcrypt hashes and only session-token hashes are
-stored.
+Phase 2 item-metadata integration, the Phase 3 import pipeline and the Phase 4
+public inventory read path are implemented and validated: `go build`,
+`go vet`, `go test ./...`, SQLite migration/rollback tests, parser golden tests
+against the 548-line sample, commit-plan and summary tests, multipart CSRF and
+import handler tests, public inventory service/repository/API/HTML security
+tests, and the live Compose app + MariaDB identity/settings, import and public
+inventory flows. Users, Settings and Sessions exist under `user_version=1`;
+passwords are bcrypt hashes and only session-token hashes are stored.
 
 The guild store now has embedded migrations for `ImportBatch`, `ImportList`,
-`GuildBankItems` and `Audit`. Phase 3 supports upload, durable parse failures,
-normalized staging, a selector derived from distinct `LocationGroup` values
-(with every `Hoard<n>` collapsed to `Hoard`), persisted selection, unit-aware
-summary, and an advisory-locked atomic commit that expands item units and merges
-spells into the lowest active EQUID target. Import audit rows are written in the
-commit or staging transaction. Manual inventory administration, public inventory
-browsing, the general audit UI/outbox, user management and dashboard remain
-later phases; Phase 4 has not started.
+`GuildBankItems` and `Audit`, plus the approved index-only public-inventory
+migration. Phase 3 supports upload, durable parse failures, normalized staging,
+a selector derived from distinct `LocationGroup` values (with every `Hoard<n>`
+collapsed to `Hoard`), persisted selection, unit-aware summary, and an
+advisory-locked atomic commit that expands item units and merges spells into
+the lowest active EQUID target. Phase 4 exposes those records anonymously with
+bounded search, class/race/type filters, natural/date sorts, pagination,
+UTC availability states, EQResource links and a dedicated public DTO. Import
+audit rows are written in the commit or staging transaction. Manual inventory
+administration, the general audit UI/outbox, user management and dashboard
+remain later phases; Phase 5 has not started.
 
 A development copy of the item metadata is available as `GuildBank.items`
 (144,712 rows, read-only in use). The profile in DP-001 confirms both permanent

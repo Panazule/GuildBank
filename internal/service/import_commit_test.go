@@ -34,8 +34,9 @@ func TestBuildCommitPlanExpandsItemsAndAggregatesSpells(t *testing.T) {
 		t.Fatalf("first item = %+v", plan.items[0])
 	}
 	if !plan.items[0].DateAdded.Equal(time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)) ||
-		!plan.items[0].DateOpen.Equal(time.Date(2026, 12, 5, 0, 0, 0, 0, time.UTC)) {
-		t.Fatalf("dates = %s / %s", plan.items[0].DateAdded, plan.items[0].DateOpen)
+		!plan.items[0].DateOpen.Equal(time.Date(2026, 12, 5, 0, 0, 0, 0, time.UTC)) ||
+		!plan.items[0].DateBazaar.Equal(time.Date(2026, 12, 21, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("dates = %s / %s / %s", plan.items[0].DateAdded, plan.items[0].DateOpen, plan.items[0].DateBazaar)
 	}
 	if plan.newSpellCount != 1 || len(plan.newSpells) != 1 {
 		t.Fatalf("new spells = %d/%d", plan.newSpellCount, len(plan.newSpells))

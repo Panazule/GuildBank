@@ -1,0 +1,130 @@
+{{define "inventory_list.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card inventory-card">
+    <p class="eyebrow">Guild inventory</p>
+    <h1>Guild inventory</h1>
+    <p class="muted">Search by item name and filter by class, race or item type. Each row is one inventory record.</p>
+
+    <form method="get" action="/" class="inventory-filters">
+      <div class="filter-grid">
+        <label>
+          Search
+          <input name="q" type="search" maxlength="128" value="{{.Filter.Search}}" autocomplete="off">
+          <span class="help">Item name only; <code>%</code>, <code>_</code> and <code>!</code> are literal.</span>
+        </label>
+        <label>
+          Class
+          <select name="class">
+            {{range .ClassOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>
+          Race
+          <select name="race">
+            {{range .RaceOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>
+          Item type
+          <select name="itemType">
+            {{range .ItemTypeOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>
+          Sort
+          <select name="sort">
+            {{range .SortOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <div class="filter-actions">
+          <button type="submit" class="primary">Apply filters</button>
+          {{if .HasFilters}}<a class="link" href="{{.ClearFiltersURL}}">Clear filters</a>{{end}}
+        </div>
+      </div>
+    </form>
+
+    <p class="result-summary" aria-live="polite">
+      {{if .Total}}{{.Total}} inventory record{{if ne .Total 1}}s{{end}} · page {{.Page}} of {{.TotalPages}}{{else}}No matching records{{end}}
+    </p>
+
+    {{if .BeyondLast}}
+      <div class="alert" role="status">
+        This page is beyond the available results.
+        {{if .LastPageURL}}<a href="{{.LastPageURL}}">Go to the last page</a>.{{end}}
+      </div>
+    {{end}}
+
+    {{if .EmptyInventory}}
+      <div class="empty-state"><p>No inventory records are available yet.</p></div>
+    {{else if .EmptyFiltered}}
+      <div class="empty-state">
+        <p>No items match these filters.</p>
+        <p><a href="{{.ClearFiltersURL}}">Clear filters</a></p>
+      </div>
+    {{else if .Items}}
+      <div class="table-scroll" role="region" aria-label="Guild inventory results" tabindex="0">
+        <table class="inventory-table">
+          <caption class="sr-only">Guild inventory records</caption>
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Type</th>
+              <th scope="col">Class</th>
+              <th scope="col">Race</th>
+              <th scope="col">Quantity</th>
+              <th scope="col">Availability</th>
+              <th scope="col">EQResource</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Items}}
+            <tr>
+              <td>
+                <a href="/inventory/{{.ID}}">{{.Name}}</a>
+                <span class="item-identity">ID {{.ID}} · EQUID {{.EQUID}}</span>
+              </td>
+              <td>{{.ItemType}}</td>
+              <td{{if .ClassUnknown}} class="unknown"{{end}}>
+                {{.ClassText}}
+                {{if and .MetadataNote .ClassUnknown}}<span class="unknown-note">{{.MetadataNote}}</span>{{end}}
+              </td>
+              <td{{if .RaceUnknown}} class="unknown"{{end}}>
+                {{.RaceText}}
+                {{if and .MetadataNote .RaceUnknown}}<span class="unknown-note">{{.MetadataNote}}</span>{{end}}
+              </td>
+              <td>{{.Quantity}}</td>
+              <td><span class="availability-badge availability-{{.Availability}}">{{.AvailabilityLabel}}</span></td>
+              <td>
+                {{if .EQResourceURL}}
+                  <a href="{{.EQResourceURL}}" target="_blank" rel="noopener noreferrer" aria-label="Open {{.Name}} on EQResource (new tab)">EQResource</a>
+                {{else}}
+                  <span class="muted">Unavailable</span>
+                {{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{end}}
+
+    {{if or .PrevURL .NextURL .PageLinks}}
+    <nav class="pager inventory-pager" aria-label="Inventory pages">
+      {{if .FirstURL}}<a href="{{.FirstURL}}">First</a>{{end}}
+      {{if .PrevURL}}<a href="{{.PrevURL}}" rel="prev">Previous</a>{{end}}
+      {{range .PageLinks}}
+        {{if .Current}}<span class="page-current" aria-current="page">{{.Page}}</span>{{else}}<a href="{{.URL}}">{{.Page}}</a>{{end}}
+      {{end}}
+      {{if .NextURL}}<a href="{{.NextURL}}" rel="next">Next</a>{{end}}
+      {{if .LastURL}}<a href="{{.LastURL}}">Last</a>{{end}}
+    </nav>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

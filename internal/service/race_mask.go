@@ -1,5 +1,7 @@
 package service
 
+import "strings"
+
 // raceMaskLabels is ordered by bit value so decoded strings follow the
 // specification's stable order (Design.md L470-L500).
 var raceMaskLabels = [...]string{
@@ -25,6 +27,23 @@ var raceMaskLabels = [...]string{
 // race names stored in GuildBankItems.RaceString. It has no repository
 // dependency and can be reused by import and inventory workflows.
 type RaceMaskDecoder struct{}
+
+// RaceValues returns a copy of the canonical race labels in decoder order.
+// Inventory filter validation and UI select lists share this source.
+func RaceValues() []string {
+	return append([]string(nil), raceMaskLabels[:]...)
+}
+
+// CanonicalRace maps a case-insensitive race label to its canonical spelling,
+// including labels with spaces such as "Wood Elf".
+func CanonicalRace(value string) (string, bool) {
+	for _, label := range raceMaskLabels {
+		if strings.EqualFold(value, label) {
+			return label, true
+		}
+	}
+	return "", false
+}
 
 // NewRaceMaskDecoder builds the race-mask decoder.
 func NewRaceMaskDecoder() *RaceMaskDecoder {

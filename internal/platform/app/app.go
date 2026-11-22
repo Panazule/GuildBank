@@ -107,11 +107,14 @@ func Run(ctx context.Context, opts Options) error {
 	authService := service.NewAuthService(appStore, appStore, settingsService)
 
 	var importService *service.ImportService
+	var inventoryService *service.InventoryService
 	if guildStore != nil {
 		metadata := service.NewItemMetadataService(guildStore)
 		importService = service.NewImportService(guildStore, metadata, settingsService, time.Now, logger)
+		inventoryService = service.NewInventoryService(guildStore, settingsService, time.Now, logger)
 	} else {
 		importService = service.NewImportService(nil, nil, settingsService, time.Now, logger)
+		inventoryService = service.NewInventoryService(nil, settingsService, time.Now, logger)
 	}
 
 	purgeCtx, stopPurge := context.WithCancel(ctx)
@@ -145,6 +148,7 @@ func Run(ctx context.Context, opts Options) error {
 		Auth:           authService,
 		Settings:       settingsService,
 		Imports:        importService,
+		Inventory:      inventoryService,
 		Version:        opts.Version,
 		TrustedProxies: cfg.TrustedProxies,
 		SecureCookies:  cfg.SecureCookies,

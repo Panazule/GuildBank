@@ -1,0 +1,36 @@
+{{define "inventory_detail.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card inventory-detail-card">
+    <p class="eyebrow">{{.Item.ItemType}} record</p>
+    <h1>{{.Item.Name}}</h1>
+    <p class="item-identity">Inventory ID {{.Item.ID}} · EQUID {{.Item.EQUID}}</p>
+
+    <p><span class="availability-badge availability-{{.Item.Availability}}">{{.Item.AvailabilityLabel}}</span></p>
+
+    {{if .Item.MetadataNote}}<div class="alert" role="status">{{.Item.MetadataNote}}</div>{{end}}
+
+    <dl class="detail-list">
+      <div><dt>Type</dt><dd>{{.Item.ItemType}}</dd></div>
+      <div><dt>Quantity</dt><dd>{{.Item.Quantity}}</dd></div>
+      <div><dt>Classes</dt><dd{{if .Item.ClassUnknown}} class="unknown"{{end}}>{{.Item.ClassText}}</dd></div>
+      <div><dt>Races</dt><dd{{if .Item.RaceUnknown}} class="unknown"{{end}}>{{.Item.RaceText}}</dd></div>
+      <div><dt>Availability</dt><dd>{{.Item.AvailabilityLabel}}</dd></div>
+      <div><dt>Date added</dt><dd><time datetime="{{.Item.DateAddedISO}}">{{.Item.DateAddedText}}</time></dd></div>
+      <div><dt>Date open</dt><dd><time datetime="{{.Item.DateOpenISO}}">{{.Item.DateOpenText}}</time></dd></div>
+      <div><dt>Date bazaar</dt><dd><time datetime="{{.Item.DateBazaarISO}}">{{.Item.DateBazaarText}}</time></dd></div>
+    </dl>
+
+    {{if .Item.EQResourceURL}}
+      <p><a class="link primary" href="{{.Item.EQResourceURL}}" target="_blank" rel="noopener noreferrer" aria-label="Open {{.Item.Name}} on EQResource (new tab)">Open on EQResource (new tab)</a></p>
+    {{end}}
+
+    <p><a href="/">Back to guild inventory</a></p>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

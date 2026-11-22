@@ -30,6 +30,7 @@ type Deps struct {
 	Auth           *service.AuthService
 	Settings       *service.SettingsService
 	Imports        *service.ImportService
+	Inventory      *service.InventoryService
 	Version        string
 	TrustedProxies []string
 	StartTime      time.Time
@@ -46,8 +47,8 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	if deps.Health == nil {
 		return nil, errors.New("api: health probe is required")
 	}
-	if deps.Setup == nil || deps.Auth == nil || deps.Settings == nil || deps.Imports == nil {
-		return nil, errors.New("api: setup, auth, settings and imports services are required")
+	if deps.Setup == nil || deps.Auth == nil || deps.Settings == nil || deps.Imports == nil || deps.Inventory == nil {
+		return nil, errors.New("api: setup, auth, settings, imports and inventory services are required")
 	}
 	if deps.StartTime.IsZero() {
 		deps.StartTime = time.Now()
@@ -86,7 +87,8 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	setupHandler := &setupHandler{setup: deps.Setup, auth: authHandler, views: viewSet, logger: deps.Logger}
 	settingsHandler := &settingsHandler{settings: deps.Settings, views: viewSet, logger: deps.Logger}
 	importHandler := &importsHandler{imports: deps.Imports, views: viewSet, logger: deps.Logger}
-	ui := &uiHandler{auth: deps.Auth, views: viewSet}
+	inventoryHandler := &inventoryHandler{inventory: deps.Inventory, auth: deps.Auth, views: viewSet, logger: deps.Logger}
+	ui := &uiHandler{views: viewSet}
 
 	// Public forms (login and setup) need a CSRF token even though no session
 	// exists yet. Protected routes authenticate first so an absent session
@@ -101,7 +103,10 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	public.POST("/setup/guild", setupHandler.validateGuild)
 	public.POST("/setup/database/test", setupHandler.testDatabase)
 	public.POST("/setup/complete", setupHandler.complete)
-	public.GET("/", ui.home)
+	public.GET("/", inventoryHandler.page)
+	public.GET("/inventory/:id", inventoryHandler.detailPage)
+	public.GET("/api/v1/items", inventoryHandler.list)
+	public.GET("/api/v1/items/:id", inventoryHandler.get)
 
 	admin := r.Group("/")
 	admin.Use(RequireAuth(deps.Auth, deps.SecureCookies), csrf.middleware(), RequireAdmin())
