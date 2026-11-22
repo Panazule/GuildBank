@@ -190,3 +190,50 @@ button.secondary:hover { border-color: var(--accent); }
   .wizard-actions { justify-content: stretch; }
   .wizard-actions button { flex: 1 1 auto; }
 }
+
+/* Phase 3 import review */
+.import-upload { margin-top: 1rem; }
+.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.import-table { width: 100%; border-collapse: collapse; min-width: 44rem; }
+.import-table caption { padding: 0.7rem 0.9rem; color: var(--muted); text-align: left; }
+.import-table th, .import-table td { padding: 0.55rem 0.7rem; border-top: 1px solid var(--border); text-align: left; vertical-align: top; }
+.import-table th { background: rgba(0, 0, 0, 0.16); color: var(--accent-strong); font-size: 0.85rem; }
+.import-table tbody tr:hover { background: rgba(199, 168, 90, 0.06); }
+.import-table input[type="checkbox"] { margin: 0; }
+.mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 0.85rem; }
+.failure { display: block; max-width: 26rem; margin-top: 0.2rem; color: var(--danger); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.failure-detail { max-height: 14rem; overflow: auto; padding: 0.75rem; border: 1px solid var(--danger); border-radius: 6px; background: #10130e; white-space: pre-wrap; }
+.status-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.status-Uploaded { color: var(--accent-strong); border-color: var(--accent); }
+.status-Processing { color: #f0d693; border-color: #a88e4d; }
+.status-Completed { color: var(--ok); border-color: var(--ok); }
+.status-Failed { color: var(--danger); border-color: var(--danger); }
+.batch-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.75rem; margin: 1rem 0 1.5rem; padding: 0; }
+.batch-meta div { padding: 0.65rem 0.8rem; border: 1px solid var(--border); border-radius: 6px; background: rgba(0, 0, 0, 0.12); }
+.batch-meta dt { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.batch-meta dd { margin: 0.25rem 0 0; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.7rem; }
+.summary-card { padding: 0.7rem 0.85rem; border: 1px solid var(--border); border-radius: 6px; background: rgba(0, 0, 0, 0.12); }
+.summary-label { display: block; color: var(--muted); font-size: 0.78rem; }
+.summary-value { display: block; margin-top: 0.2rem; color: var(--accent-strong); }
+.import-layout { display: grid; grid-template-columns: minmax(13rem, 17rem) minmax(0, 1fr); gap: 1.25rem; margin-top: 1.5rem; align-items: start; }
+.location-panel, .row-panel { min-width: 0; }
+.location-list { display: grid; gap: 0.35rem; max-height: 34rem; overflow: auto; padding-right: 0.25rem; }
+.location-item { padding: 0.35rem 0.45rem; border: 1px solid var(--border); border-radius: 6px; }
+.location-toggle { font-weight: 500; }
+.location-toggle input { margin-right: 0.35rem; }
+.location-item .help { margin: 0.15rem 0 0 1.25rem; }
+.filter-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 0.65rem; align-items: end; margin-bottom: 0.85rem; }
+.filter-row label { font-size: 0.85rem; }
+.filter-row select, .filter-row input { margin-top: 0.2rem; padding: 0.5rem 0.6rem; }
+select { display: block; width: 100%; border: 1px solid var(--border); border-radius: 6px; background: #10130e; color: var(--text); font: inherit; }
+.pager { display: flex; align-items: center; gap: 0.7rem; margin-top: 0.75rem; flex-wrap: wrap; }
+.commit-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.commit-bar .help { max-width: 38rem; margin: 0; }
+.warning-badge { display: inline-block; padding: 0.1rem 0.4rem; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent-strong); font-size: 0.75rem; }
+button:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
+@media (max-width: 900px) {
+  .import-layout { grid-template-columns: 1fr; }
+  .location-list { max-height: none; }
+  .commit-bar { align-items: flex-start; flex-direction: column; }
+}

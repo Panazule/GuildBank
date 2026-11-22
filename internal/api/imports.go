@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,16 +25,16 @@ type importsHandler struct {
 }
 
 type batchResponse struct {
-	ID               int64              `json:"id"`
-	FileName         string             `json:"fileName"`
-	SHA256           *string            `json:"sha256"`
+	ID               int64               `json:"id"`
+	FileName         string              `json:"fileName"`
+	SHA256           *string             `json:"sha256"`
 	Status           domain.ImportStatus `json:"status"`
-	SourceRowCount   *int               `json:"sourceRowCount"`
-	AcceptedRowCount *int               `json:"acceptedRowCount"`
-	FailureReason    *string            `json:"failureReason"`
-	ImportedBy       string             `json:"importedBy"`
-	ImportedByUserID *int64             `json:"importedByUserId"`
-	ImportedAt       time.Time          `json:"importedAt"`
+	SourceRowCount   *int                `json:"sourceRowCount"`
+	AcceptedRowCount *int                `json:"acceptedRowCount"`
+	FailureReason    *string             `json:"failureReason"`
+	ImportedBy       string              `json:"importedBy"`
+	ImportedByUserID *int64              `json:"importedByUserId"`
+	ImportedAt       time.Time           `json:"importedAt"`
 }
 
 type rowResponse struct {
@@ -57,22 +58,22 @@ type locationResponse struct {
 }
 
 type summaryResponse struct {
-	BatchID                  int64              `json:"batchId"`
+	BatchID                  int64               `json:"batchId"`
 	Status                   domain.ImportStatus `json:"status"`
-	SelectedRows             int                `json:"selectedRows"`
-	StagedRows               int                `json:"stagedRows"`
-	SelectedLocations        int                `json:"selectedLocations"`
-	TotalLocations           int                `json:"totalLocations"`
-	ItemRows                 int                `json:"itemRows"`
-	ItemUnits                uint64             `json:"itemUnits"`
-	SpellRows                int                `json:"spellRows"`
-	SpellQuantity            uint64             `json:"spellQuantity"`
-	DistinctSpells           int                `json:"distinctSpells"`
-	NewSpells                int                `json:"newSpells"`
-	MergedSpells             int                `json:"mergedSpells"`
-	InventoryRecordsToCreate uint64             `json:"inventoryRecordsToCreate"`
-	WarningRows              int                `json:"warningRows"`
-	TotalRecordsToImport     uint64             `json:"totalRecordsToImport"`
+	SelectedRows             int                 `json:"selectedRows"`
+	StagedRows               int                 `json:"stagedRows"`
+	SelectedLocations        int                 `json:"selectedLocations"`
+	TotalLocations           int                 `json:"totalLocations"`
+	ItemRows                 int                 `json:"itemRows"`
+	ItemUnits                uint64              `json:"itemUnits"`
+	SpellRows                int                 `json:"spellRows"`
+	SpellQuantity            uint64              `json:"spellQuantity"`
+	DistinctSpells           int                 `json:"distinctSpells"`
+	NewSpells                int                 `json:"newSpells"`
+	MergedSpells             int                 `json:"mergedSpells"`
+	InventoryRecordsToCreate uint64              `json:"inventoryRecordsToCreate"`
+	WarningRows              int                 `json:"warningRows"`
+	TotalRecordsToImport     uint64              `json:"totalRecordsToImport"`
 }
 
 func (h *importsHandler) page(c *gin.Context) {
@@ -410,13 +411,13 @@ func (h *importsHandler) commit(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
 		"batchId": result.BatchID, "status": result.Status,
-		"itemRecordsCreated": result.ItemRecordsCreated,
-		"spellRecordsCreated": result.SpellRecordsCreated,
-		"spellRecordsMerged": result.SpellRecordsMerged,
-		"spellQuantityAdded": result.SpellQuantityAdded,
-		"totalRecordsAffected": result.TotalRecordsAffected,
+		"itemRecordsCreated":    result.ItemRecordsCreated,
+		"spellRecordsCreated":   result.SpellRecordsCreated,
+		"spellRecordsMerged":    result.SpellRecordsMerged,
+		"spellQuantityAdded":    result.SpellQuantityAdded,
+		"totalRecordsAffected":  result.TotalRecordsAffected,
 		"duplicateSpellTargets": result.DuplicateSpellTargets,
-		"warnings": result.Warnings, "durationMs": result.DurationMS,
+		"warnings":              result.Warnings, "durationMs": result.DurationMS,
 	}})
 }
 
@@ -464,6 +465,10 @@ func (h *importsHandler) respondImportError(c *gin.Context, err error) {
 		writeError(c, http.StatusNotFound, "not_found", "import batch not found")
 	case errors.Is(err, domain.ErrUnavailable):
 		writeError(c, http.StatusServiceUnavailable, "dependency_unavailable", "a required dependency is unavailable")
+	case errors.Is(err, context.DeadlineExceeded):
+		writeError(c, http.StatusServiceUnavailable, "dependency_unavailable", "the import request timed out; retry the request")
+	case errors.Is(err, context.Canceled):
+		return
 	case errors.As(err, &retry):
 		writeError(c, http.StatusServiceUnavailable, "dependency_unavailable", "the guild database is busy; retry the request")
 	default:
@@ -490,6 +495,6 @@ func summaryResponseOf(summary domain.ImportSummary) summaryResponse {
 		SpellQuantity: summary.SpellQuantity, DistinctSpells: summary.DistinctSpells,
 		NewSpells: summary.NewSpells, MergedSpells: summary.MergedSpells,
 		InventoryRecordsToCreate: summary.InventoryRecordsToCreate,
-		WarningRows: summary.WarningRows, TotalRecordsToImport: summary.TotalRecordsToImport,
+		WarningRows:              summary.WarningRows, TotalRecordsToImport: summary.TotalRecordsToImport,
 	}
 }

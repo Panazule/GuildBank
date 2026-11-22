@@ -46,9 +46,7 @@
         <section class="row-panel" aria-labelledby="rows-heading">
           <h2 id="rows-heading">Staged rows</h2>
           <form id="row-filters" class="filter-row">
-            {{if not .Batch.ReadOnly}}
             <label>Location<select id="filter-location" name="locationGroup"><option value="">All locations</option></select></label>
-            {{end}}
             <label>Selection<select id="filter-selected" name="selected">
               <option value="all">All rows</option>
               <option value="selected">Selected</option>

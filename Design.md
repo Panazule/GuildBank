@@ -1261,3 +1261,14 @@ Change log:
 1.6 - Version 1.6 Final Decisions (D-01 through D-13) added.
 
 1.6.1 - Original EQUID preserved; MetadataMissingFg added; sample path corrected; Hoard terminology standardized; version metadata updated.
+
+Project Implementation Status (Informational)
+This section records delivery status only; it does not modify the normative specification above.
+
+- Phase 0 (platform skeleton) is approved and implemented.
+- Phase 1 (identity, setup, authentication, sessions, settings) is approved and implemented.
+- Phase 2 (read-only item metadata integration) is approved and implemented.
+- Phase 3 (import upload, staging, selection and atomic commit) is approved and implemented. PD3-01 through PD3-14 and all six Phase 3 plan defaults are approved. The authenticated Compose workflow (setup/login, canonical 548-line sample, subset commit, spell merge and audit) passed on 2026-11-22 UTC; see `Docs/ProjectStatus.md` §1.5.1.
+- PD-10 through PD-20 are approved. PD-19 and PD-20 are implemented.
+- The development GuildBank.items table was imported and validated with 144,712 rows; the approved Hoard normalization (AM-04) is implemented, including every Hoard<n> variant collapsing to Hoard.
+- Phase 4 has not started.

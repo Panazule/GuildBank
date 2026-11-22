@@ -1,6 +1,6 @@
 # Phase 3 Implementation Plan — Import Batches, Lists, Normalization, Selection and Commit
 
-**Status:** Proposed for review — no implementation code has been written.
+**Status:** Approved 2026-11-21 (PD3-01–PD3-14 and all six §14.1 defaults) and implemented. The authenticated Compose workflow passed on 2026-11-22 UTC; see `ProjectStatus.md` §1.5 and §1.5.1 for the implementation and validation record.
 **Date:** 2026-11-21
 **Scope owner:** single developer
 **Implementation-plan mapping:** this is the user's “Phase 3” (import pipeline). It corresponds to `Docs/ImplementationPlan.md` Phase 6, and it depends on the Phase 1 foundation (settings, SQLite, authentication) and the Phase 3 metadata service (`ItemMetadataService`). The phase numbering is called out so no one mistakes this document for the earlier Phase 3 dependency.
@@ -12,7 +12,7 @@
 - `Docs/ImplementationPlan.md` Phase 6 and Appendix B rules MR-01–MR-20.
 - `Docs/ItemsDataProfile.md` and `Docs/Samples/InventoryExport-Sample.txt` for field-profile evidence.
 
-Where this plan proposes something not yet in a normative document, it is marked **PROPOSED** and listed in §2 for explicit approval. Everything marked **SPEC** already exists in the documents above.
+Where this plan originally proposed something not yet in a normative document, it was marked **PROPOSED** and listed in §2 for explicit approval. The owner approved all §2 decisions and the six §14.1 defaults on 2026-11-21; the implementation is complete. Everything marked **SPEC** already exists in the documents above.
 
 ---
 
@@ -44,9 +44,9 @@ Acceptance is verified by the test matrix in §12, including a golden fixture de
 - No automatic creation or migration of the external `Items` table (SR-13).
 ---
 
-## 2. Decisions requiring review
+## 2. Approved decisions
 
-The defaults below are what this plan assumes. They are chosen to be conservative and testable. Approval of this plan approves these defaults.
+The owner approved PD3-01 through PD3-14 and the six §14.1 defaults on 2026-11-21. The defaults below are the approved implementation contract, not pending proposals.
 
 | ID | Decision | Default / rationale | Impact if changed |
 |---|---|---|---|
@@ -60,7 +60,7 @@ The defaults below are what this plan assumes. They are chosen to be conservativ
 | PD3-08 | Selection and upload audit | Upload and commit are audited. Selection changes are operational staging state and are not audited, because an audit row per checkbox would swamp the log; the selected set remains recoverable from `ImportList.SelectedFg` and the commit audit records the resulting counts. | Auditing selection requires a revision column and event-per-PUT design. |
 | PD3-09 | UI transport | Vanilla `imports.js` + JSON endpoints, following `setup.js`. No HTMX vendor file. | HTMX would add a new vendored JS file and HTML fragment endpoints; the service/API contract is unchanged. |
 | PD3-10 | Migration failure behavior | If MariaDB opens but migration fails, startup is fatal (exit non-zero) rather than serving a partially migrated guild store. If MariaDB cannot be opened while unconfigured, the existing degraded mode remains. | Continuing after a failed migration risks committing against a wrong schema. |
-| PD3-11 | Import grid sort columns | Phase 3 writes `ImportList.LocationSort` (DD proposed, DC-13) and adds **PROPOSED** `ImportList.NameSort VARCHAR(160) NULL` so the import grid and location drill-down obey the natural-sort requirement for names as well as locations. Add `ix_import_batch_sort (ImportBatchID, LocationGroup, LocationSort, NameSort, ImportID)`. | Without `NameSort`, names sort by collation; location order still meets the explicit examples. |
+| PD3-11 | Import grid sort columns | Phase 3 writes `ImportList.LocationSort` (DD-approved, DC-13) and adds **APPROVED** `ImportList.NameSort VARCHAR(160) NULL` so the import grid and location drill-down obey the natural-sort requirement for names as well as locations. Add `ix_import_batch_sort (ImportBatchID, LocationGroup, LocationSort, NameSort, ImportID)`. | Without `NameSort`, names sort by collation; location order still meets the explicit examples. |
 | PD3-12 | Sample counts | The supplied sample is a golden test with 548 physical lines, 197 accepted rows, 348 discarded data rows, 2 structural rows (header + one section row), 1 blank line, 30 location groups, 194 item rows → 723 item units, and 3 distinct spell rows → 3 spell quantity. These are asserted, not treated as production invariants. | Updating the fixture requires updating the golden test. |
 | PD3-13 | Timeouts | HTTP `ReadTimeout`/`WriteTimeout` become 120s and the guild-store DSN `ReadTimeout`/`WriteTimeout` become 120s so a 10 MiB upload or a 100,000-row commit is not cut off by the current 30s limits. `ReadHeaderTimeout` stays 10s and `IdleTimeout` stays 60s. | Slower clients can hold connections longer; the body, row and expansion limits remain the real guardrails. |
 | PD3-14 | Import audit granularity | Follow the D-10 allowlist and the taxonomy's "one row per logical operation": upload writes `IMPORT_CREATED`; commit writes `IMPORT_COMMITTED` plus one `ITEM_CREATED` summary (`RecordID=ImportBatchID`) and one `ITEM_UPDATED` per merged spell row for provenance. Do not write one audit row per expanded item unit. | Per-row item audit gives forensic detail but creates up to 100,000 audit rows per commit, contradicts the taxonomy, and bloats the append-only table. |
@@ -68,7 +68,7 @@ The defaults below are what this plan assumes. They are chosen to be conservativ
 
 ## 3. Current-state facts the implementation builds on
 
-- Guild-store schema is documented but **not implemented** (`ImportBatch`/`ImportList` appear only in docs; `E-14` is unused).
+- Guild-store schema was documented but not implemented when this plan was written. It is now implemented by embedded migration `0001_guild_store.sql`; `ImportBatch`, `ImportList`, `GuildBankItems`, `Audit` and `schema_migrations` exist in the Compose guild store.
 - `internal/platform/app/app.go` creates a MariaDB `GuildStore` only when guild database settings exist, keeps `guildErr`, and exposes it as unavailable instead of failing startup.
 - `internal/api/router.go` groups `/api/v1` with `RequireAuth` (and `RequireAdmin` for settings), applies CSRF middleware to unsafe methods, and `errors.go` maps `domain.ValidationError`, `ErrConflict`, `ErrNotFound`, `ErrUnavailable`, etc.
 - `internal/service/item_metadata.go` resolves canonical item metadata and mask warnings. It does not persist warnings; the import service owns that sink.
@@ -143,7 +143,7 @@ type ImportRow struct {
     LocationRaw   string
     LocationGroup string
     LocationSort  string
-    NameSort      string // PROPOSED column; always written by Phase 3
+    NameSort      string // APPROVED column; always written by Phase 3
     SelectedFg    bool
     Warnings      []ImportWarning
 }
@@ -315,13 +315,15 @@ CREATE TABLE IF NOT EXISTS ImportBatch (
     ImportedAt     DATETIME(6)  NOT NULL,              -- SPEC (UTC)
     Status         ENUM('Uploaded','Processing','Completed','Failed')
                                 NOT NULL DEFAULT 'Uploaded',  -- SPEC
-    ImportedByUserID INT NULL,                          -- PROPOSED
-    FailureReason  TEXT NULL,                           -- PROPOSED (MR-12)
-    SourceRowCount INT UNSIGNED NULL,                   -- PROPOSED
-    AcceptedRowCount INT UNSIGNED NULL,                 -- PROPOSED
-    FileSha256     CHAR(64) NULL,                       -- PROPOSED (duplicate detection)
+    ImportedByUserID INT NULL,                          -- APPROVED
+    FailureReason  TEXT NULL,                           -- APPROVED (MR-12)
+    SourceRowCount INT UNSIGNED NULL,                   -- APPROVED
+    AcceptedRowCount INT UNSIGNED NULL,                 -- APPROVED
+    FileSha256     CHAR(64) NULL,                       -- APPROVED (duplicate detection)
     PRIMARY KEY (ImportBatchID),
-    KEY ix_batch_status (Status, ImportedAt)
+    KEY ix_batch_status (Status, ImportedAt),
+    KEY ix_batch_sha (FileSha256),
+    CONSTRAINT ck_batch_status CHECK (Status IN ('Uploaded','Processing','Completed','Failed'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS ImportList (
@@ -333,11 +335,11 @@ CREATE TABLE IF NOT EXISTS ImportList (
     LocationRaw    VARCHAR(128) NOT NULL,               -- SPEC
     LocationGroup  VARCHAR(64)  NOT NULL,               -- SPEC (normalized)
     SelectedFg     TINYINT(1) NOT NULL DEFAULT 1,       -- SPEC
-    ItemType       ENUM('Item','Spell') NULL,           -- PROPOSED (DC-18)
-    WarningText    TEXT NULL,                           -- PROPOSED (E-14, D-08)
-    SourceLine     INT UNSIGNED NULL,                   -- PROPOSED (troubleshooting)
-    LocationSort   VARCHAR(80) NULL,                    -- PROPOSED (DC-13)
-    NameSort       VARCHAR(160) NULL,                   -- PROPOSED (PD3-11)
+    ItemType       ENUM('Item','Spell') NOT NULL,       -- APPROVED (DC-18)
+    WarningText    TEXT NULL,                           -- APPROVED (PD3-02, D-08)
+    SourceLine     INT UNSIGNED NULL,                   -- APPROVED (troubleshooting)
+    LocationSort   VARCHAR(80) NULL,                    -- APPROVED (DC-13)
+    NameSort       VARCHAR(160) NULL,                   -- APPROVED (PD3-11)
     PRIMARY KEY (ImportID),
     KEY ix_import_batch_selected (ImportBatchID, SelectedFg),
     KEY ix_import_batch_location (ImportBatchID, LocationGroup),
@@ -352,7 +354,7 @@ CREATE TABLE IF NOT EXISTS ImportList (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-`GuildBankItems` DDL is copied verbatim from `Docs/DatabaseDesign.md` §4.2, including the `NameSort`, `MetadataMissingFg`, `ModByUserID` proposed columns and all named checks/indexes. The `ImportList.NameSort` column and `ix_import_batch_sort` index are the only Phase 3 schema additions beyond `DatabaseDesign.md`; approving PD3-11 also approves recording them there. `ix_import_batch_sort` is ordered `(ImportBatchID, LocationGroup, LocationSort, NameSort, ImportID)` so the location-filtered review query both filters and orders by index; it subsumes the shorter `ix_import_batch_location`, which remains in the baseline DDL for compatibility. `SourceRowCount`/`AcceptedRowCount` are nullable although Phase 3 always writes them; the app enforces `AcceptedRowCount <= SourceRowCount` because the DD table has no such CHECK.
+`GuildBankItems` DDL is copied verbatim from `Docs/DatabaseDesign.md` §4.2, including the approved `NameSort`, `MetadataMissingFg` and `ModByUserID` columns and all named checks/indexes. The `ImportList.NameSort` column and `ix_import_batch_sort` index were added to `DatabaseDesign.md` when PD3-11 was approved. `ix_import_batch_sort` is ordered `(ImportBatchID, LocationGroup, LocationSort, NameSort, ImportID)` so the location-filtered review query both filters and orders by index; it subsumes the shorter `ix_import_batch_location`, which remains in the baseline DDL for compatibility. `SourceRowCount`/`AcceptedRowCount` are nullable although Phase 3 always writes them; the app enforces `AcceptedRowCount <= SourceRowCount` because the DD table has no such CHECK.
 
 ### 4.3 `Audit`
 
@@ -469,6 +471,12 @@ Rules, in order:
    - Any other value beginning with `General`, `Bank`, `SharedBank` or `Hoard` (case-insensitive) → `Unspecified`, warning `location_pattern_invalid`.
 5. Any other section (for example `Equipment`, `Possessions`, `KeyRing`, `Handout`, `Ground`, spell-family names) → `Unspecified` without `location_pattern_invalid`.
 6. `Sort = NaturalSortKey(Group)`.
+
+**Approved review clarification (2026-11-21):** `LocationGroup` is the
+authoritative source for import filtering and selection. The selector is
+generated from distinct `LocationGroup` values, and every `Hoard<n>` variant
+normalizes to the single `Hoard` option. `LocationRaw` is preserved only for
+traceability and auditing; it is never used as a filter key.
 
 The normalizer returns a canonical group, never the raw section, so `ImportList.LocationGroup` cannot become an unbounded enumeration. `LocationRaw` keeps the input for audit/display. If the resulting group exceeds 64 code points (possible only for an over-long numeric suffix), use `Unspecified` with `location_pattern_invalid` rather than truncating; this keeps the selector stable and satisfies the `VARCHAR(64)` column. `LocationSort` is truncated to 80 characters and `NameSort` to 160 characters at a rune boundary before staging; this keeps each value inside its column even when a long name produces a long sort key.
 
@@ -797,7 +805,7 @@ Use typed service errors and handler mapping; do not leak MariaDB errors. The ex
 ### 8.2 Interaction rules
 
 - Load `/selection` and `/summary` in parallel on page load. Maintain `selected = Set(selectedImportIds)`.
-- Load location groups and the first row page. Rows show checkbox state from the local set, not from the row response alone.
+- Load location groups and the first row page. The location selector is built only from distinct `LocationGroup` values; all `Hoard<n>` variants appear as one `Hoard` entry. `LocationRaw` is shown as row provenance, never as a filter option. Rows show checkbox state from the local set, not from the row response alone.
 - Toggle a row: update the set immediately, recalculate the visible checkbox/counters optimistically, debounce 300 ms, then `PUT /selection` with the complete set. Disable commit while a PUT is in flight; apply the canonical `summary` from the response; on failure revert the set and show an inline error.
 - Toggle a location:
   1. `GET /row-ids?locationGroup=…` once and cache the IDs.
@@ -1333,7 +1341,7 @@ The dependency direction stays `api/web → service → repository`; `service` d
 - Every acceptance item in §1 has an automated test except the visual/accessibility pass in §12.5.
 - `ImportBatch`/`ImportList`/`Audit`/`schema_migrations` exist in a migrated test database; `Items` remains untouched.
 - A completed batch is read-only and one inventory/audit result exists per committed record.
-- Docs reflect the actual column names, route list, limits and operational notes; no “PROPOSED” remains without a status.
+- Docs reflect the actual column names, route list, limits and operational notes; every former “PROPOSED” item now has an approved status.
 - `go vet ./...` and `go test ./...` pass; integration run recorded in the PR description.
 ---
 
@@ -1357,33 +1365,37 @@ The dependency direction stays `api/web → service → repository`; `service` d
 | Time-zone drift in dates | Low / off-by-one day | Use the injected time function in UTC, construct calendar dates with `time.Date`, and test at 23:59 UTC |
 | `NameSort`/`LocationSort` exceed their column widths | Low / insert failure | Truncate `LocationSort` to 80 and `NameSort` to 160 characters at a rune boundary before staging; test long names, numbers and Unicode |
 
-### 14.1 Open questions for the reviewer
+### 14.1 Resolved review questions
 
-1. Approve the `ImportList.NameSort` column (PD3-11) or accept collation order for names?
-2. Approve store-level audit writes (no separate recorder) in Phase 3, or defer the feature until a later audit phase (which would block commit acceptance)?
-3. Approve `Unspecified` for equipment/handout rows (PD3-01), or amend D-05 to create a separate section?
-4. Approve 120s HTTP and MariaDB DSN read/write timeouts (PD3-13)?
-5. Approve the PD3-14 audit granularity (one `ITEM_CREATED` summary plus one `ITEM_UPDATED` per merged spell, not per expanded unit)?
-6. Should the import page be visible in degraded mode with a disabled upload, or redirect to settings? This plan keeps it visible and explanatory.
+All questions below were resolved by the owner on 2026-11-21 as part of the Phase 3 approval. No Phase 3 review question remains open.
+
+| # | Question | Resolution | Decision |
+|---|---|---|---|
+| 1 | Add `ImportList.NameSort` or use collation order? | `NameSort` is approved and implemented, including the sort index. | PD3-11 |
+| 2 | Write audit through the store or defer to a later audit phase? | Import-scoped audit writes in the same MariaDB transaction are approved and implemented. | PD3-14 |
+| 3 | Use `Unspecified` for equipment/handout rows or amend D-05? | `Unspecified` fallback is approved; D-05 remains unchanged. | PD3-01 |
+| 4 | Use 120-second HTTP and DSN timeouts? | Approved and implemented. | PD3-13 |
+| 5 | Use one `ITEM_CREATED` summary plus one `ITEM_UPDATED` per merged spell? | Approved and implemented. | PD3-14 |
+| 6 | Show the import page in degraded mode with upload disabled, or redirect to settings? | The page remains visible and explanatory, with upload and commit disabled. | §14.1 default approved 2026-11-21 |
 
 ---
 
 ## 15. Review checklist
 
-- [ ] Phase numbering is understood: this document is Phase 3, implemented as `ImplementationPlan.md` Phase 6.
-- [ ] PD3-01–PD3-14 are accepted or amended before coding.
-- [ ] `ImportList.NameSort` and its index/ordering are accepted.
-- [ ] Staging schema and indexes match `DatabaseDesign.md`; `Items` is read-only.
-- [ ] Parser rules for 3/4/5 fields, header, section rows, empty IDs and limits are accepted.
-- [ ] Golden sample counts (548/197/348/2/1/30/194→723/3) are accepted as test expectations.
-- [ ] Location and name sort keys are approved.
-- [ ] Spell aggregation/merge, lowest-ID anomaly handling and advisory lock are approved.
-- [ ] Metadata fallback and commit date/offset rules are approved.
-- [ ] Audit-in-transaction behavior is approved.
-- [ ] Route list, JSON envelope, status codes and 409/413/422/503 behavior are approved.
-- [ ] Multipart CSRF support and the path-aware body limits (10 MiB upload/2 MiB selection/1 MiB otherwise) are approved.
-- [ ] 120s HTTP/DSN timeouts (PD3-13) are approved.
-- [ ] UI flow, `imports.js`, accessibility and no-HTMX choice are approved.
-- [ ] Migration failure is fatal; recovery sweep behavior is approved.
-- [ ] Test matrix covers every acceptance criterion; integration policy is acceptable.
-- [ ] No implementation code starts until this checklist is signed off.
+- [x] Phase numbering is understood: this document is Phase 3, implemented as `ImplementationPlan.md` Phase 6.
+- [x] PD3-01–PD3-14 were approved on 2026-11-21 before completion.
+- [x] `ImportList.NameSort` and its index/ordering are approved and implemented.
+- [x] Staging schema and indexes match `DatabaseDesign.md`; `Items` is read-only.
+- [x] Parser rules for 3/4/5 fields, header, section rows, empty IDs and limits are accepted.
+- [x] Golden sample counts (548/197/348/2/1/30/194→723/3) are accepted as test expectations and asserted by the parser test.
+- [x] Location and name sort keys are approved.
+- [x] Spell aggregation/merge, lowest-ID anomaly handling and advisory lock are approved.
+- [x] Metadata fallback and commit date/offset rules are approved.
+- [x] Audit-in-transaction behavior is approved.
+- [x] Route list, JSON envelope, status codes and 409/413/422/503 behavior are approved.
+- [x] Multipart CSRF support and the path-aware body limits (10 MiB upload/2 MiB selection/1 MiB otherwise) are approved.
+- [x] 120s HTTP/DSN timeouts (PD3-13) are approved.
+- [x] UI flow, `imports.js`, accessibility and no-HTMX choice are approved.
+- [x] Migration failure is fatal; recovery sweep behavior is approved.
+- [x] Test matrix covers every acceptance criterion; integration policy is acceptable.
+- [x] Signed off 2026-11-21; implementation completed without starting Phase 4.

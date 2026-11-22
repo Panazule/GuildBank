@@ -16,7 +16,7 @@ services:
       GUILDBANK_PORT: "8080"
       GUILDBANK_SQLITE_PATH: /config/guildbank.db
       GUILDBANK_LOG_LEVEL: debug
-      # Bootstrap-only guild store config; Phase 3 moves this to Settings.
+      # Bootstrap-only guild store config; Settings-backed adoption is not in Phase 3 (PD-18).
       GUILDBANK_MARIADB_HOST: mariadb
       GUILDBANK_MARIADB_PORT: "3306"
       GUILDBANK_MARIADB_DATABASE: GuildBank

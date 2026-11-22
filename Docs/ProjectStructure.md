@@ -5,7 +5,7 @@
 | Document ID | PS-002 |
 | As-of date | 2026-11-21 |
 | Source specification | `Design.md` v1.6.1 |
-| Scope | Phase 1 identity/settings layer plus the completed Phase 2 item-metadata integration (no inventory/import/audit) |
+| Scope | Phases 0–2 approved; Phase 3 approved, implemented and live-validated: identity/settings, item-metadata integration and import pipeline (no public/manual inventory, general audit UI or user management) |
 | Related | `Docs/ProjectStatus.md`, `Docs/ImplementationPlan.md` §Phase 1, `README.md` |
 
 This document maps every generated directory and major file to its
@@ -22,7 +22,8 @@ GuildBank/
 │   ├── domain/
 │   │   ├── setup.go              D-02 setup state
 │   │   ├── identity.go           User/session/setting models, sentinel and validation errors
-│   │   └── item.go               Logical Item and ItemReference contracts
+│   │   ├── item.go               Logical Item and ItemReference contracts
+│   │   └── import.go             Import batch/row/location/warning/commit contracts
 │   ├── service/
 │   │   ├── health.go             Readiness aggregation over injected interfaces
 │   │   ├── mask.go               Shared mask decoding and structured warnings
@@ -34,6 +35,13 @@ GuildBank/
 │   │   ├── rate_limit.go         D-12 IP+username login lockout
 │   │   ├── setup.go              Wizard validation, DB test and atomic commit
 │   │   ├── settings.go           Typed setting allowlist, validation and session policy
+│   │   ├── import_parser.go      Canonical TSV parser, limits and diagnostics
+│   │   ├── import_normalize.go   D-05/PD3-01 location and Hoard normalization
+│   │   ├── import_sort.go        Natural sort keys for location and name
+│   │   ├── import_upload.go      Metadata resolution, classification and durable staging
+│   │   ├── import_commit.go      Selection, summary and atomic commit planning
+│   │   ├── import_service.go     Import service wiring, reads and lifecycle
+│   │   ├── import_warning.go     Structured warning encoding for WarningText
 │   │   └── *_test.go
 │   ├── integration/
 │   │   └── items_test.go        Opt-in full-source Items metadata test
@@ -49,14 +57,21 @@ GuildBank/
 │   │   │   └── *_test.go
 │   │   └── mariadb/
 │   │       ├── store.go          MariaDB pool, bounded ping and connection test
+│   │       ├── migrate.go        Embedded guild-store migration runner (GET_LOCK)
+│   │       ├── migrations/       0001_guild_store.sql (imports, inventory, audit)
 │   │       ├── items.go          Read-only physical→logical Items repository
+│   │       ├── imports.go        Batch/row/location/selection reads and staging
+│   │       ├── imports_commit.go Advisory-locked atomic import commit and audit
+│   │       ├── errors.go         MariaDB error classification
 │   │       └── *_test.go
 │   ├── api/
 │   │   ├── router.go             Route groups, middleware order, JSON 404/405
 │   │   ├── auth.go               Login/logout/session/csrf handlers
 │   │   ├── setup.go              Setup page and step handlers
 │   │   ├── settings.go           Settings page and REST handlers
+│   │   ├── imports.go            Import upload, review, selection and commit handlers
 │   │   ├── views.go              Embedded template rendering
+│   │   ├── ui.go                 Shared HTML page helpers
 │   │   ├── csrf.go               Signed double-submit CSRF
 │   │   ├── cookies.go            Session/CSRF cookie flags and redirect safety
 │   │   ├── middleware.go          Request ID, access log, panic recovery
@@ -67,8 +82,8 @@ GuildBank/
 │   ├── web/
 │   │   ├── embed.go              Embedded template/static filesystems
 │   │   ├── embed_test.go         Import guard + embed checks
-│   │   ├── templates/            setup, login, settings, home, error, partials
-│   │   └── static/               app.css and setup wizard script
+│   │   ├── templates/            setup, login, settings, imports, import_detail, home, error, partials
+│   │   └── static/               app.css, setup.js and imports.js
 │   └── platform/
 │       ├── config/
 │       │   ├── config.go        Defaults -> env -> flags, validation, redaction
@@ -109,9 +124,10 @@ calling `platform/app.Run` directly.
 
 Pure specification types shared across layers. Defines `SetupState`
 (unknown/pending/complete) per D-02 plus `User`, `Session`, `Setting`, logical
-`Item`/`ItemReference`, sentinel errors and field validation errors. No I/O, no
-imports of other application packages. Inventory, import and audit types arrive
-with their phases.
+`Item`/`ItemReference`, and the Phase 3 `ImportBatch`/`ImportRow`/`ImportLocation`/
+`ImportWarning`/commit contracts, sentinel errors and field validation errors. No
+I/O, no imports of other application packages. Public/manual inventory and general
+audit types arrive with their phases.
 
 ### `internal/service`
 
@@ -120,8 +136,11 @@ setup validation/commit, bcrypt password helpers, authentication and session
 lifecycle, the D-12 login limiter and typed settings. Phase 2 adds
 repository-independent class/race decoders and `ItemMetadataService`, which
 resolves an imported `EQUID` against Items and generates `GuildBankItems`
-metadata. The package never imports a repository: concrete stores are injected
-by `platform/app` through the interfaces declared here.
+metadata. Phase 3 adds the streaming import parser, location/Hoard normalization
+(PD3-01), natural sort keys, metadata-aware staging, full-replacement selection,
+unit-aware summaries, spell aggregation and atomic commit planning
+(PD3-03/PD3-04/PD3-14). The package never imports a repository: concrete stores
+are injected by `platform/app` through the interfaces declared here.
 
 ### `internal/repository/sqlite`
 
@@ -150,6 +169,15 @@ that knows the physical lowercase table and its `id`/`name`/`classes`/`races`
 columns (PD-19). It provides single, batch, count and keyset-page reads and no
 write method. Production grants must still enforce `SELECT` only (E-01).
 
+`migrate.go` applies embedded forward-only migrations under a per-database
+`GET_LOCK` and records them in `schema_migrations`; `0001_guild_store.sql`
+creates `ImportBatch`, `ImportList`, `GuildBankItems` and `Audit`.
+`imports.go` owns durable batch/staging writes, paged review reads and
+full-replacement selection. `imports_commit.go` owns the advisory-locked atomic
+commit, item-unit expansion, spell merge into the lowest active target and
+transactional import audit. `errors.go` classifies deadlocks and unavailable
+store errors for the service layer.
+
 ### `internal/api`
 
 HTTP entry layer. It depends on `service` types and must not import
@@ -158,15 +186,22 @@ recovery → request ID → access log → security headers → setup gate, then
 public CSRF or, for admin routes, session → CSRF → administrator check. JSON
 errors use `{"error":{"code","message","fields","request_id"}}`. Setup and
 login HTML forms post to the same REST handlers as JSON clients; POST settings
-is a thin HTML adapter for PUT.
+is a thin HTML adapter for PUT. Phase 3 adds the admin-only import routes for
+upload, history, detail, locations, rows, row IDs, selection, summary and commit.
+The multipart upload uses the path-aware body limit and multipart CSRF support;
+`imports.go` maps parse, selection, terminal-state, duplicate-commit and
+unavailable-store errors to `409`/`413`/`422`/`503`.
 
 ### `internal/web`
 
 Server-side rendering assets, embedded with `embed.FS` so the container needs
 no asset files on disk. Phase 1 adds setup, login, settings, home and error
-templates plus `app.css` and a small vanilla setup script. No CDN is used.
+templates plus `app.css` and a small vanilla setup script. Phase 3 adds the
+import history/upload page, the batch review page (location filter available in
+read-only terminator states), and `imports.js` for upload state, paged rows,
+location toggles, debounced selection saves and commit. No CDN is used.
 Bootstrap/HTMX adoption for later inventory screens remains a recorded decision
-(PD-12).
+(PD-12); the import UI deliberately uses vanilla `fetch` (PD3-09).
 
 ### `internal/platform/config`
 
@@ -189,8 +224,10 @@ writable, opens and migrates SQLite, attempts MariaDB when configured, wires
 the services/router and the hourly session purge, serves HTTP with bounded
 timeouts, and on shutdown stops accepting connections, drains for at most ten
 seconds, checkpoints SQLite and closes both pools. A MariaDB failure is logged
-and surfaced through `/readyz` rather than preventing startup; Phase 3 makes
-the pool Settings-backed and hot-swappable.
+and surfaced through `/readyz` rather than preventing startup. A configured
+MariaDB store is migrated at startup (fatal on migration failure) and interrupted
+`Processing` batches are recovered; the pool is not Settings-backed or
+hot-swappable in Phase 3 (PD-18).
 
 ## 3. Request and startup flow
 
@@ -203,8 +240,10 @@ main
      ├─ sqlite.Open  ── pragmas, ping, single writer
      ├─ sqlite.Migrate ── PRAGMA user_version = 1 (Users, Settings, Sessions)
      ├─ mariadb.Open ── OPTIONAL: pool + 5s ping (failure = degraded)
+     ├─ mariadb.Migrate ── 0001_guild_store (fatal on migration error)
+     ├─ mariadb.RecoverInterrupted ── fail stranded Processing batches
      ├─ service.NewHealthService(sqlite, setup, mariadb)
-     ├─ setup/auth/settings services + hourly session purge
+     ├─ setup/auth/settings/import services + hourly session purge
      ├─ api.NewRouter(setup gate -> public CSRF or session -> CSRF -> admin)
      └─ http.Server.ListenAndServe
          └─ on SIGTERM: Shutdown(10s) -> sqlite wal_checkpoint(TRUNCATE) -> close
@@ -224,11 +263,11 @@ routes return `503 setup_required`.
 
 | # | Decision | Rationale | Status |
 |---|---|---|---|
-| PD-01 | Module path `github.com/Panazule/guildbank` (from the git remote, lowercase) | Stable import paths; easy to change before publishing | Provisional |
+| PD-01 | Module path `github.com/Panazule/guildbank` (from the git remote, lowercase) | Stable import paths; easy to change before publishing | **Approved with Phase 0**; used by Phases 1–3 |
 | PD-02 | SQLite driver `modernc.org/sqlite` | Pure Go; satisfies the static, CGO-free, non-root container requirement | Adopted |
 | PD-03 | One SQLite connection plus WAL and `busy_timeout(5000)` | Removes writer contention now; dedicated read/write pools can follow with measured need (IC-08) | Adopted |
 | PD-04 | MariaDB optional at startup; failure is logged and reported by `/readyz` | SQLite-backed login/settings must survive a guild-store outage | Adopted |
-| PD-05 | `GUILDBANK_MARIADB_*` environment bootstrap, superseded by Settings | Exercises the connection layer before Phase 3; E-11 is unresolved, so this must not become the permanent model | **Approved 2026-11-21 as temporary bootstrap**; Phase 1 persists wizard values but runtime adoption is Phase 3 |
+| PD-05 | `GUILDBANK_MARIADB_*` environment bootstrap, superseded by Settings | Exercises the connection layer before Phase 3; E-11 is unresolved, so this must not become the permanent model | **Approved 2026-11-21 as temporary bootstrap**; the wizard persists values, but Phase 3 deliberately did not replace the runtime pool |
 | PD-06 | Setup readiness is a real `Users`-table probe | Implements D-02; disabled admins still count so setup cannot reopen | Superseded by PD-14 (missing table fails closed) |
 | PD-07 | `/readyz` returns `503` until an administrator exists and MariaDB is reachable | Follows IP acceptance and §7.5; container health uses `/healthz` | Adopted |
 | PD-08 | Gin release mode, custom recovery/request-ID/access-log middleware | Avoids Gin's unstructured defaults; matches IC-20/IC-24 | Adopted |
@@ -246,12 +285,13 @@ routes return `503 setup_required`.
 | PD-15 | Session lifecycle 30-minute idle / 8-hour absolute, sliding refresh throttled to once per minute, hourly purge | Implements E-08 defaults; no refresh-token or rotation beyond login | **Approved 2026-11-21** |
 | PD-16 | In-process login limiter keyed IP+username: 5 failures → 15-minute lockout; fifth failure returns `429` with `Retry-After` | Implements D-12 defaults for a single instance; multi-instance needs a shared store | **Approved 2026-11-21** |
 | PD-17 | `GUILDBANK_SECURE_COOKIES` (flag/env) explicitly enables `Secure`; no automatic `X-Forwarded-Proto` inference | Avoids trusting spoofable headers; operator must enable behind TLS. Public exposure without it needs approval | **Approved 2026-11-21** |
-| PD-18 | Wizard persists MariaDB settings but runtime pool still uses `GUILDBANK_MARIADB_*` until Phase 3 | Keeps Phase 1 free of MariaDB business wiring; the wizard requires a successful test before committing the admin (PD-05 remains runtime bootstrap) | **Approved 2026-11-21** |
+| PD-18 | Wizard persists MariaDB settings, but the runtime pool still uses `GUILDBANK_MARIADB_*` | Keeps Phase 1 free of MariaDB business wiring; the wizard requires a successful test before committing the admin (PD-05 remains runtime bootstrap) | **Approved 2026-11-21; still in force** — Phase 3 uses the bootstrap pool and does not hot-swap or adopt Settings-backed connections |
 
-The owner approved PD-10–PD-18 on 2026-11-21 and authorized the remainder of
-Phase 2. The approved `ClassMaskDecoder` and `RaceMaskDecoder` are part of that
-baseline; Blade of Carnage and Flayed Skin Cap are permanent validation
-fixtures. Phase 3 has not started.
+The owner approved PD-10–PD-20 on 2026-11-21. The approved `ClassMaskDecoder`
+and `RaceMaskDecoder` are part of the Phase 2 baseline; Blade of Carnage and
+Flayed Skin Cap are permanent validation fixtures. Phase 3 was subsequently
+approved (PD3-01–PD3-14 and all six plan defaults) and implemented from
+`Phase3ImplementationPlan.md`.
 
 ### 4.3 Pre-Phase 2 data-source decisions
 
@@ -261,7 +301,30 @@ the Phase 1 approval set. Both were approved by the owner on 2026-11-21.
 | # | Decision | Rationale | Status |
 |---|---|---|---|
 | PD-19 | Map `GuildBank.items` physical columns `id`, `name`, `classes`, `races` to the logical `EQUID`, `Name`, `ClassList`, `RaceList` inside the read-only item repository; do not rename, alter or view-wrap the external table | The actual source is lowercase with different column names; one repository must isolate that contract (`Docs/ItemsDataProfile.md` §2) | **Approved and implemented 2026-11-21**; `internal/repository/mariadb/items.go` provides read-only single, batch, count and keyset-page reads behind `domain.Item` |
-| PD-20 | Decode only defined low 16 bits; treat `65535` as `ALL`, `0` as blank, and preserve the row with a non-fatal warning for undefined high bits; do not reuse `MetadataMissingFg` | 570 class and 628 race values exceed the specified 16-bit masks; rejecting them would fail otherwise valid metadata, while silently dropping high bits needs explicit approval | **Approved and implemented 2026-11-21**; repository-independent decoders and `ItemMetadataService`; warnings remain sink-neutral pending E-14 |
+| PD-20 | Decode only defined low 16 bits; treat `65535` as `ALL`, `0` as blank, and preserve the row with a non-fatal warning for undefined high bits; do not reuse `MetadataMissingFg` | 570 class and 628 race values exceed the specified 16-bit masks; rejecting them would fail otherwise valid metadata, while silently dropping high bits needs explicit approval | **Approved and implemented 2026-11-21**; repository-independent decoders and `ItemMetadataService`; import warnings persist through PD3-02 |
+
+### 4.4 Phase 3 decisions (approved 2026-11-21)
+
+PD3-01 through PD3-14 and all six `Phase3ImplementationPlan.md` §14.1 defaults
+were approved and implemented. The authoritative rationale and impact analysis
+remain in `Phase3ImplementationPlan.md` §2 and §14.1.
+
+| # | Decision | Status |
+|---|---|---|
+| PD3-01 | Equipment/blank/unparseable locations → `Unspecified`; `Hoard<n>` → `Hoard` | **Approved and implemented** |
+| PD3-02 | Row warnings stored as structured JSON in `ImportList.WarningText` | **Approved and implemented** |
+| PD3-03 | Merge spells only into active (`DeletedFg=0`) rows; insert otherwise | **Approved and implemented** |
+| PD3-04 | Aggregate staged spells by EQUID; lowest active id on anomaly; advisory lock | **Approved and implemented** |
+| PD3-05 | SourceRowCount is physical lines; AcceptedRowCount is staged rows; summary states units | **Approved and implemented** |
+| PD3-06 | 10 MiB body, 50k lines, 64 KiB/line, 100k expanded rows, 10k count/row | **Approved and implemented** |
+| PD3-07 | Canonical item names with missing-metadata fallback; spells keep imported names | **Approved and implemented** |
+| PD3-08 | Upload/commit audited; selection changes are not audited | **Approved and implemented** |
+| PD3-09 | Vanilla `imports.js` and JSON endpoints; no HTMX vendor file | **Approved and implemented** |
+| PD3-10 | Guild migration failure is fatal; unreachable store remains degraded | **Approved and implemented** |
+| PD3-11 | Persist `LocationSort` and `NameSort` with the import sort index | **Approved and implemented** |
+| PD3-12 | Golden sample counts 548/197/348/2/1, 30 groups, 723 item units, 3 spells | **Approved and asserted** |
+| PD3-13 | 120-second HTTP and MariaDB DSN read/write timeouts | **Approved and implemented** |
+| PD3-14 | Upload/commit audit summary; one `ITEM_UPDATED` per merged spell, not per unit | **Approved and implemented** |
 
 ## 5. Scope boundaries
 
@@ -273,19 +336,28 @@ default-deny admin routes, typed settings read/update, embedded UI, the
 read-only Items repository, class/race decoders and service-layer item-metadata
 generation.
 
-Deliberately absent: user management, audit/outbox, inventory, imports,
-`GuildBankItems` migration/writes, dashboard, public inventory UI, HTTP item
-metadata routes, and Settings-backed MariaDB pool adoption.
+Phase 3 adds `domain/import.go`, parser/normalizer/sort/upload/commit service
+files, `repository/mariadb/{migrate,imports,imports_commit,errors}.go` with the
+embedded `0001_guild_store.sql`, `api/imports.go`, the import templates,
+`imports.js` and import handler/parser/commit tests. It writes `ImportBatch`,
+`ImportList`, `GuildBankItems` and import-scoped `Audit` rows, and is implemented
+and live-migrated in Compose.
 
-Known Phase 1/2 limitations: if MariaDB is configured but unreachable at
-startup, `/readyz` keeps reporting the startup error until the process is
-restarted; Phase 3 adds reconnect and hot-swap. The wizard persists MariaDB
-settings but the running process still uses the environment bootstrap (PD-18).
-The login limiter is in-process, so multiple replicas do not share lockouts
-(PD-16). `ItemMetadataService` is available to the inventory/import phases but
-has no HTTP route yet, and warning persistence remains an E-14 decision. The
-image build and `go test -race` run in Linux CI; a local Windows race run
-requires `CGO_ENABLED=1` and a C toolchain.
+Deliberately absent: user management, general audit/outbox, manual inventory
+CRUD, dashboard, public inventory UI, HTTP item-metadata routes, and
+Settings-backed MariaDB pool adoption.
+
+Remaining limitations: if MariaDB is configured but unreachable at startup,
+`/readyz` keeps reporting the startup error until the process is restarted;
+Phase 3 does not add reconnect or hot-swap. The wizard persists MariaDB settings
+but the running process still uses the environment bootstrap (PD-18). The login
+limiter is in-process, so multiple replicas do not share lockouts (PD-16).
+`ItemMetadataService` is consumed by the import pipeline but has no separate
+metadata route. Import warnings are persisted in `ImportList.WarningText`; the
+authenticated Compose upload → selection → commit workflow passed on
+2026-11-22 UTC (`ProjectStatus.md` §1.5.1). The image build and `go test -race`
+run in Linux CI; a local Windows race run requires `CGO_ENABLED=1` and a C
+toolchain.
 
 ## 6. Validation performed
 
@@ -299,7 +371,9 @@ requires `CGO_ENABLED=1` and a C toolchain.
 | Item metadata tests | Found EQUIDs use source `Name` and decoded strings; absent EQUIDs preserve imported name, blank class/race, set `MetadataMissing`, and emit one `metadata_missing` warning; batch order, validation, source errors and warning propagation covered |
 | Repository mapping tests | `items.id/name/classes/races` → `EQUID/Name/ClassList/RaceList`, blank masks → 0, malformed masks rejected, missing row → `domain.ErrNotFound` |
 | Repository batch/page tests | Duplicate EQUIDs collapsed; invalid page sizes rejected; repository source contains no write statement |
-| API tests | Setup wizard and 410 closure, CSRF 403, default-deny 401/redirect, cookie flags, raw token absent from SQLite, secret redaction, settings persistence |
+| API tests | Setup wizard and 410 closure, CSRF 403, default-deny 401/redirect, cookie flags, raw token absent from SQLite, secret redaction, settings persistence; import multipart CSRF, upload, selection, `LocationGroup` locations and rendered pages |
+| Import parser/commit tests | Golden sample 548/197/348/2/1, 30 groups with one `Hoard`, 723 item units and 3 spells; natural sort and normalization cases; item expansion, spell aggregation, lowest active target, missing metadata and warning cap |
+| Guild migration (live Compose) | Rebuilt image; startup logged `guild store schema ready schema_version=0001_guild_store`; all five guild-store tables and the version row exist; `/healthz` healthy |
 | Runtime `/healthz` | `200` |
 | Runtime `/readyz` before setup | `503` with sqlite `ok`, setup `pending`, mariadb `ok` |
 | Runtime `/readyz` after setup | `200` with sqlite/setup/mariadb all `ok` |
@@ -312,6 +386,7 @@ requires `CGO_ENABLED=1` and a C toolchain.
 | Docker/Compose | Image built; app and MariaDB healthy; restart retained administrator/settings and returned ready `200` |
 | Development `Items` profile (read-only) | `GuildBank.items`: 144,712 rows, 144,712 distinct `id`; both published fixtures (`Blade of Carnage`, `Flayed Skin Cap`) decode as specified; 570/628 masks exceed 16 bits and now produce non-fatal warnings under approved PD-20 |
 | Live Items integration (opt-in) | Static Linux test binary run on the Compose network: `CountItems` = 144,712, keyset scan covered every row exactly once, class/race high-bit counts = 570/628, fixture metadata and a missing EQUID matched D-08; `PASS` |
+| Live import commit | Pass. Fresh-volume setup and admin login, canonical sample upload (548/197/348), 30 `LocationGroup` options with one `Hoard`, 8-group subset selection (77 rows, 471 item units, 3 spells) and atomic commit (474 records); `ImportBatch`/`ImportList`/`GuildBankItems`/`Audit` verified, re-commit `409`, and a second batch produced 2 spell merges plus `ITEM_UPDATED` audit rows. Evidence in `ProjectStatus.md` §1.5.1 |
 
 ## 7. Build and run
 

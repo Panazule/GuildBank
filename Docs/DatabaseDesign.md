@@ -3,13 +3,14 @@
 | Field | Value |
 |---|---|
 | Document ID | DD-001 |
-| Source specification | `Design.md` v1.6.1 (authoritative; body L1–L854, decisions L855–L1161, amendments AM-01–AM-05 at L1163–L1263) |
+| Source specification | `Design.md` v1.6.1 (authoritative; body L1–L854, decisions L855–L1161, amendments AM-01–AM-05 at L1163–L1263, informational status at L1265–L1274) |
 | Review date | 2026-11-20 |
-| Revision | 1.2 — 2026-11-20, incorporates decisions D-01–D-13 and amendments AM-01–AM-05 |
-| Companion documents | `ArchitectureReview.md`, `ImplementationPlan.md`, `ProjectStatus.md` |
+| Revision | 1.3 — 2026-11-21, implementation status aligned with PD-10–PD-20, PD3-01–PD3-14 and migration `0001_guild_store` |
+| Companion documents | `ArchitectureReview.md`, `ImplementationPlan.md`, `ProjectStatus.md`, `Phase3ImplementationPlan.md` |
 | Scope | Logical and physical schema for the SQLite application store and the MariaDB guild store |
+| Implementation status | SQLite §§3.1–3.3 and MariaDB §§4.1–4.5 are implemented for Phases 1–3; §3.4 `AuditOutbox` and the general audit UI remain later-phase work |
 
-This document is an implementation-ready data design derived from `Design.md`. Columns marked **SPEC** are mandated by the specification; columns marked **SPEC-V1.6** are mandated by decisions D-01–D-13; columns marked **SPEC-V1.6.1** are mandated by amendments AM-01–AM-05. Columns, tables, constraints and indexes marked **PROPOSED** are engineering additions required to make the specification implementable; each is cross-referenced to a finding in `ArchitectureReview.md` and must be approved as a specification amendment before release. v1.6.1 resolves the two conflicts this design previously recorded (the `-1` sentinel and the sample path), so the physical model now conforms to the specification without a blocking deviation.
+This document is an implementation-ready data design derived from `Design.md`. Columns marked **SPEC** are mandated by the specification; columns marked **SPEC-V1.6** are mandated by decisions D-01–D-13; columns marked **SPEC-V1.6.1** are mandated by amendments AM-01–AM-05. Columns, tables, constraints and indexes marked **PROPOSED** are engineering additions required to make the specification implementable; each is cross-referenced to a finding in `ArchitectureReview.md`. The additions used by Phases 1–3 were approved through PD-10–PD-20 and PD3-01–PD3-14 and are implemented in the migrations; remaining proposals such as `AuditOutbox` await a later phase. v1.6.1 resolves the two conflicts this design previously recorded (the `-1` sentinel and the sample path), so the physical model now conforms to the specification without a blocking deviation.
 
 ---
 
@@ -38,12 +39,12 @@ This document is an implementation-ready data design derived from `Design.md`. C
 | SQLite | `Users` | Application | Read/Write | L166–L181 |
 | SQLite | `Settings` | Application | Read/Write | L190–L214 |
 | SQLite | `Sessions` | Application | Read/Write | L216–L227; D-09 (L1066–L1082) |
-| SQLite | `AuditOutbox` **PROPOSED** | Application | Read/Write | DC-03 |
-| MariaDB | `Items` | External loader | **Read only** | L233–L259 |
-| MariaDB | `GuildBankItems` | Application | Insert/Update (no delete) | L261–L374 |
-| MariaDB | `ImportBatch` | Application | Insert/Update (no delete) | L531–L549 |
-| MariaDB | `ImportList` | Application | Insert/Update (no delete) | L551–L605 |
-| MariaDB | `Audit` | Application | Insert only | L107, L773–L783; D-10 (L1083–L1116) |
+| SQLite | `AuditOutbox` **PROPOSED (later phase)** | Application | Read/Write | DC-03 |
+| MariaDB | `Items` | External loader | **Read only** (PD-19; production grant pending E-01) | L233–L259 |
+| MariaDB | `GuildBankItems` | Application | Insert/Update (no delete); implemented | L261–L374 |
+| MariaDB | `ImportBatch` | Application | Insert/Update (no delete); implemented | L531–L549 |
+| MariaDB | `ImportList` | Application | Insert/Update (no delete); implemented | L551–L605 |
+| MariaDB | `Audit` | Application | Insert only; import-scoped writes implemented | L107, L773–L783; D-10 (L1083–L1116) |
 
 The store split in this table is fixed by D-13 (L1147–L1161) and is not a migration convenience: SQLite never holds guild data and MariaDB never holds credentials or sessions.
 
@@ -69,9 +70,9 @@ CREATE TABLE Users (
     DisabledFg    INTEGER NOT NULL DEFAULT 0         -- SPEC
                           CHECK (DisabledFg IN (0,1)),
     ModAt         TEXT    NOT NULL,                  -- SPEC: UTC ISO-8601
-    CreatedAt     TEXT    NOT NULL,                  -- PROPOSED
-    ModBy         TEXT    NULL,                      -- PROPOSED: username snapshot
-    MustChangePassword INTEGER NOT NULL DEFAULT 0    -- PROPOSED
+    CreatedAt     TEXT    NOT NULL,                  -- IMPLEMENTED (Phase 1)
+    ModBy         TEXT    NULL,                      -- IMPLEMENTED: username snapshot
+    MustChangePassword INTEGER NOT NULL DEFAULT 0    -- IMPLEMENTED
                           CHECK (MustChangePassword IN (0,1))
 );
 
@@ -88,18 +89,18 @@ CREATE UNIQUE INDEX ux_users_username ON Users (UserName COLLATE NOCASE);
 
 Spec fields (L194–L198): `SettingKey`, `SettingValue`. Initial settings (L198–L213): `GuildName`, `GuildOpenDays`, `BazaarDays`, `EQResourceBaseUrl` with defaults `Aeternus`, `14`, `30`, `https://items.eqresource.com/items.php?id=`.
 
-The wizard also "stores configuration" for MariaDB (L147–L164). Those keys are not enumerated, so their names are **PROPOSED** while the requirement is spec-mandated.
+The wizard also "stores configuration" for MariaDB (L147–L164). Those keys are not enumerated by the specification; the implemented names were approved with the Phase 1 settings set.
 
 ```sql
 CREATE TABLE Settings (
     SettingKey   TEXT PRIMARY KEY,                   -- SPEC
     SettingValue TEXT NOT NULL,                      -- SPEC
-    SettingType  TEXT NOT NULL DEFAULT 'string'      -- PROPOSED (MR-09)
+    SettingType  TEXT NOT NULL DEFAULT 'string'      -- IMPLEMENTED (MR-09)
                      CHECK (SettingType IN ('string','integer','boolean','secret','url')),
-    IsSecret     INTEGER NOT NULL DEFAULT 0          -- PROPOSED (SR-02)
+    IsSecret     INTEGER NOT NULL DEFAULT 0          -- IMPLEMENTED (SR-02)
                      CHECK (IsSecret IN (0,1)),
-    ModAt        TEXT NOT NULL,                      -- PROPOSED
-    ModBy        TEXT NULL                           -- PROPOSED
+    ModAt        TEXT NOT NULL,                      -- IMPLEMENTED
+    ModBy        TEXT NULL                           -- IMPLEMENTED
 );
 ```
 
@@ -117,8 +118,8 @@ Seed rows (idempotent `INSERT ... ON CONFLICT(SettingKey) DO NOTHING`):
 | `MariaDbUsername` | *(setup)* | string | no | non-empty |
 | `MariaDbPassword` | *(setup)* | secret | **yes** | non-empty |
 | `SetupComplete` | `0` | boolean | no | must be `1` before setup routes close |
-| `SessionIdleMinutes` | `30` | integer | no | `5–1440` (PROPOSED, E-08) |
-| `SessionAbsoluteHours` | `8` | integer | no | `1–168` (PROPOSED, E-08) |
+| `SessionIdleMinutes` | `30` | integer | no | `5–1440` (APPROVED PD-15) |
+| `SessionAbsoluteHours` | `8` | integer | no | `1–168` (APPROVED PD-15) |
 
 **Secret storage limitation.** SQLite offers no native secret protection. Options: (a) rely on `/config` volume permissions and document the trust boundary; (b) encrypt `SettingValue` with a key injected via environment or stored outside the volume. Encryption with a key stored beside the ciphertext adds little. The chosen approach must be recorded in the specification (SR-02, E-11). Regardless, `GET /api/settings` must never return `IsSecret = 1` values (MR-09).
 
@@ -135,7 +136,7 @@ CREATE TABLE Sessions (
     CreatedAt   TEXT NOT NULL,
     LastAccessed TEXT NOT NULL,
     ExpiresAt   TEXT NOT NULL,                   -- idle expiry
-    -- PROPOSED (SR-03, E-08)
+    -- APPROVED PD-15 (SR-03, E-08)
     AbsoluteExpiresAt TEXT NOT NULL,
     RevokedAt   TEXT NULL,
     ClientIP    TEXT NULL,
@@ -272,8 +273,8 @@ CREATE TABLE GuildBankItems (
     DeletedFg       TINYINT(1) NOT NULL DEFAULT 0,           -- SPEC
     ModAt           DATETIME(6) NOT NULL,                    -- SPEC (UTC)
     ModBy           VARCHAR(64) NOT NULL,                    -- SPEC (username snapshot)
-    ModByUserID     INT NULL,                                -- PROPOSED (DC-07)
-    NameSort        VARCHAR(160) NULL,                       -- PROPOSED (DC-13)
+    ModByUserID     INT NULL,                                -- APPROVED and implemented (DC-07)
+    NameSort        VARCHAR(160) NULL,                       -- APPROVED and implemented (DC-13)
     PRIMARY KEY (GuildBankItemID),
     KEY ix_gbi_equid     (EQUID),
     KEY ix_gbi_public    (DeletedFg, ItemType, Name),
@@ -311,13 +312,15 @@ CREATE TABLE ImportBatch (
     ImportedAt     DATETIME(6)  NOT NULL,              -- SPEC (UTC)
     Status         ENUM('Uploaded','Processing','Completed','Failed')
                                 NOT NULL DEFAULT 'Uploaded',  -- SPEC
-    ImportedByUserID INT NULL,                          -- PROPOSED
-    FailureReason  TEXT NULL,                           -- PROPOSED (MR-12)
-    SourceRowCount INT UNSIGNED NULL,                   -- PROPOSED
-    AcceptedRowCount INT UNSIGNED NULL,                 -- PROPOSED
-    FileSha256     CHAR(64) NULL,                       -- PROPOSED (duplicate detection)
+    ImportedByUserID INT NULL,                          -- APPROVED and implemented (Phase 3)
+    FailureReason  TEXT NULL,                           -- APPROVED and implemented (MR-12)
+    SourceRowCount INT UNSIGNED NULL,                   -- APPROVED and implemented (Phase 3)
+    AcceptedRowCount INT UNSIGNED NULL,                 -- APPROVED and implemented (Phase 3)
+    FileSha256     CHAR(64) NULL,                       -- APPROVED and implemented (duplicate detection)
     PRIMARY KEY (ImportBatchID),
-    KEY ix_batch_status (Status, ImportedAt)
+    KEY ix_batch_status (Status, ImportedAt),
+    KEY ix_batch_sha (FileSha256),
+    CONSTRAINT ck_batch_status CHECK (Status IN ('Uploaded','Processing','Completed','Failed'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
@@ -325,7 +328,7 @@ CREATE TABLE ImportBatch (
 - `ImportedBy` cannot be a foreign key (SQLite users, DC-07); it is a label plus optional numeric reference.
 - History retention (L549) means the runtime never deletes batches. `Failed` rows persist with `FailureReason` (MR-12).
 - Allowed transitions are `Uploaded → Processing → Completed|Failed`; `Completed` and `Failed` are terminal (DC-16). Status changes are guarded by `SELECT ... FOR UPDATE` during commit.
-- `FileSha256` is optional but recommended to warn on duplicate uploads (MR-12).
+- `FileSha256` is nullable and indexed by `ix_batch_sha`; the import service uses it to report duplicate uploads without rejecting them (MR-12). `ck_batch_status` is defense in depth behind the service state machine.
 
 ### 4.4 `ImportList`
 
@@ -341,14 +344,16 @@ CREATE TABLE ImportList (
     LocationRaw    VARCHAR(128) NOT NULL,               -- SPEC
     LocationGroup  VARCHAR(64)  NOT NULL,               -- SPEC (normalized)
     SelectedFg     TINYINT(1) NOT NULL DEFAULT 1,       -- SPEC
-    ItemType       ENUM('Item','Spell') NULL,           -- PROPOSED (DC-18); required by D-06/D-07, see IC-28
-    WarningText    TEXT NULL,                           -- PROPOSED (E-14, D-08 unresolved-metadata warning)
-    SourceLine     INT UNSIGNED NULL,                   -- PROPOSED (troubleshooting)
-    LocationSort   VARCHAR(80) NULL,                    -- PROPOSED (DC-13)
+    ItemType       ENUM('Item','Spell') NOT NULL,       -- APPROVED (Phase 3 staging contract); required by D-06/D-07
+    WarningText    TEXT NULL,                           -- APPROVED PD3-02 (structured warning JSON)
+    SourceLine     INT UNSIGNED NULL,                   -- APPROVED (troubleshooting)
+    LocationSort   VARCHAR(80) NULL,                    -- APPROVED PD3-11 (DC-13)
+    NameSort       VARCHAR(160) NULL,                   -- APPROVED PD3-11 (DC-13)
     PRIMARY KEY (ImportID),
     KEY ix_import_batch_selected (ImportBatchID, SelectedFg),
     KEY ix_import_batch_location (ImportBatchID, LocationGroup),
     KEY ix_import_batch_equid    (ImportBatchID, EQUID),
+    KEY ix_import_batch_sort     (ImportBatchID, LocationGroup, LocationSort, NameSort, ImportID),
     CONSTRAINT fk_import_batch FOREIGN KEY (ImportBatchID)
         REFERENCES ImportBatch (ImportBatchID)
         ON UPDATE RESTRICT ON DELETE RESTRICT,
@@ -360,14 +365,15 @@ CREATE TABLE ImportList (
 
 **Notes**
 - Deliberately **no FK on `EQUID`**: staging must accept a row whose metadata is missing or stale, because classification/metadata validation happens at commit (DC-08). Staging is a landing zone, not inventory.
-- `ItemType` is populated at parse time by the same classifier used at commit (DC-18); D-06/D-07 make it load-bearing, so it must be promoted from PROPOSED to specified (IC-28). It stays nullable only for legacy batches.
-- `WarningText` is the proposed sink for D-08 warnings; D-08 names a "warning entry" without a destination (MR-22). Nullable and never used for control flow.
-- `LocationRaw` is preserved exactly as imported; `LocationGroup` is the normalized selector value (L569–L605, D-05). Both are retained so a normalization-rule fix can be re-run without re-upload (MR-04, IC-14).
+- `ItemType` is populated at parse time by the same classifier used at commit (DC-18); D-06/D-07 make it load-bearing. PD3-07 approved it as a non-null staging field; legacy nullable data is not part of the implemented schema.
+- `WarningText` is the approved sink for import warnings (PD3-02). It stores a compact JSON array of structured warnings, is nullable and is never used for control flow.
+- `NameSort` was added by PD3-11 so the import grid and location drill-down follow natural-sort order for names as well as locations; `ix_import_batch_sort` serves those reads.
+- `LocationRaw` is preserved exactly as imported; `LocationGroup` is the normalized selector value (L569–L605, D-05, PD3-01). Both are retained so a normalization-rule fix can be re-run without re-upload (MR-04, IC-14).
 - Deselected rows remain in the table (L556); they are excluded at commit and never deleted (MR-17).
 
 ### 4.5 `Audit` **SPEC-V1.6**
 
-D-10 defines the table, its ten fields and its append-only rule (L1083–L1116), replacing the proposal that previously filled this gap (MR-01). The field names below are therefore normative and must not be renamed; two proposed columns are carried as nullable additions.
+D-10 defines the table, its ten fields and its append-only rule (L1083–L1116), replacing the proposal that previously filled this gap (MR-01). The field names below are therefore normative and must not be renamed; `CorrelationID` and `SourceIP` are implemented nullable additions.
 
 ```sql
 CREATE TABLE Audit (
@@ -381,8 +387,8 @@ CREATE TABLE Audit (
     OldValues    JSON NULL,                                -- SPEC-V1.6; redacted before/after snapshots
     NewValues    JSON NULL,                                -- SPEC-V1.6
     Notes        TEXT NULL,                                -- SPEC-V1.6
-    CorrelationID CHAR(36) NULL,                           -- PROPOSED (request traceability)
-    SourceIP     VARCHAR(45) NULL,                         -- PROPOSED (IPv4/IPv6 textual)
+    CorrelationID CHAR(36) NULL,                           -- IMPLEMENTED (request traceability)
+    SourceIP     VARCHAR(45) NULL,                         -- IMPLEMENTED (IPv4/IPv6 textual)
     PRIMARY KEY (AuditID),
     KEY ix_audit_table (TableName, RecordID, EventDate),
     KEY ix_audit_user  (UserName, EventDate),
@@ -443,6 +449,11 @@ Because SQLite and MariaDB cannot share a transaction, these rules are the contr
 
 ## 7. Transaction specifications
 
+Sections 7.1–7.3 describe later inventory surfaces; 7.4, 7.5 and 7.9 are the
+implemented import transactions. Import commit takes a per-database advisory
+lock in addition to the batch `FOR UPDATE` (PD3-04) and writes inventory, batch
+state and import-scoped audit in one MariaDB transaction.
+
 ### 7.1 First-run setup (SQLite only, then MariaDB validation)
 
 | Step | Store | Action | Commit point |
@@ -500,23 +511,25 @@ BEGIN;                                    -- MariaDB
   VALUES (?, ?, ?, 'Processing', ?);
   -- rows collected by the streaming parser before this transaction
   INSERT INTO ImportList (ImportBatchID, EQUID, Name, Quantity,
-                          LocationRaw, LocationGroup, SelectedFg, ItemType, SourceLine, LocationSort)
+                          LocationRaw, LocationGroup, SelectedFg, ItemType,
+                          WarningText, SourceLine, LocationSort, NameSort)
   VALUES (...), (...);                    -- batched
-  UPDATE ImportBatch SET Status = 'Uploaded', SourceRowCount = ?, AcceptedRowCount = ?;
-  INSERT INTO Audit (...) VALUES ('import.upload', ...);
+  UPDATE ImportBatch SET Status = 'Uploaded', SourceRowCount = ?, AcceptedRowCount = ?, FileSha256 = ?;
+  INSERT INTO Audit (...) VALUES ('IMPORT_CREATED', ...);
 COMMIT;
 ```
 
 - Format contract (D-04, AM-03): the sample at `Docs/Samples/InventoryExport-Sample.txt` is tab-delimited with header `Location`, `Name`, `ID`, `Count`, `Slots`; `Count` maps to `Quantity` and `Slots` is collector metadata. The file is read as UTF-8; blank lines and section-header rows are skipped; three-field rows default `Count` to 1; a non-numeric fourth field is treated as `Slots`; rows with `ID = 0` or an empty `Name` are discarded.
 - Parsing failures set `Status='Failed'`, `FailureReason`, and commit whatever diagnostics apply; a failed batch keeps zero inventory impact because nothing is written to `GuildBankItems` (MR-12).
-- `SelectedFg` defaults to `1`. Location normalization is applied once here and stored in `LocationGroup` using the D-05 rules: `General`/`Bank`/`SharedBank` `n-Slot m` → `Area n`, and `Hoard n` → `Hoard` (MR-04, DC-20). `LocationRaw` is never rewritten.
-- An unresolved `EQUID` preserves the imported identifier, sets `MetadataMissingFg = 1`, leaves `ClassString`/`RaceString` blank and produces a warning (`WarningText`) (AM-01/AM-02, MR-22).
+- `SelectedFg` defaults to `1`. Location normalization is applied once here and stored in `LocationGroup` using the D-05/PD3-01 rules: `General`/`Bank`/`SharedBank` `n-Slot m` → `Area n`, every `Hoard<n>` → `Hoard`, and equipment/blank/unparseable reserved patterns → `Unspecified` with a warning. `LocationRaw` is never rewritten. `LocationSort` and `NameSort` are written by the natural-sort key function.
+- Staging records the unresolved-metadata warning in `WarningText`; `MetadataMissingFg` belongs to `GuildBankItems` and is set at commit when the `EQUID` is absent from `Items` (AM-01/AM-02, PD3-02, PD3-07).
 - Staging rows are retained indefinitely for review and troubleshooting (L556, MR-20).
 
 ### 7.5 Import commit (`POST /api/imports/{id}/commit`)
 
 ```
 BEGIN;                                                       -- MariaDB
+  SELECT GET_LOCK(import-commit-lock, timeout);              -- per-database serialization
   SELECT Status FROM ImportBatch
    WHERE ImportBatchID = ? FOR UPDATE;                       -- must be 'Uploaded'
   -- reject if Status IN ('Processing','Completed','Failed')
@@ -535,7 +548,9 @@ BEGIN;                                                       -- MariaDB
   -- selection state comes only from ImportList.SelectedFg (D-11)
 
   UPDATE ImportBatch SET Status = 'Completed', AcceptedRowCount = ?;
-  INSERT INTO Audit (...) VALUES ('import.commit', ...);
+  INSERT INTO Audit (...) VALUES ('IMPORT_COMMITTED', ...);
+  -- plus one ITEM_CREATED summary and one ITEM_UPDATED per merged spell (PD3-14)
+  SELECT RELEASE_LOCK(import-commit-lock);
 COMMIT;
 ```
 
@@ -543,7 +558,7 @@ COMMIT;
 - **Idempotent terminal state.** `Completed` cannot be re-committed; a retry returns `409 Conflict` (DC-16).
 - **Row locking.** The `FOR UPDATE` on the batch serializes concurrent commit attempts.
 - **Quantity expansion.** D-07 requires one inventory row per imported item unit; a staged spell row produces one row with summed quantity (L682–L698).
-- **Merge provenance** (which row and location received the added quantity) is not defined by D-06; it must be captured in `Audit.OldValues/NewValues` and settled by E-05/DC-21.
+- **Merge provenance** (which row and location received the added quantity) was settled for imports by PD3-03/PD3-04/PD3-14: only active rows are merged, multiple active targets resolve to the lowest `GuildBankItemID`, the anomaly is reported, and each merge writes an `ITEM_UPDATED` audit row with `OldValues`/`NewValues`.
 - **Selection and location filters** apply to `SelectedFg` only; location deselection is expressed by updating `SelectedFg` for all rows in the group, through the D-11 endpoint (MR-03).
 
 ### 7.6 Settings update (`PUT /api/settings`)
@@ -591,13 +606,13 @@ BEGIN;
   -- reject when Status IN ('Processing','Completed','Failed')
   UPDATE ImportList SET SelectedFg = 0 WHERE ImportBatchID = ?;
   UPDATE ImportList SET SelectedFg = 1 WHERE ImportBatchID = ? AND ImportID IN (...);
-  INSERT INTO Audit (EventType, TableName, RecordID, NewValues, ...) VALUES (...);
+  -- assert the final selected count equals the requested set before COMMIT
 COMMIT;
 ```
 
-- Treat the payload as a **full replacement set** scoped to the batch; IDs that do not belong to the batch are a `422`, not a silent no-op. This is the recommended reading (E-15); D-11 does not state it (DC-22).
+- The payload is a **full replacement set** scoped to the batch; IDs that do not belong to the batch, duplicates and non-positive IDs are `422 selection_invalid`. This is implemented under D-11 and the approved Phase 3 contract.
 - Location-group toggles resolve to row-level `SelectedFg` updates for every row in the group; the selector remains a derived view.
-- D-10 has no event type for selection changes; either map them to an approved extension or do not audit them (DC-25).
+- Selection changes are intentionally **not audited** (PD3-08): they are staging state, and the selected set remains recoverable from `ImportList.SelectedFg`. The commit audit records the resulting counts.
 
 ---
 
@@ -606,7 +621,7 @@ COMMIT;
 | Store | Mechanism | Rules |
 |---|---|---|
 | SQLite | `PRAGMA user_version` + embedded ordered migrations | Forward-only; each migration runs in a transaction; startup refuses `user_version > binary version`; backup the file before migrating |
-| MariaDB | `schema_migrations (Version VARCHAR(32) PRIMARY KEY, AppliedAt DATETIME(6) NOT NULL)` **PROPOSED** | Forward-only; advisory lock (`GET_LOCK`) around migration; no destructive changes without an explicit documented step |
+| MariaDB | `schema_migrations (Version VARCHAR(32) PRIMARY KEY, AppliedAt DATETIME(6) NOT NULL)` **IMPLEMENTED** | Forward-only; per-database advisory lock (`GET_LOCK`) around migration; lexical downgrade guard; fatal startup on migration failure (PD3-10) |
 | `Items` | Out-of-band loader | Not managed by application migrations; version/compatibility documented separately (MR-05) |
 
 Startup order: (1) open SQLite, migrate, (2) load settings, (3) if the `Users` table has no administrator, serve setup only (D-02), (4) connect MariaDB, migrate, (5) serve application. A failure at any step leaves the previous state usable and logs a structured error; it never auto-recreates a database (SR-01).
@@ -683,7 +698,7 @@ Natural sort (L699–L728) is implemented as a persisted key, not a collation tr
 | `Hoard` | `hoard` | — |
 | `SharedBank 1` | `sharedbank\x010000000001` | — |
 
-`LocationSort` in `ImportList` and `NameSort` in `GuildBankItems` are written by the same key function. Ties break on the numeric primary key for deterministic pagination (IC-11). D-05 normalizes every `Hoard<n>` value to `Hoard`, and AM-04 makes `Hoard` the single spelling, so all hoard locations collapse to one selector entry (DC-20 covers unknown patterns only).
+`LocationSort` and `NameSort` in `ImportList`, and `NameSort` in `GuildBankItems`, are written by the same key function. Ties break on the numeric primary key for deterministic pagination (IC-11). D-05 normalizes every `Hoard<n>` value to `Hoard`, and AM-04 makes `Hoard` the single spelling, so all hoard locations collapse to one selector entry; PD3-01 resolves unknown patterns to `Unspecified`.
 
 ### 9.6 Bitmask decoding
 
@@ -780,42 +795,42 @@ Service-level rules that cannot be expressed as DDL: item identity is `Items.ID`
 | D-02 Setup mode | §3.5, §7.1, §8 | Conformant at schema level; step ordering conflict recorded (DC-24) |
 | D-03 HTMX / REST | No schema impact; enforced by layering | Not applicable |
 | D-04 Import contract | §7.4 staging shape; sample present at `Docs/Samples/InventoryExport-Sample.txt` | **Conformant** — D-04 path and AM-03 contract (tab-delimited header `Location/Name/ID/Count/Slots`, UTF-8, row rejection) are implemented by §7.4 |
-| D-05 Location normalization | §4.4 `LocationRaw`/`LocationGroup`; §9.5 key | Conformant for defined patterns; unknown patterns open (DC-20) |
-| D-06 Spell merge | §4.2 `ck_gbi_item_one`; §7.5 merge path | Conformant; provenance open (DC-21) |
+| D-05 Location normalization | §4.4 `LocationRaw`/`LocationGroup`; §9.5 key | **Conformant and implemented** — PD3-01 resolves equipment/blank/unknown patterns to `Unspecified`; all `Hoard<n>` collapse to `Hoard` |
+| D-06 Spell merge | §4.2 `ck_gbi_item_one`; §7.5 merge path | **Conformant and implemented** — PD3-03/PD3-04 settle active-only targets, lowest-id anomaly handling and concurrency |
 | D-07 Item import | §4.2 quantity rule; §7.5 expansion | Conformant |
-| D-08 Missing metadata | §4.2 `MetadataMissingFg` (SPEC-V1.6.1); §4.4 `WarningText` (PROPOSED); service validation of `EQUID` | **Conformant** — AM-01/AM-02 preserve the identifier, forbid `-1` and define the flag; warning sink still proposed (E-14) |
-| D-09 Session security | §3.3 `TokenHash`; §10.2 | Conformant for storage; lifecycle open (SR-22) |
-| D-10 Audit table | §4.5, §10.1 grants, §10.3 | Conformant; taxonomy/retention open (DC-25) |
-| D-11 Selection endpoint | §7.9, §4.4 indexes | Conformant for storage; payload open (DC-22) |
-| D-12 Security requirements | §3.3, §10.1–§10.2 | Conformant at storage/grant level; CSRF coverage open (SR-19) |
+| D-08 Missing metadata | §4.2 `MetadataMissingFg` (SPEC-V1.6.1); §4.4 `WarningText` (PD3-02); service validation of `EQUID` | **Conformant and implemented** — AM-01/AM-02 preserve the identifier, forbid `-1` and define the flag; import warnings persist in `ImportList.WarningText` |
+| D-09 Session security | §3.3 `TokenHash`; §10.2 | **Conformant and implemented** for storage and the PD-15 lifecycle; broader lifecycle review may refine values |
+| D-10 Audit table | §4.5, §10.1 grants, §10.3 | **Conformant** — import-scoped writes implemented by PD3-14; general taxonomy/retention and audit UI remain later-phase work |
+| D-11 Selection endpoint | §7.9, §4.4 indexes | **Conformant and implemented** — full-replacement selection with batch ownership checks, `422` invalid IDs and `409` terminal state |
+| D-12 Security requirements | §3.3, §10.1–§10.2 | **Conformant** — CSRF coverage, cookie flags, lockout and parameterized queries are implemented for the current surface |
 | D-13 Store separation | §1, §2 | Conformant |
 
-### 12.2 Open schema and implementation decisions
+### 12.2 Resolved and remaining schema decisions
 
-| Decision | Affects | Cross-reference |
+| Decision | Affects | Status / cross-reference |
 |---|---|---|
-| `Items` provisioning, ownership and freshness (identity fixed by D-01) | `Items`, `GuildBankItems` | MR-21, E-01 |
-| `MetadataMissingFg` refresh procedure and audit of later resolution | `GuildBankItems`, service layer | AM-02, MR-22, E-14 |
-| Warning sink for unresolved items | `ImportList.WarningText` or `ImportBatch` | MR-22, E-14 |
-| Spell merge provenance, soft-deleted targets and concurrency | `GuildBankItems` commit path | DC-21, E-05 |
-| Selection payload semantics and response | §7.9 | DC-22, E-15 |
-| Unknown location grammar and case/whitespace normalization (`Hoard` settled by AM-04) | `ImportList.LocationGroup` | DC-20, E-06 |
-| Session lifecycle: entropy, rotation, `SameSite`, idle expiry, purge | `Sessions`, `TokenHash` | SR-22, E-08 |
-| Secret-at-rest approach for MariaDB credentials | `Settings` | SR-02, E-11 |
-| Closed audit event taxonomy and retention | `Audit` | DC-25, E-09, MR-20 |
-| Public vs. admin field projection | All read paths | DC-10, MR-06 |
-| Whether natural sort keys are persisted columns or generated | `NameSort`, `LocationSort` | DC-13, IC-11 |
+| `Items` provisioning, ownership and freshness (identity fixed by D-01) | `Items`, `GuildBankItems` | **Remaining operational follow-up** — E-01, MR-21; the development copy is loaded and validated (144,712 rows) |
+| `MetadataMissingFg` refresh procedure and audit of later resolution | `GuildBankItems`, service layer | **Remaining later-phase procedure** — AM-02, MR-22; import-time flagging is implemented |
+| Warning sink for unresolved items | `ImportList.WarningText` | **Resolved for imports** by PD3-02 and implemented |
+| Spell merge provenance, soft-deleted targets and concurrency | `GuildBankItems` commit path | **Resolved for imports** by PD3-03/PD3-04/PD3-14 and implemented |
+| Selection payload semantics and response | §7.9 | **Resolved and implemented** — full replacement, batch-scoped, `422` invalid IDs, `409` terminal state |
+| Unknown location grammar and case/whitespace normalization (`Hoard` settled by AM-04) | `ImportList.LocationGroup` | **Resolved for imports** by PD3-01: `Unspecified` with warnings; every `Hoard<n>` collapses to `Hoard` |
+| Session lifecycle: entropy, rotation, `SameSite`, idle expiry, purge | `Sessions`, `TokenHash` | **Resolved and implemented** by PD-15; broader review may refine values |
+| Secret-at-rest approach for MariaDB credentials | `Settings` | **Remaining review** — E-11/SR-02; the `/config` permission boundary is the current mitigation |
+| Closed general audit event taxonomy and retention | `Audit` | **Partially resolved** — import subset closed by PD3-14; general taxonomy/retention and UI remain open (DC-25, E-09, MR-20) |
+| Public vs. admin field projection | All read paths | **Remaining later-phase contract** — DC-10, MR-06 |
+| Whether natural sort keys are persisted columns or generated | `NameSort`, `LocationSort` | **Resolved and implemented** — persisted columns written by PD3-11/DC-13 |
 
 ### 12.3 Spec area coverage
 
 | Spec area | Schema section | Status |
 |---|---|---|
-| SQLite tables (L166–L231) | §3.1–§3.3 | Fields complete; `TokenHash` specified; other constraints/policies proposed |
-| `Items` (L233–L259) | §4.1 | Identity fixed (D-01); provisioning open (MR-21) |
-| `GuildBankItems` (L261–L374) | §4.2 | Complete; D-06/D-07 rules encoded; AM-01/AM-02 missing-metadata fields specified |
-| `ImportBatch` (L531–L549) | §4.3 | Complete; failure/observability fields proposed |
-| `ImportList` (L551–L605) | §4.4 | Complete; `ItemType`/`WarningText`/`LocationSort` proposed |
-| `Audit` (L107, L773–L783; D-10) | §4.5 | D-10 schema specified; taxonomy and retention open |
-| v1.6 decisions and v1.6.1 amendments (L855–L1263) | §1, §3.3, §4.1–§4.5, §7.9 | 12 conformant, 1 not applicable |
+| SQLite tables (L166–L231) | §3.1–§3.3 | **Implemented** for Phase 1; `TokenHash` specified; `AuditOutbox` remains later-phase |
+| `Items` (L233–L259) | §4.1 | Identity fixed (D-01) and read-only mapping implemented (PD-19); provisioning and production grants remain open (MR-21/E-01) |
+| `GuildBankItems` (L261–L374) | §4.2 | **Implemented**; D-06/D-07 rules encoded; AM-01/AM-02 missing-metadata fields specified |
+| `ImportBatch` (L531–L549) | §4.3 | **Implemented**; failure, hash and observability fields approved |
+| `ImportList` (L551–L605) | §4.4 | **Implemented**; `ItemType`, `WarningText`, `LocationSort` and `NameSort` approved by PD3 decisions |
+| `Audit` (L107, L773–L783; D-10) | §4.5 | **Implemented** for import-scoped writes; general taxonomy, retention and UI open |
+| v1.6 decisions and v1.6.1 amendments (L855–L1263; status L1265–L1274) | §1, §3.3, §4.1–§4.5, §7.9 | 12 conformant, 1 not applicable |
 | Decoding/sorting rules (L376–L529, L699–L728) | §9.5–§9.6 | Implementable; fixtures defined |
 | Security requirements (L797–L804; D-12) | §10 | Governance model defined at schema level |

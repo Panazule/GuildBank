@@ -3,11 +3,11 @@
 | Field | Value |
 |---|---|
 | Document ID | IP-001 |
-| Source specification | `Design.md` v1.6.1 (authoritative; decisions D-01–D-13 at L855–L1161, amendments AM-01–AM-05 at L1163–L1263) |
+| Source specification | `Design.md` v1.6.1 (authoritative; decisions D-01–D-13 at L855–L1161, amendments AM-01–AM-05 at L1163–L1263, informational status at L1265–L1274) |
 | Review date | 2026-11-20 |
-| Revision | 1.2 — 2026-11-20, re-baselined on v1.6.1 |
-| Companion documents | `ArchitectureReview.md`, `DatabaseDesign.md`, `ProjectStatus.md` |
-| Current repository state | Phase 0 platform skeleton present (`cmd/`, `internal/`, build and deployment files; see `ProjectStatus.md` §1.1); no business features or migrations |
+| Revision | 1.4 — 2026-11-21, implementation status aligned through Phase 3 and authenticated live validation |
+| Companion documents | `ArchitectureReview.md`, `DatabaseDesign.md`, `ProjectStatus.md`, `Phase3ImplementationPlan.md` |
+| Current repository state | Phases 0–3 present: platform skeleton, SQLite identity/settings, read-only Items metadata and the import pipeline (`Phase3ImplementationPlan.md` is the user's Phase 3 and this plan's Phase 6); the authenticated Compose import workflow passed on 2026-11-22 UTC (`ProjectStatus.md` §1.5.1); public/manual inventory and the general audit UI remain later phases |
 
 This plan assumes the specification is amended per the decisions in `ArchitectureReview.md` §9 and the v1.6/v1.6.1 decision set. Estimates are ranges in engineer-days for one experienced Go developer familiar with Gin, SQLite and MariaDB; they exclude product-decision time and the external inputs in §8.1.
 
@@ -15,7 +15,7 @@ This plan assumes the specification is amended per the decisions in `Architectur
 
 ## 1. Delivery principles
 
-1. **Decisions before code.** D-01–D-13 landed in v1.6 and AM-01–AM-05 in v1.6.1; Phase 0 now closes only the remaining contract gaps (E-14 warning sink, E-15 selection payload, E-09 audit taxonomy). Building around an unresolved contract creates rework in schema, API and UI simultaneously.
+1. **Decisions before code.** D-01–D-13 landed in v1.6 and AM-01–AM-05 in v1.6.1. PD-10–PD-20 and PD3-01–PD3-14 were approved on 2026-11-21; the import warning sink and selection payload are resolved. Remaining contracts (general audit taxonomy, secret at rest and any future HTMX shape) are later-phase work, because building around an unresolved contract creates rework in schema, API and UI simultaneously.
 2. **Vertical slices, not horizontal layers.** Each phase produces a runnable application with a demonstrable workflow, not a layer with no consumer.
 3. **Schema first within a slice.** Migration → repository → service → API → UI, in that order, so the UI never invents data shapes.
 4. **Security controls land with the feature they protect.** D-12's CSRF, cookie and rate-limit controls arrive with the first form, not in a later hardening phase.
@@ -52,7 +52,7 @@ Critical path: Phase 0 → 2 → 3 → 4 → 6 → 8. Phases 5 and 7 have slack.
 
 **Tasks**
 1. Record the v1.6 decisions (D-01–D-13) and v1.6.1 amendments (AM-01–AM-05) as adopted ADRs, and the residual decisions E-14–E-16 as short ADRs under `Docs/decisions/`.
-2. Resolve the three residual contracts: warning sink (E-14/MR-22), selection payload (E-15/DC-22), audit taxonomy closure (E-09/DC-25).
+2. Resolve the three residual contracts: warning sink (E-14/MR-22; resolved for imports by PD3-02), selection payload (E-15/DC-22; resolved by D-11/PD3-08), audit taxonomy closure (E-09/DC-25; import subset closed by PD3-14, general taxonomy remains later-phase).
 3. Add two real collector exports alongside the canonical sample at `Docs/Samples/InventoryExport-Sample.txt`, whose format, encoding and row rules are fixed by AM-03; commit the repository (currently no commits) so the sample and fixtures are tracked.
 4. Confirm `Design.md` v1.6.1 is published: title/version corrected, `Hoard` standardized, AM-01–AM-05 appended, change log present.
 5. Re-derive `DatabaseDesign.md` §12 against the approved decisions and amendments.
@@ -61,7 +61,7 @@ Critical path: Phase 0 → 2 → 3 → 4 → 6 → 8. Phases 5 and 7 have slack.
 
 **Exit criteria**
 - No open item from `ArchitectureReview.md` §1.2 or §12 remains without a recorded resolution.
-- Every **PROPOSED** column in `DatabaseDesign.md` is either approved or removed; `ItemType` is promoted.
+- Every **PROPOSED** column used by Phases 1–3 in `DatabaseDesign.md` is approved and implemented; `ItemType` is promoted. `AuditOutbox` remains a later-phase proposal.
 - Import parser requirements are testable from the documented sample alone (no tribal knowledge).
 - The missing-metadata rule is the signed AM-01/AM-02 rule (preserved `EQUID`, `MetadataMissingFg`, no sentinel).
 
@@ -214,6 +214,11 @@ Critical path: Phase 0 → 2 → 3 → 4 → 6 → 8. Phases 5 and 7 have slack.
 
 ### Phase 6 — Import pipeline
 
+> **Status note:** approved and implemented 2026-11-21 as the user's Phase 3.
+> PD3-01–PD3-14 and all six `Phase3ImplementationPlan.md` §14.1 defaults govern
+> the implementation; the UI uses server-rendered templates and vanilla `fetch`
+> rather than HTMX (PD3-09).
+
 **Goal:** upload a collector export, review and adjust selections, and commit atomically with no partial inventory.
 
 **Tasks**
@@ -222,8 +227,8 @@ Critical path: Phase 0 → 2 → 3 → 4 → 6 → 8. Phases 5 and 7 have slack.
 3. Classification: spell prefixes (`Spell:`, `Song:`, `Ancient:`, plus approved additions) feed `ItemType` in staging (DC-09, DC-18).
 4. Location normalization: single pure function implementing D-05 (`Area n-Slot m` → `Area n`; `Hoard n` → `Hoard`), with table-driven tests for every spec example and an explicit unknown-format policy (E-06/DC-20); `LocationSort` generated here.
 5. Staging transaction for `ImportBatch` + `ImportList`; `Status = Failed` with `FailureReason` on parse errors (MR-12); optional duplicate-upload warning via hash.
-6. Review UI: import list screen, batch detail with location selector, per-row and bulk selection, dynamic summary counts, HTMX updates.
-7. Selection API (D-11): `PUT /api/imports/{id}/selection` accepting the full `ImportID` set for the batch (E-15); plus `GET /api/imports/{id}/summary`. Both validate batch ownership and terminal status; foreign IDs return `422`.
+6. Review UI: import list screen, batch detail with location selector, per-row and bulk selection, dynamic summary counts, JSON-backed vanilla `fetch` updates (PD3-09).
+7. Selection API (D-11): `PUT /api/imports/{id}/selection` accepting the full `ImportID` set for the batch; plus `GET /api/imports/{id}/summary`. Both validate batch ownership and terminal status; foreign/duplicate/non-positive IDs return `422`. The approved contract is implemented.
 8. Commit service implementing `DatabaseDesign.md` §7.5: row lock, status guard, item instance expansion (D-07), spell merge on `(ItemType='Spell', EQUID)` with unchanged dates (D-06), unresolved metadata preserved with `MetadataMissingFg` and a warning, never `-1` (AM-01/AM-02), audit, single transaction, `409` on re-commit.
 9. Import history screen: batches, statuses, counts, failure reasons; staging rows retained.
 10. Failure injection tests: disconnect during commit, duplicate commit, parse failure mid-file, deselected rows.
@@ -320,7 +325,7 @@ The specification lists the resource endpoints (L736–L771) but not their contr
 | POST | `/api/v1/imports` | admin | Upload and stage | Multipart file; size/type limits |
 | GET | `/api/v1/imports/{id}` | admin | Batch detail with staging rows | Paginated; location filter |
 | PUT | `/api/v1/imports/{id}/selection` | admin | Persist `SelectedFg` for the batch | **D-11**; full `ImportID` set; `422` for foreign IDs |
-| GET | `/api/v1/imports/{id}/summary` | admin | Counts by location, items, spells | **Proposed** (MR-03) |
+| GET | `/api/v1/imports/{id}/summary` | admin | Counts by location, items, spells | **Implemented** (MR-03) |
 | POST | `/api/v1/imports/{id}/commit` | admin | Commit selected rows | Atomic; `409` if terminal/in progress |
 | GET | `/api/v1/users` | admin | List users | Never returns hashes |
 | POST | `/api/v1/users` | admin | Create user | Password policy applied |
@@ -523,7 +528,7 @@ A task is complete only when all of the following are true:
 
 | Risk | Likelihood | Impact | Mitigation | Trigger to act |
 |---|---|---|---|---|
-| Residual contracts stall (E-14/E-15/E-09) | Medium | High | Timebox Phase 0; AR §9 recommendations pre-agreed | Any residual open > 1 week |
+| Residual general contracts stall (E-09/E-11/E-16) | Medium | High | Import warning/selection/merge contracts are resolved by PD3-02/PD3-08 and D-11; timebox remaining later-phase contracts | Any residual open > 1 week |
 | Import format diverges from real exports (D-04/AM-03) | Medium | High | Add two real files before Phase 6; parser behind an interface | Fixture missing or parsing failure > 1 % |
 | Unresolved metadata never revalidated (AM-01/AM-02) | Medium | Medium | Implement the `MetadataMissingFg` refresh job and audit the transition to resolved | Flagged rows older than one `Items` refresh cycle |
 | `Items` table unpopulated or stale | Medium | High | Provision loader before Phase 3 integration; record metadata coverage | Any test needing real item data fails |

@@ -15,6 +15,7 @@ const commitLockName = "guildbank:commit:"
 
 type importCommitTx struct {
 	store    *Store
+	ctx      context.Context
 	conn     *sql.Conn
 	tx       *sql.Tx
 	batch    domain.ImportBatch
@@ -47,7 +48,7 @@ func (s *Store) BeginCommit(ctx context.Context, batchID int64) (service.ImportC
 		_ = conn.Close()
 		return nil, mapStoreError("begin commit", err)
 	}
-	commit := &importCommitTx{store: s, conn: conn, tx: tx}
+	commit := &importCommitTx{store: s, ctx: ctx, conn: conn, tx: tx}
 	row := tx.QueryRowContext(ctx, `SELECT ImportBatchID, FileName, FileSha256,
 		SourceRowCount, AcceptedRowCount, Status, FailureReason, ImportedBy,
 		ImportedByUserID, ImportedAt FROM ImportBatch
@@ -79,7 +80,7 @@ func (s *Store) BeginCommit(ctx context.Context, batchID int64) (service.ImportC
 func (c *importCommitTx) Batch() domain.ImportBatch { return c.batch }
 
 func (c *importCommitTx) SelectedRows() ([]domain.ImportRow, error) {
-	rows, err := c.tx.QueryContext(context.Background(), `SELECT ImportID, ImportBatchID,
+	rows, err := c.tx.QueryContext(c.ctx, `SELECT ImportID, ImportBatchID,
 		SourceLine, ItemType, EQUID, Name, Quantity, LocationRaw, LocationGroup,
 		LocationSort, NameSort, SelectedFg, WarningText FROM ImportList
 		WHERE ImportBatchID=? AND SelectedFg=1 ORDER BY ImportID`, c.batch.ImportBatchID)
@@ -111,7 +112,7 @@ func (c *importCommitTx) ActiveSpells(equids []uint64) ([]domain.GuildBankItem, 
 			args = append(args, equid)
 			placeholders = append(placeholders, "?")
 		}
-		rows, err := c.tx.QueryContext(context.Background(), `SELECT GuildBankItemID,
+		rows, err := c.tx.QueryContext(c.ctx, `SELECT GuildBankItemID,
 			ItemType, EQUID, Quantity, SourceLocation, Name
 			FROM GuildBankItems WHERE DeletedFg=0 AND ItemType='Spell'
 			AND EQUID IN (`+strings.Join(placeholders, ",")+`)
@@ -169,7 +170,7 @@ func (c *importCommitTx) insertInventory(rows []domain.GuildBankItem) ([]int64, 
 			 DateAdded, DateOpen, DateBazaar, Quantity, SourceLocation, GivenTo,
 			 DeletedFg, ModAt, ModBy, ModByUserID, NameSort)
 			VALUES ` + strings.Join(placeholders, ",")
-		result, err := c.tx.ExecContext(context.Background(), query, args...)
+		result, err := c.tx.ExecContext(c.ctx, query, args...)
 		if err != nil {
 			return nil, mapStoreError("insert inventory rows", err)
 		}
@@ -185,7 +186,7 @@ func (c *importCommitTx) insertInventory(rows []domain.GuildBankItem) ([]int64, 
 }
 
 func (c *importCommitTx) AddSpellQuantity(id int64, qty uint32, at time.Time, actorName string, actorID int64) error {
-	result, err := c.tx.ExecContext(context.Background(), `UPDATE GuildBankItems
+	result, err := c.tx.ExecContext(c.ctx, `UPDATE GuildBankItems
 		SET Quantity=Quantity+?, ModAt=?, ModBy=?, ModByUserID=?
 		WHERE GuildBankItemID=? AND DeletedFg=0 AND ItemType='Spell'`,
 		qty, at.UTC(), actorName, nullableInt64(actorID), id)
@@ -209,7 +210,7 @@ func (c *importCommitTx) ReplaceRowWarnings(warnings map[int64][]domain.ImportWa
 		if len(body) > 0 {
 			arg = string(body)
 		}
-		if _, err := c.tx.ExecContext(context.Background(),
+		if _, err := c.tx.ExecContext(c.ctx,
 			`UPDATE ImportList SET WarningText=? WHERE ImportID=?`, arg, id); err != nil {
 			return mapStoreError("replace row warnings", err)
 		}
@@ -218,11 +219,11 @@ func (c *importCommitTx) ReplaceRowWarnings(warnings map[int64][]domain.ImportWa
 }
 
 func (c *importCommitTx) WriteAudit(entries []domain.AuditEntry) error {
-	return insertAudit(context.Background(), c.tx, entries)
+	return insertAudit(c.ctx, c.tx, entries)
 }
 
 func (c *importCommitTx) MarkCompleted() error {
-	_, err := c.tx.ExecContext(context.Background(),
+	_, err := c.tx.ExecContext(c.ctx,
 		`UPDATE ImportBatch SET Status='Completed' WHERE ImportBatchID=? AND Status='Processing'`,
 		c.batch.ImportBatchID)
 	if err != nil {

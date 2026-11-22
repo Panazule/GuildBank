@@ -68,15 +68,15 @@ func Run(ctx context.Context, opts Options) error {
 			Password: cfg.MariaDB.Password,
 		})
 		if guildErr != nil {
-			// Phase 3 makes the guild store hot-swappable; Phase 1 keeps
-			// serving and reports the failure through /readyz.
+			// Keep serving and report the failure through /readyz. The pool is
+			// not hot-swappable in Phase 3 (PD-18).
 			logger.Warn("guild store unreachable; continuing in degraded mode",
 				"target", cfg.MariaDB.Redacted(), "error", guildErr)
 		} else {
 			if version, err := guildStore.Migrate(ctx); err != nil {
 				return fmt.Errorf("app: migrate guild store: %w", err)
 			} else {
-				logger.Info("guild store schema ready", "version", version)
+				logger.Info("guild store schema ready", "schema_version", version)
 			}
 			if n, err := guildStore.RecoverInterrupted(ctx); err != nil {
 				logger.Warn("import recovery failed", "error", err)

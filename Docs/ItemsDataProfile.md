@@ -136,7 +136,7 @@ The published decoding fixture resolves exactly as specified:
 | `id=25210`, `Blade of Carnage` | `races=65535` | `ALL` |
 | `id=10802`, `Flayed Skin Cap` | `races=5` | `Human,Erudite` (1 + 4) |
 | `id=10802`, `Flayed Skin Cap` | `classes=1040` | `SHD,NEC` (16 + 1024) |
-| `id=1041`, `Worthless Coin` | `classes=0`, `races=0` | No defined class/race bits (blank under the proposed rule) |
+| `id=1041`, `Worthless Coin` | `classes=0`, `races=0` | No defined class/race bits (blank under the approved PD-20 rule) |
 
 A primary-key lookup by `id` uses the `PRIMARY` index:
 
@@ -144,9 +144,9 @@ A primary-key lookup by `id` uses the `PRIMARY` index:
 SIMPLE  items  const  PRIMARY  PRIMARY  8  const  1
 ```
 
-### Proposed failure behavior for malformed/wide masks
+### Approved failure behavior for malformed/wide masks
 
-The default proposal is:
+The approved PD-20 policy is:
 
 1. Parse each value as an unsigned 32-bit decimal integer.
 2. Decode only the defined low 16 bits using the specification masks.
@@ -159,8 +159,9 @@ The default proposal is:
    string blank and attach the same class of warning.
 
 This preserves the meaningful low bits in the 209 + 71 `ALL` cases and imports
-the row rather than failing the whole batch. It still needs an owner decision
-because the warning sink (E-14) is open and the high-bit meaning is not known.
+the row rather than failing the whole batch. PD-20 approved this policy on
+2026-11-21; import warnings persist through PD3-02, and high-bit meanings remain
+unknown by design rather than guessed.
 
 ---
 
@@ -234,7 +235,8 @@ runtime queries belong in the MariaDB repository, not in this profile.
   or race meanings beyond the 16 bits defined by the specification.
 - The collector loader procedure, refresh cadence and production account model
   remain open under E-01.
-- The Phase 2 metadata resolver is implemented and tested but has no HTTP route;
-  inventory and import consumers arrive in later phases. Warning persistence is
-  still an E-14 decision.
+- The Phase 2 metadata resolver is implemented and tested but has no separate
+  HTTP route; the Phase 3 import pipeline consumes it. Import warnings persist
+  in `ImportList.WarningText` under PD3-02; public/manual inventory remain later
+  phases.
 - The 5,522 duplicate-name rows were counted, not individually dispositioned.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"time"
 
@@ -232,6 +233,11 @@ func buildCommitPlan(rows []domain.ImportRow, active []domain.GuildBankItem,
 	activeByEQUID := make(map[uint64][]domain.GuildBankItem)
 	for _, item := range active {
 		activeByEQUID[item.EQUID] = append(activeByEQUID[item.EQUID], item)
+	}
+	for _, targets := range activeByEQUID {
+		sort.Slice(targets, func(i, j int) bool {
+			return targets[i].GuildBankItemID < targets[j].GuildBankItemID
+		})
 	}
 	type spellAggregate struct {
 		first    domain.ImportRow

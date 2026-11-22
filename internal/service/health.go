@@ -53,7 +53,7 @@ type HealthDeps struct {
 	MariaDB           Pinger
 	MariaDBConfigured bool
 	// MariaDBErr records a connection failure at startup; it is reported
-	// until a reconnect succeeds (Phase 3 hot-swap).
+	// until the process is restarted (no hot-swap in Phase 3).
 	MariaDBErr error
 }
 

@@ -4,7 +4,8 @@
 // Precedence, highest first: command-line flags, environment variables,
 // built-in defaults. MariaDB settings loaded here are a development
 // bootstrap only: the setup wizard persists credentials in SQLite, but the
-// live pool adopts them in Phase 3 (PD-18, E-11).
+// live pool still uses this bootstrap; Phase 3 did not adopt Settings-backed
+// connections (PD-18, E-11).
 package config
 
 import (
@@ -132,7 +133,8 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		cfg.SecureCookies = secure
 	}
 
-	// Development bootstrap only; Phase 3 replaces this with Settings.
+	// Development bootstrap only; Settings-backed adoption remains a separate
+	// approved change (PD-18).
 	cfg.MariaDB.Host = strings.TrimSpace(getenv("GUILDBANK_MARIADB_HOST"))
 	if v := strings.TrimSpace(getenv("GUILDBANK_MARIADB_PORT")); v != "" {
 		port, err := strconv.Atoi(v)

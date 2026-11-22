@@ -101,9 +101,9 @@ type importsPageData struct {
 
 type importDetailPageData struct {
 	pageData
-	Ready       bool
-	Batch       importBatchView
-	Uploaded    bool
+	Ready        bool
+	Batch        importBatchView
+	Uploaded     bool
 	FailedUpload bool
 }
 

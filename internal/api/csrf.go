@@ -144,8 +144,7 @@ func (m *csrfManager) submittedToken(c *gin.Context) (string, error) {
 		}
 		return values.Get(csrfFieldName), nil
 	}
-	if strings.HasPrefix(contentType, "multipart/form-data") &&
-		c.Request.Method == http.MethodPost && c.FullPath() == "/api/v1/imports" {
+	if strings.HasPrefix(contentType, "multipart/form-data") && c.Request.Method == http.MethodPost {
 		if err := c.Request.ParseMultipartForm(1 << 20); err != nil {
 			return "", err
 		}

@@ -5,14 +5,24 @@ specification is [`Design.md`](Design.md) v1.6.1; delivery is tracked in
 [`Docs/ProjectStatus.md`](Docs/ProjectStatus.md) and
 [`Docs/ImplementationPlan.md`](Docs/ImplementationPlan.md).
 
-**Current scope: Phase 1 complete; Phase 2 item-metadata integration complete.**
-The process builds, starts, migrates SQLite, serves the four-step setup wizard,
-creates a bcrypt-hashed administrator, issues server-side sessions, enforces
-CSRF and default-deny admin routes, rate-limits login and persists typed
-settings. The MariaDB item repository is read-only and resolves EQUIDs into
-decoded class/race metadata, including the approved missing-metadata behavior.
-Inventory, imports, audit, user management and writable MariaDB repositories
-remain later phases; Phase 3 has not started.
+**Current scope: Phase 0 approved; Phase 1 approved and complete; Phase 2
+item-metadata integration approved and complete; Phase 3 import pipeline
+approved, complete and live-validated.**
+The process builds, starts, migrates SQLite and MariaDB, serves the four-step
+setup wizard, creates a bcrypt-hashed administrator, issues server-side
+sessions, enforces CSRF and default-deny admin routes, rate-limits login and
+persists typed settings. The MariaDB item repository is read-only and resolves
+EQUIDs into decoded class/race metadata, including the approved
+missing-metadata behavior. The development `GuildBank.items` copy was imported
+and validated with 144,712 rows; PD-10 through PD-20 are approved. Phase 3 adds
+the admin import pipeline: upload, parsing, normalized staging, selection and
+atomic commit into `GuildBankItems`, with import-scoped audit writes and the
+`/admin/imports` screens. PD3-01 through PD3-14 and all six Phase 3 plan
+defaults are approved. The authenticated Compose upload → selection → commit
+workflow has passed, including durable staging, warnings, inventory, spell
+merges and audit records (`Docs/ProjectStatus.md` §1.5.1). Public/manual
+inventory, the general audit UI/outbox and user management remain later phases;
+Phase 4 has not started.
 
 ## Requirements
 
@@ -85,7 +95,7 @@ Precedence: flags > environment > defaults.
 | `-log-format` | `GUILDBANK_LOG_FORMAT` | `json` | `json` or `text` |
 | `-secure-cookies` | `GUILDBANK_SECURE_COOKIES` | `false` | Set `Secure` on session and CSRF cookies; enable when served over HTTPS |
 | — | `GUILDBANK_TRUSTED_PROXIES` | empty | Comma-separated IPs/CIDRs allowed to set forwarded headers; empty trusts none |
-| — | `GUILDBANK_MARIADB_HOST` | empty | **Development bootstrap only**; Phase 3 reads Settings |
+| — | `GUILDBANK_MARIADB_HOST` | empty | **Development bootstrap only**; the wizard persists Settings but the live pool still uses this value |
 | — | `GUILDBANK_MARIADB_PORT` | `3306` | Bootstrap guild store port |
 | — | `GUILDBANK_MARIADB_DATABASE` | `GuildBank` | Bootstrap guild store database |
 | — | `GUILDBANK_MARIADB_USERNAME` | empty | Bootstrap guild store user |
@@ -94,8 +104,8 @@ Precedence: flags > environment > defaults.
 `GUILDBANK_MARIADB_*` exists so the connection layer can be exercised before
 the setup wizard stores credentials in SQLite. The wizard persists those
 credentials in `Settings`, but the running pool still uses this environment
-bootstrap until Phase 3 implements the Settings-backed pool and hot-swap
-(PD-05 remains in force for the runtime connection during Phase 1).
+bootstrap. Phase 3 deliberately did not hot-swap the pool; changing connection
+settings takes effect after a restart (PD-05/PD-18 remain in force).
 
 ## Endpoints
 
@@ -114,6 +124,17 @@ bootstrap until Phase 3 implements the Settings-backed pool and hot-swap
 | GET | `/admin/settings` | Administrator settings screen |
 | GET | `/api/v1/settings` | Redacted settings JSON; secrets never returned |
 | PUT/POST | `/api/v1/settings` | Validate and persist settings; POST is the HTML form adapter for PUT |
+| GET | `/admin/imports` | Import history and upload form |
+| GET | `/admin/imports/:batchID` | Batch review page; read-only for terminal batches |
+| GET | `/api/v1/imports` | Recent batches (`limit`, `beforeId`) |
+| POST | `/api/v1/imports` | Multipart upload of `InventoryExport.txt`; JSON by default or `303` for HTML |
+| GET | `/api/v1/imports/:batchID` | Batch status, counts, hash and failure reason |
+| GET | `/api/v1/imports/:batchID/locations` | Selector generated from distinct normalized `LocationGroup` values |
+| GET | `/api/v1/imports/:batchID/rows` | Paged staged rows (`locationGroup`, `selected`, `q`, `page`, `pageSize`) |
+| GET | `/api/v1/imports/:batchID/row-ids` | All staged IDs, optionally for one `LocationGroup` |
+| GET/PUT | `/api/v1/imports/:batchID/selection` | Read or fully replace the persisted selection |
+| GET | `/api/v1/imports/:batchID/summary` | Unit-aware selected totals and spell preview |
+| POST | `/api/v1/imports/:batchID/commit` | Atomically write the persisted selection to `GuildBankItems` |
 
 Every response carries `X-Request-ID`; logs include the same ID. JSON errors
 use `{"error":{"code","message","fields","request_id"}}`. Admin API requests
@@ -136,6 +157,16 @@ session hashing/expiry/disabled accounts, login failure parity and lockout,
 CSRF rejection, default-deny routes, secure cookie flags, secret redaction and
 settings validation. The four-step flow was also exercised against the Compose
 topology with a live MariaDB 11.4 instance.
+
+Phase 3 adds the parser golden test for the 548-line sample, natural-sort and
+`LocationGroup` normalization tests, commit-plan expansion/merge tests, and
+handler tests for multipart CSRF, upload, selection and rendered import pages.
+The guild migration has been applied against the Compose MariaDB 11.4 instance
+and the app starts healthy with the new schema. The authenticated live workflow
+was also executed: setup and login, the canonical sample (548 physical lines,
+197 accepted and 348 discarded rows, 30 groups with one `Hoard`, 723 item units,
+3 spell units), a persisted 8-group subset commit and a second batch that merged
+spells; see `Docs/ProjectStatus.md` §1.5.1.
 
 The full Items metadata test is opt-in because it requires the provisioned
 144,712-row source. Set `GUILDBANK_INTEGRATION=1` and the

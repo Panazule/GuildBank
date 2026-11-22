@@ -159,15 +159,13 @@ func SecurityHeaders() gin.HandlerFunc {
 }
 
 func requestBodyLimit(c *gin.Context) int64 {
-	switch c.FullPath() {
-	case "/api/v1/imports":
-		if c.Request.Method == http.MethodPost {
-			return 10 << 20
-		}
-	case "/api/v1/imports/:batchID/selection":
-		if c.Request.Method == http.MethodPut {
-			return 2 << 20
-		}
+	path := c.Request.URL.Path
+	if path == "/api/v1/imports" && c.Request.Method == http.MethodPost {
+		return 10 << 20
+	}
+	if strings.HasPrefix(path, "/api/v1/imports/") && strings.HasSuffix(path, "/selection") &&
+		c.Request.Method == http.MethodPut {
+		return 2 << 20
 	}
 	return 1 << 20
 }
