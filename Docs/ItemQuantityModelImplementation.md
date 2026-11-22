@@ -141,6 +141,7 @@ MariaDB 11.4 container (created, exercised, then dropped):
 |---|---|
 | Create the 0001 `GuildBankItems` shape with `ck_gbi_item_one` | table created |
 | `ALTER TABLE … DROP CHECK ck_gbi_item_one` (first draft) | **failed** `ERROR 1064`; migration corrected to `DROP CONSTRAINT` |
+| `DROP CONSTRAINT` (without `IF EXISTS`) after the table already lacked the constraint | **failed**; the shipped form is `DROP CONSTRAINT IF EXISTS` |
 | `DROP CONSTRAINT IF EXISTS ck_gbi_item_one` + `ADD COLUMN ConsolidatedInto` | success; `ConsolidatedInto bigint(20) unsigned YES NULL`; a second `DROP CONSTRAINT IF EXISTS` is also a no-op |
 | Insert `Item` row with `Quantity=55` | success (row 6, quantity 55) |
 | Insert `Item` row with `Quantity=0` | rejected `ERROR 4025 … CONSTRAINT ck_gbi_quantity failed` |
@@ -148,6 +149,22 @@ MariaDB 11.4 container (created, exercised, then dropped):
 | Consolidation transaction (survivor quantity 2; absorbed row soft deleted with `ConsolidatedInto=1`) | rows: 1 qty 2 active; 2 qty 1 removed into 1; others unchanged |
 | Re-run duplicate-group query | `duplicate_groups 0` (idempotent) |
 | Audit inserts | `ITEM_UPDATED` record 1 note `quantity consolidated from 2 rows`; `ITEM_REMOVED` record 2 note `consolidated into 1` |
+
+Live Compose validation on 2026-11-22 (rebuilt `guildbank:dev`, MariaDB 11.4):
+
+| Step | Result |
+|---|---|
+| `docker compose build guildbank` | image built (`BUILD_EXIT=0`) |
+| `docker compose run --rm -T --no-deps guildbank -consolidate-items -dry-run` | exit 0; startup reported `schema_version=0005_item_quantity_model`; location backfill wrote 0 rows |
+| Dry-run log | `groups=39`, `absorbed_rows=795`, `units_in_groups=834`, `units_absorbed=0`, `units_remaining=834`, `dry_run=true` |
+| Statement before the dry run | 874 active item rows / 874 units; 39 duplicate groups. Projected post-run state: 79 active rows, 874 units |
+| Schema after deployment | `0005` recorded in `schema_migrations`; `ConsolidatedInto` present; only `ck_gbi_quantity`, `ck_gbi_deleted`, `ck_gbi_meta_missing`, `ck_gbi_bazaar` and `ck_gbi_open` remain as CHECK constraints |
+| Audit after the dry run | 0 rows with `Notes LIKE '%consolidat%'`, proving the rehearsal wrote nothing |
+| Restart on the new image | container healthy; `/healthz` returned `200` |
+
+The dry run was **not** followed by a real run: applying consolidation is the
+owner's separate, actor-recorded step (QTY-09 Option C). The development store
+still holds the 874 legacy rows until that run is authorized.
 
 The opt-in full-table Items integration test and the Phase 4 benchmarks were not
 re-run; this change does not touch the Items repository or the public query

@@ -636,6 +636,16 @@ D-01–D-13 are specification decisions and do not require engineering approval.
 
 Evidence and before/after examples are in `ItemQuantityModelImplementation.md`.
 
+Live deployment and rehearsal on 2026-11-22: the rebuilt `guildbank:dev` image
+applied `0005_item_quantity_model` to the development guild store and started
+healthy (`/healthz` 200). The owner-run dry run
+(`guildbank -consolidate-items -dry-run`) reported 39 duplicate groups, 795
+absorbable rows, 834 units in those groups and 0 rows changed; the store
+remained at 874 active item rows / 874 units pending the authorized real run.
+The audit table gained no consolidation rows, confirming the dry run wrote
+nothing. `0005` is recorded in `schema_migrations`, `ConsolidatedInto` exists,
+and `ck_gbi_item_one` is gone while `ck_gbi_quantity` remains.
+
 ---
 
 ## 7. Next actions
@@ -735,6 +745,7 @@ has been authorized; the owner review of the Phase 5 implementation is the gate.
 | 2.4 | 2026-11-22 | Phase 5 final approval with PD5-40: availability thresholds are inclusive, so `Bazaar` begins on the `DateBazaar` day (`Mains` while `today < DateOpen`; `Persona` while `DateOpen <= today < DateBazaar`; `Bazaar` when `today >= DateBazaar`). `service.Availability` changed one comparison, the service and API boundary tests were updated and extended, `PublicInventoryAPI.md`, `Phase4ImplementationPlan.md` PD4-11/§5.4/§7.3, `Phase5ImplementationPlan.md` PD5-37/PD5-40/§9.5 and `Phase5Validation.md` were aligned; three admin probe rows (718–720) verified `Bazaar`/`Persona`/`Mains` in HTML and JSON and were removed through the admin form; `gofmt`/`go vet`/`go test ./...` clean; final state 706 active rows, 29 audit rows. No post-Phase-5 work started |
 | 2.5 | 2026-11-22 | Owner-approved post-Phase-5 review items implemented: IMP-01 nested-slot rows ignored and counted (`IgnoredRowCount`, migration `0004`); IMP-02/IMP-03 Other label, Kind column and banner; IMP-04/IMP-05 container-aware default selection with the Hoard exception and non-retroactive reset; IMP-06 page-local group scope with an unselected view that ignores it; AI-01 page-local bulk removal through a preview and one all-or-nothing transaction; AI-02 combined edit+remove in one transaction with `ITEM_UPDATED`+`ITEM_REMOVED` under one correlation ID. Audit vocabulary, import commit path and advisory lock unchanged; the migration hash manifest is now LF-normalized so the gate passes on both Windows and Linux; `gofmt`/`go vet`/`go test ./...` clean; live Compose verification passed. Recorded in `ImportAdminImprovements.md` and §1.9 |
 | 2.6 | 2026-11-22 | Item quantity model approved and implemented (QTY-01–QTY-12): migration `0005` drops `ck_gbi_item_one` and adds `ConsolidatedInto`; import commit and manual create write one row with the line/entered quantity; later imports of the same EQUID do not merge; item quantity is editable/audited; spells keep merge-by-EQUID; owner-run `-consolidate-items` (dry-run first) folds legacy expanded rows into the lowest ID with summed quantity, soft deletes and per-row audit, and restore of absorbed rows is rejected; review, implementation summary, D-07/PD3/PD5/DatabaseDesign/ProjectStructure amendments recorded; `gofmt`/`go vet`/`go test ./...` clean. Recorded in `ItemQuantityModelReview.md` and `ItemQuantityModelImplementation.md` |
+| 2.7 | 2026-11-22 | Live deployment of the item quantity model: rebuilt `guildbank:dev` applied `0005_item_quantity_model` to the development guild store and restarted healthy (`/healthz` 200); the owner-run dry run reported 39 groups / 795 absorbable rows / 834 units in groups with 0 rows changed, leaving 874 active item rows and 874 units pending the authorized real run; 0 consolidation audit rows confirm the dry run wrote nothing; `ConsolidatedInto` present, `ck_gbi_item_one` absent and `ck_gbi_quantity` retained |
 
 ---
 
