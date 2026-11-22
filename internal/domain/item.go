@@ -1,5 +1,14 @@
 package domain
 
+// ItemType is the inventory kind stored in GuildBankItems. The two values are
+// the only values accepted by the MariaDB ENUM (Design.md L266-L374).
+type ItemType string
+
+const (
+	ItemTypeItem  ItemType = "Item"
+	ItemTypeSpell ItemType = "Spell"
+)
+
 // Item is the application's logical view of the externally owned item
 // metadata. The MariaDB repository maps the physical source columns to these
 // fields; callers must not depend on the source names.

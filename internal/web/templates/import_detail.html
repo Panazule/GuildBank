@@ -1,0 +1,87 @@
+{{define "import_detail.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card import-detail" id="import-detail" data-batch-id="{{.Batch.ID}}" data-status="{{.Batch.Status}}" data-page-size="50">
+    <p class="eyebrow"><a href="/admin/imports">Imports</a></p>
+    {{if not .Ready}}
+      <h1>Import batch</h1>
+      <div class="alert alert-error" role="alert">The guild database is unavailable, so this batch cannot be displayed. <a href="/admin/settings">Review database settings</a>.</div>
+    {{else}}
+      <h1>{{.Batch.FileName}}</h1>
+      <p><span class="status-badge status-{{.Batch.Status}}">{{.Batch.Status}}</span>
+        {{if .Batch.ReadOnly}}<span class="muted">This batch is read-only.</span>{{end}}</p>
+      {{if .Uploaded}}<div class="alert alert-ok" role="status">The file was staged successfully. Review the selection before committing.</div>{{end}}
+      {{if .FailedUpload}}<div class="alert alert-error" role="alert">The file could not be imported. The durable failure reason is shown below.</div>{{end}}
+      <dl class="batch-meta">
+        <div><dt>Batch</dt><dd>{{.Batch.ID}}</dd></div>
+        <div><dt>Imported</dt><dd>{{.Batch.ImportedAt}} by {{.Batch.ImportedBy}}</dd></div>
+        <div><dt>Source rows</dt><dd>{{.Batch.SourceRowCount}}</dd></div>
+        <div><dt>Accepted rows</dt><dd>{{.Batch.AcceptedRowCount}}</dd></div>
+        <div><dt>SHA-256</dt><dd class="mono">{{.Batch.SHA256Prefix}}{{if .Batch.SHA256}}…{{end}}</dd></div>
+      </dl>
+      {{if .Batch.FailureReason}}<h2>Failure reason</h2><pre class="failure-detail">{{.Batch.FailureReason}}</pre>{{end}}
+      {{if eq .Batch.Status "Completed"}}<div class="alert alert-ok" role="status">This batch has been committed to inventory and cannot be committed again.</div>{{end}}
+
+      <section id="import-summary-section">
+        <h2>Selection summary</h2>
+        <div class="summary-grid" id="import-summary" aria-live="polite"></div>
+      </section>
+
+      <div class="import-layout">
+        <aside class="location-panel" aria-labelledby="location-heading">
+          <h2 id="location-heading">Locations</h2>
+          <p class="help">The selector is built from normalized LocationGroup values. All Hoard variants appear as one Hoard group.</p>
+          <div id="location-list" class="location-list"></div>
+          {{if not .Batch.ReadOnly}}
+          <div class="wizard-actions">
+            <button type="button" class="secondary" id="select-all">Select all</button>
+            <button type="button" class="secondary" id="clear-all">Clear all</button>
+          </div>
+          {{end}}
+        </aside>
+
+        <section class="row-panel" aria-labelledby="rows-heading">
+          <h2 id="rows-heading">Staged rows</h2>
+          <form id="row-filters" class="filter-row">
+            {{if not .Batch.ReadOnly}}
+            <label>Location<select id="filter-location" name="locationGroup"><option value="">All locations</option></select></label>
+            {{end}}
+            <label>Selection<select id="filter-selected" name="selected">
+              <option value="all">All rows</option>
+              <option value="selected">Selected</option>
+              <option value="unselected">Unselected</option>
+            </select></label>
+            <label>Search by name<input id="filter-search" name="q" type="search" maxlength="128" placeholder="Name contains…"></label>
+            <button type="submit" class="secondary">Apply filters</button>
+          </form>
+          <div class="table-scroll">
+            <table class="import-table" id="row-table">
+              <caption>Staged rows grouped by normalized location</caption>
+              <thead><tr>
+                {{if not .Batch.ReadOnly}}<th scope="col">Select</th>{{end}}
+                <th scope="col">Line</th><th scope="col">Type</th><th scope="col">Name</th>
+                <th scope="col">EQUID</th><th scope="col">Qty</th><th scope="col">Location</th><th scope="col">Warnings</th>
+              </tr></thead>
+              <tbody id="row-body"></tbody>
+            </table>
+          </div>
+          <div class="pager" id="row-pager" aria-live="polite"></div>
+          {{if not .Batch.ReadOnly}}
+          <div class="commit-bar">
+            <p class="help">Committing expands item units into individual inventory records and merges spells by EQUID. A batch can be committed once.</p>
+            <button type="button" class="primary" id="commit-button">Commit selected</button>
+          </div>
+          {{end}}
+        </section>
+      </div>
+      <div id="import-status" class="test-result" role="status" aria-live="polite"></div>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+  <script src="/static/imports.js"></script>
+</body>
+</html>
+{{end}}

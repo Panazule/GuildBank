@@ -50,6 +50,7 @@ func newHarness(t *testing.T, secure bool) *harness {
 		Setup:         setup,
 		Auth:          auth,
 		Settings:      settings,
+		Imports:       service.NewImportService(nil, nil, settings, nil, nil),
 		Version:       "test",
 		SecureCookies: secure,
 	})

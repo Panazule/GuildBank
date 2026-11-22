@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,14 +54,32 @@ func (m *csrfManager) middleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		submitted := m.submittedToken(c)
+		submitted, parseErr := m.submittedToken(c)
+		if parseErr != nil {
+			var maxBytes *http.MaxBytesError
+			if errors.As(parseErr, &maxBytes) {
+				writeError(c, http.StatusRequestEntityTooLarge, "file_too_large", "the uploaded file exceeds 10 MiB")
+			} else {
+				writeError(c, http.StatusUnprocessableEntity, "validation_failed", "the multipart form could not be read")
+			}
+			if c.Request.MultipartForm != nil {
+				_ = c.Request.MultipartForm.RemoveAll()
+			}
+			return
+		}
 		if submitted == "" || subtle.ConstantTimeCompare([]byte(token), []byte(submitted)) != 1 || !m.valid(submitted) {
+			if c.Request.MultipartForm != nil {
+				_ = c.Request.MultipartForm.RemoveAll()
+			}
 			if wantsHTML(c) {
 				writeHTMLStatus(c, http.StatusForbidden, "Request rejected", "The form security token is missing or expired. Reload the page and try again.")
 			} else {
 				writeError(c, http.StatusForbidden, "csrf_invalid", "CSRF token is missing or invalid")
 			}
 			return
+		}
+		if c.Request.MultipartForm != nil {
+			defer func() { _ = c.Request.MultipartForm.RemoveAll() }()
 		}
 		c.Next()
 	}
@@ -108,24 +127,33 @@ func (m *csrfManager) setCookie(c *gin.Context, token string) {
 	c.SetCookie(csrfCookieName, token, csrfMaxAge, "/", "", m.secure, true)
 }
 
-func (m *csrfManager) submittedToken(c *gin.Context) string {
+func (m *csrfManager) submittedToken(c *gin.Context) (string, error) {
 	if value := strings.TrimSpace(c.GetHeader(csrfHeaderName)); value != "" {
-		return value
+		return value, nil
 	}
 	contentType := c.GetHeader("Content-Type")
 	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
 		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
 		if err != nil {
-			return ""
+			return "", err
 		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(body))
 		values, err := url.ParseQuery(string(body))
 		if err != nil {
-			return ""
+			return "", err
 		}
-		return values.Get(csrfFieldName)
+		return values.Get(csrfFieldName), nil
 	}
-	return ""
+	if strings.HasPrefix(contentType, "multipart/form-data") &&
+		c.Request.Method == http.MethodPost && c.FullPath() == "/api/v1/imports" {
+		if err := c.Request.ParseMultipartForm(1 << 20); err != nil {
+			return "", err
+		}
+		if values := c.Request.MultipartForm.Value[csrfFieldName]; len(values) > 0 {
+			return values[0], nil
+		}
+	}
+	return "", nil
 }
 
 func encodeToken(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }

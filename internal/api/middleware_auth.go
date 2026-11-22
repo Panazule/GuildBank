@@ -152,8 +152,22 @@ func SecurityHeaders() gin.HandlerFunc {
 			"default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'")
 		c.Header("Cache-Control", "no-store")
 		if c.Request.Body != nil {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, requestBodyLimit(c))
 		}
 		c.Next()
 	}
+}
+
+func requestBodyLimit(c *gin.Context) int64 {
+	switch c.FullPath() {
+	case "/api/v1/imports":
+		if c.Request.Method == http.MethodPost {
+			return 10 << 20
+		}
+	case "/api/v1/imports/:batchID/selection":
+		if c.Request.Method == http.MethodPut {
+			return 2 << 20
+		}
+	}
+	return 1 << 20
 }

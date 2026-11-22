@@ -73,6 +73,16 @@ func Run(ctx context.Context, opts Options) error {
 			logger.Warn("guild store unreachable; continuing in degraded mode",
 				"target", cfg.MariaDB.Redacted(), "error", guildErr)
 		} else {
+			if version, err := guildStore.Migrate(ctx); err != nil {
+				return fmt.Errorf("app: migrate guild store: %w", err)
+			} else {
+				logger.Info("guild store schema ready", "version", version)
+			}
+			if n, err := guildStore.RecoverInterrupted(ctx); err != nil {
+				logger.Warn("import recovery failed", "error", err)
+			} else if n > 0 {
+				logger.Warn("failed interrupted import batches", "count", n)
+			}
 			defer func() {
 				if cerr := guildStore.Close(); cerr != nil {
 					logger.Warn("mariadb close failed", "error", cerr)
@@ -95,6 +105,14 @@ func Run(ctx context.Context, opts Options) error {
 	settingsService := service.NewSettingsService(appStore)
 	setupService := service.NewSetupService(appStore, appStore, guildConnectionTester{})
 	authService := service.NewAuthService(appStore, appStore, settingsService)
+
+	var importService *service.ImportService
+	if guildStore != nil {
+		metadata := service.NewItemMetadataService(guildStore)
+		importService = service.NewImportService(guildStore, metadata, settingsService, time.Now, logger)
+	} else {
+		importService = service.NewImportService(nil, nil, settingsService, time.Now, logger)
+	}
 
 	purgeCtx, stopPurge := context.WithCancel(ctx)
 	defer stopPurge()
@@ -126,6 +144,7 @@ func Run(ctx context.Context, opts Options) error {
 		Setup:          setupService,
 		Auth:           authService,
 		Settings:       settingsService,
+		Imports:        importService,
 		Version:        opts.Version,
 		TrustedProxies: cfg.TrustedProxies,
 		SecureCookies:  cfg.SecureCookies,
@@ -138,8 +157,8 @@ func Run(ctx context.Context, opts Options) error {
 		Addr:              ":" + strconv.Itoa(cfg.Port),
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		ReadTimeout:       120 * time.Second,
+		WriteTimeout:      120 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}

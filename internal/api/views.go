@@ -79,6 +79,34 @@ type errorPageData struct {
 	Status int
 }
 
+type importBatchView struct {
+	ID               int64
+	FileName         string
+	SHA256           string
+	SHA256Prefix     string
+	Status           domain.ImportStatus
+	SourceRowCount   int
+	AcceptedRowCount int
+	FailureReason    string
+	ImportedBy       string
+	ImportedAt       string
+	ReadOnly         bool
+}
+
+type importsPageData struct {
+	pageData
+	Ready   bool
+	Batches []importBatchView
+}
+
+type importDetailPageData struct {
+	pageData
+	Ready       bool
+	Batch       importBatchView
+	Uploaded    bool
+	FailedUpload bool
+}
+
 func (v *views) login(c *gin.Context, status int, data loginPageData) {
 	v.render(c, status, "login.html", data)
 }
@@ -104,4 +132,49 @@ func (v *views) errorPage(c *gin.Context, status int, message string) {
 		},
 		Status: status,
 	})
+}
+
+func (v *views) imports(c *gin.Context, status int, data importsPageData) {
+	v.render(c, status, "imports.html", data)
+}
+
+func (v *views) importDetail(c *gin.Context, status int, data importDetailPageData) {
+	v.render(c, status, "import_detail.html", data)
+}
+
+func importBatchViews(batches []domain.ImportBatch) []importBatchView {
+	out := make([]importBatchView, 0, len(batches))
+	for _, batch := range batches {
+		out = append(out, importBatchViewOf(batch))
+	}
+	return out
+}
+
+func importBatchViewOf(batch domain.ImportBatch) importBatchView {
+	sha := ""
+	if batch.FileSha256 != nil {
+		sha = *batch.FileSha256
+	}
+	prefix := sha
+	if len(prefix) > 12 {
+		prefix = prefix[:12]
+	}
+	view := importBatchView{
+		ID: batch.ImportBatchID, FileName: batch.FileName, SHA256: sha,
+		SHA256Prefix: prefix, Status: batch.Status,
+		SourceRowCount: intValue(batch.SourceRowCount), AcceptedRowCount: intValue(batch.AcceptedRowCount),
+		ImportedBy: batch.ImportedBy, ImportedAt: batch.ImportedAt.UTC().Format("2006-01-02 15:04 UTC"),
+		ReadOnly: batch.Status != domain.ImportStatusUploaded,
+	}
+	if batch.FailureReason != nil {
+		view.FailureReason = *batch.FailureReason
+	}
+	return view
+}
+
+func intValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }

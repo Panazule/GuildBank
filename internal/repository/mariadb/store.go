@@ -54,8 +54,8 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 	my.Loc = time.UTC
 	my.Collation = "utf8mb4_unicode_ci"
 	my.Timeout = 5 * time.Second
-	my.ReadTimeout = 30 * time.Second
-	my.WriteTimeout = 30 * time.Second
+	my.ReadTimeout = 120 * time.Second
+	my.WriteTimeout = 120 * time.Second
 	my.Params = map[string]string{"charset": "utf8mb4"}
 
 	db, err := sql.Open(DriverName, my.FormatDSN())

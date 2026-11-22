@@ -1,0 +1,58 @@
+{{define "imports.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card">
+    <p class="eyebrow">Administration</p>
+    <h1>Imports</h1>
+    <p class="muted">Upload a tab-delimited InventoryExport.txt. The selector and review rows are grouped by normalized LocationGroup; LocationRaw is retained only for traceability.</p>
+    {{if not .Ready}}
+      <div class="alert alert-error" role="alert">The guild database is unavailable. Uploads are disabled until the MariaDB connection is restored and the application is restarted. <a href="/admin/settings">Review database settings</a>.</div>
+    {{end}}
+    <section class="import-upload">
+      <h2>Upload a batch</h2>
+      <form id="import-upload-form" method="post" action="/api/v1/imports" enctype="multipart/form-data" class="stack">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <label>
+          Inventory export file
+          <input name="file" type="file" accept=".txt,text/plain" required {{if not .Ready}}disabled{{end}}>
+          <span class="help">Expected columns: Location, Name, ID, Count, Slots. Every accepted row starts selected.</span>
+        </label>
+        <div class="wizard-actions"><button type="submit" class="primary" {{if not .Ready}}disabled{{end}}>Upload and review</button></div>
+      </form>
+      <div id="upload-status" class="test-result" aria-live="polite"></div>
+    </section>
+
+    <section>
+      <h2>Recent batches</h2>
+      {{if .Batches}}
+      <div class="table-scroll">
+        <table class="import-table">
+          <caption>Import history, newest first</caption>
+          <thead><tr><th scope="col">Date</th><th scope="col">File</th><th scope="col">Status</th><th scope="col">Source rows</th><th scope="col">Accepted rows</th><th scope="col">Imported by</th></tr></thead>
+          <tbody>
+          {{range .Batches}}
+            <tr>
+              <td>{{.ImportedAt}}</td>
+              <td><a href="/admin/imports/{{.ID}}">{{.FileName}}</a>{{if .FailureReason}}<span class="failure">{{.FailureReason}}</span>{{end}}</td>
+              <td><span class="status-badge status-{{.Status}}">{{.Status}}</span>{{if .ReadOnly}}<span class="help">read-only</span>{{end}}</td>
+              <td>{{.SourceRowCount}}</td>
+              <td>{{.AcceptedRowCount}}</td>
+              <td>{{.ImportedBy}}</td>
+            </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+        <p class="muted">No imports exist yet.{{if not .Ready}} Configure and restart with a reachable guild database before uploading.{{end}}</p>
+      {{end}}
+    </section>
+  </main>
+  {{template "footer" .}}
+  <script src="/static/imports.js"></script>
+</body>
+</html>
+{{end}}

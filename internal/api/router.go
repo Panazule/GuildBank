@@ -29,6 +29,7 @@ type Deps struct {
 	Setup          *service.SetupService
 	Auth           *service.AuthService
 	Settings       *service.SettingsService
+	Imports        *service.ImportService
 	Version        string
 	TrustedProxies []string
 	StartTime      time.Time
@@ -45,8 +46,8 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	if deps.Health == nil {
 		return nil, errors.New("api: health probe is required")
 	}
-	if deps.Setup == nil || deps.Auth == nil || deps.Settings == nil {
-		return nil, errors.New("api: setup, auth and settings services are required")
+	if deps.Setup == nil || deps.Auth == nil || deps.Settings == nil || deps.Imports == nil {
+		return nil, errors.New("api: setup, auth, settings and imports services are required")
 	}
 	if deps.StartTime.IsZero() {
 		deps.StartTime = time.Now()
@@ -84,6 +85,7 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	authHandler := &authHandler{auth: deps.Auth, views: viewSet, logger: deps.Logger, secure: deps.SecureCookies, csrfMgr: csrf}
 	setupHandler := &setupHandler{setup: deps.Setup, auth: authHandler, views: viewSet, logger: deps.Logger}
 	settingsHandler := &settingsHandler{settings: deps.Settings, views: viewSet, logger: deps.Logger}
+	importHandler := &importsHandler{imports: deps.Imports, views: viewSet, logger: deps.Logger}
 	ui := &uiHandler{auth: deps.Auth, views: viewSet}
 
 	// Public forms (login and setup) need a CSRF token even though no session
@@ -105,6 +107,8 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	admin.Use(RequireAuth(deps.Auth, deps.SecureCookies), csrf.middleware(), RequireAdmin())
 	admin.GET("/admin", ui.adminRoot)
 	admin.GET("/admin/settings", settingsHandler.page)
+	admin.GET("/admin/imports", importHandler.page)
+	admin.GET("/admin/imports/:batchID", importHandler.detailPage)
 	admin.GET("/api/v1/auth/session", authHandler.session)
 	admin.POST("/api/v1/auth/logout", authHandler.logout)
 	admin.GET("/api/v1/settings", settingsHandler.get)
@@ -112,6 +116,16 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	// HTML forms cannot issue PUT; POST is a thin adapter onto the same REST
 	// handler and service, preserving the D-03 single write path.
 	admin.POST("/api/v1/settings", settingsHandler.update)
+	admin.GET("/api/v1/imports", importHandler.list)
+	admin.POST("/api/v1/imports", importHandler.upload)
+	admin.GET("/api/v1/imports/:batchID", importHandler.get)
+	admin.GET("/api/v1/imports/:batchID/locations", importHandler.locations)
+	admin.GET("/api/v1/imports/:batchID/rows", importHandler.rows)
+	admin.GET("/api/v1/imports/:batchID/row-ids", importHandler.rowIDs)
+	admin.GET("/api/v1/imports/:batchID/selection", importHandler.selection)
+	admin.PUT("/api/v1/imports/:batchID/selection", importHandler.putSelection)
+	admin.GET("/api/v1/imports/:batchID/summary", importHandler.summary)
+	admin.POST("/api/v1/imports/:batchID/commit", importHandler.commit)
 
 	r.NoRoute(notFound)
 	r.NoMethod(methodNotAllowed)

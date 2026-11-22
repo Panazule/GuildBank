@@ -48,6 +48,7 @@ func newTestRouter(t *testing.T, result service.Readiness) *gin.Engine {
 		Setup:    &setup,
 		Auth:     auth,
 		Settings: settings,
+		Imports:  service.NewImportService(nil, nil, settings, nil, nil),
 		Version:  "test",
 	})
 	if err != nil {
