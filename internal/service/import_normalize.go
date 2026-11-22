@@ -24,22 +24,27 @@ type NormalizedLocation struct {
 	Warnings []domain.ImportWarning
 }
 
-// NormalizeLocation applies D-05. LocationGroup is the authoritative selector
-// value; LocationRaw is retained by the caller only for display/audit.
-func NormalizeLocation(raw string) NormalizedLocation {
+// locationProblem classifies why a raw location did not produce a recognized
+// group. An empty problem means the value is recognized, or is a non-reserved
+// string that legitimately groups as Unspecified.
+type locationProblem string
+
+const (
+	locationProblemBlank    locationProblem = "blank"
+	locationProblemPattern  locationProblem = "pattern_invalid"
+	locationProblemOverlong locationProblem = "overlong"
+)
+
+// normalizeLocationValue is the single D-05 computation used by both wrappers.
+// It returns the canonical group and, when applicable, the reason the raw value
+// could not be grouped.
+func normalizeLocationValue(raw string) (string, locationProblem) {
 	value := strings.Join(strings.Fields(raw), " ")
 	value = locationSlotSuffix.ReplaceAllString(value, "")
 	value = strings.TrimSpace(value)
 
 	if value == "" {
-		return NormalizedLocation{
-			Group: "Unspecified",
-			Sort:  NaturalSortKey("Unspecified"),
-			Warnings: []domain.ImportWarning{{
-				Code: "location_blank", Field: "Location",
-				Detail: "raw location was empty; grouped as Unspecified",
-			}},
-		}
+		return "Unspecified", locationProblemBlank
 	}
 
 	group := ""
@@ -53,29 +58,69 @@ func NormalizeLocation(raw string) NormalizedLocation {
 	case locationHoard.MatchString(value):
 		group = "Hoard"
 	case reservedPrefix.MatchString(value):
-		return NormalizedLocation{
-			Group: "Unspecified",
-			Sort:  NaturalSortKey("Unspecified"),
-			Warnings: []domain.ImportWarning{{
-				Code: "location_pattern_invalid", Field: "Location",
-				Detail: "location begins with a reserved bank prefix but does not match its pattern",
-			}},
-		}
+		return "Unspecified", locationProblemPattern
 	default:
 		group = "Unspecified"
 	}
 
 	if len([]rune(group)) > 64 {
+		return "Unspecified", locationProblemOverlong
+	}
+	return group, ""
+}
+
+// NormalizeLocation applies D-05. LocationGroup is the authoritative selector
+// value; LocationRaw is retained by the caller only for display/audit.
+func NormalizeLocation(raw string) NormalizedLocation {
+	group, problem := normalizeLocationValue(raw)
+	switch problem {
+	case locationProblemBlank:
 		return NormalizedLocation{
-			Group: "Unspecified",
-			Sort:  NaturalSortKey("Unspecified"),
+			Group: group,
+			Sort:  NaturalSortKey(group),
+			Warnings: []domain.ImportWarning{{
+				Code: "location_blank", Field: "Location",
+				Detail: "raw location was empty; grouped as Unspecified",
+			}},
+		}
+	case locationProblemPattern:
+		return NormalizedLocation{
+			Group: group,
+			Sort:  NaturalSortKey(group),
+			Warnings: []domain.ImportWarning{{
+				Code: "location_pattern_invalid", Field: "Location",
+				Detail: "location begins with a reserved bank prefix but does not match its pattern",
+			}},
+		}
+	case locationProblemOverlong:
+		return NormalizedLocation{
+			Group: group,
+			Sort:  NaturalSortKey(group),
 			Warnings: []domain.ImportWarning{{
 				Code: "location_pattern_invalid", Field: "Location",
 				Detail: "normalized location exceeds 64 characters",
 			}},
 		}
+	default:
+		return NormalizedLocation{Group: group, Sort: NaturalSortKey(group)}
 	}
-	return NormalizedLocation{Group: group, Sort: NaturalSortKey(group)}
+}
+
+// NormalizeAdminLocation returns the same group and sort as NormalizeLocation
+// but reports admin-facing warnings: a blank value is expected, while any
+// non-blank value that still groups as Unspecified is surfaced once so the
+// administrator knows the raw value was retained but not grouped.
+func NormalizeAdminLocation(raw string) NormalizedLocation {
+	group, problem := normalizeLocationValue(raw)
+	normalized := NormalizedLocation{Group: group, Sort: NaturalSortKey(group)}
+	if problem == locationProblemBlank || group != "Unspecified" {
+		return normalized
+	}
+	normalized.Warnings = []domain.ImportWarning{{
+		Code: "location_unrecognized", Field: "sourceLocation",
+		Detail: "raw location was retained but does not match a known bank location; grouped as Unspecified",
+	}}
+	return normalized
 }
 
 func normalizeDigits(digits string) string {

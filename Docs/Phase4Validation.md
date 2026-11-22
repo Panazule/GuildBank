@@ -53,6 +53,12 @@ parameterized repository predicates, natural-sort allowlisting, API/HTML
 contracts, forbidden-field absence, anonymous and authenticated projection
 parity, XSS escaping, method rejection, 404/422/503 paths, and template parsing.
 
+*(Amended 2026-11-22 by the owner decision `PD5-40`: the upper availability
+boundary is inclusive, so `open` is `DateOpen <= today < DateBazaar` and
+`bazaar` starts on the `DateBazaar` day. The Phase 4 suite recorded above pinned
+the earlier `today > DateBazaar` comparison; the current expectations are in
+`Phase5Validation.md` §11.)*
+
 ## 4. Natural-sort collation and index proof
 
 The database integration fixture inserted `Phase4 Order 1`, `2`, `10` and `11`

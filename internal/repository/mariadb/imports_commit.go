@@ -151,26 +151,39 @@ func (c *importCommitTx) InsertSpells(rows []domain.GuildBankItem) ([]int64, err
 }
 
 func (c *importCommitTx) insertInventory(rows []domain.GuildBankItem) ([]int64, error) {
+	return insertInventoryRows(c.ctx, c.tx, rows)
+}
+
+// execer is the subset of *sql.Tx and *sql.Conn used by the shared row insert.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// insertInventoryRows is the single inventory INSERT used by import commit and
+// manual admin creation. Both callers share this 19-column list so the two
+// paths cannot drift; callers keep their own transaction and locking.
+func insertInventoryRows(ctx context.Context, tx execer, rows []domain.GuildBankItem) ([]int64, error) {
 	ids := make([]int64, 0, len(rows))
 	for start := 0; start < len(rows); start += importChunkSize {
 		end := min(start+importChunkSize, len(rows))
 		chunk := rows[start:end]
 		placeholders := make([]string, 0, len(chunk))
-		args := make([]any, 0, len(chunk)*17)
+		args := make([]any, 0, len(chunk)*19)
 		for _, row := range chunk {
-			placeholders = append(placeholders, "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+			placeholders = append(placeholders, "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
 			args = append(args, string(row.ItemType), row.EQUID, boolInt(row.MetadataMissingFg),
 				row.Name, row.ClassString, row.RaceString, row.DateAdded, row.DateOpen,
 				row.DateBazaar, row.Quantity, nullableString(row.SourceLocation),
+				nullableString(row.LocationGroup), nullableString(row.LocationSort),
 				nullableString(row.GivenTo), boolInt(row.DeletedFg), row.ModAt.UTC(),
 				row.ModBy, row.ModByUserID, row.NameSort)
 		}
 		query := `INSERT INTO GuildBankItems
 			(ItemType, EQUID, MetadataMissingFg, Name, ClassString, RaceString,
-			 DateAdded, DateOpen, DateBazaar, Quantity, SourceLocation, GivenTo,
-			 DeletedFg, ModAt, ModBy, ModByUserID, NameSort)
+			 DateAdded, DateOpen, DateBazaar, Quantity, SourceLocation, LocationGroup,
+			 LocationSort, GivenTo, DeletedFg, ModAt, ModBy, ModByUserID, NameSort)
 			VALUES ` + strings.Join(placeholders, ",")
-		result, err := c.tx.ExecContext(c.ctx, query, args...)
+		result, err := tx.ExecContext(ctx, query, args...)
 		if err != nil {
 			return nil, mapStoreError("insert inventory rows", err)
 		}

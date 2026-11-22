@@ -31,6 +31,7 @@ type Deps struct {
 	Settings       *service.SettingsService
 	Imports        *service.ImportService
 	Inventory      *service.InventoryService
+	Admin          *service.AdminInventoryService
 	Version        string
 	TrustedProxies []string
 	StartTime      time.Time
@@ -49,6 +50,11 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	}
 	if deps.Setup == nil || deps.Auth == nil || deps.Settings == nil || deps.Imports == nil || deps.Inventory == nil {
 		return nil, errors.New("api: setup, auth, settings, imports and inventory services are required")
+	}
+	if deps.Admin == nil {
+		// Tests and degraded configurations may omit the admin service; a nil
+		// store keeps every admin route responding 503 rather than panicking.
+		deps.Admin = service.NewAdminInventoryService(nil, nil, nil, nil, deps.Logger)
 	}
 	if deps.StartTime.IsZero() {
 		deps.StartTime = time.Now()
@@ -88,6 +94,7 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	settingsHandler := &settingsHandler{settings: deps.Settings, views: viewSet, logger: deps.Logger}
 	importHandler := &importsHandler{imports: deps.Imports, views: viewSet, logger: deps.Logger}
 	inventoryHandler := &inventoryHandler{inventory: deps.Inventory, auth: deps.Auth, views: viewSet, logger: deps.Logger}
+	adminHandler := &adminInventoryHandler{admin: deps.Admin, views: viewSet, logger: deps.Logger}
 	ui := &uiHandler{views: viewSet}
 
 	// Public forms (login and setup) need a CSRF token even though no session
@@ -131,6 +138,27 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	admin.PUT("/api/v1/imports/:batchID/selection", importHandler.putSelection)
 	admin.GET("/api/v1/imports/:batchID/summary", importHandler.summary)
 	admin.POST("/api/v1/imports/:batchID/commit", importHandler.commit)
+
+	// Phase 5 administrative inventory and audit viewer. The group above
+	// already enforces RequireAuth -> CSRF -> RequireAdmin for every route.
+	admin.GET("/admin/inventory", adminHandler.page)
+	admin.GET("/admin/inventory/new", adminHandler.newPage)
+	admin.GET("/admin/inventory/:id", adminHandler.detailPage)
+	admin.GET("/admin/inventory/:id/edit", adminHandler.editPage)
+	admin.GET("/admin/inventory/:id/remove", adminHandler.removePage)
+	admin.POST("/admin/inventory", adminHandler.createForm)
+	admin.POST("/admin/inventory/:id", adminHandler.updateForm)
+	admin.POST("/admin/inventory/:id/remove", adminHandler.removeForm)
+	admin.POST("/admin/inventory/:id/restore", adminHandler.restoreForm)
+	admin.GET("/admin/audit", adminHandler.auditPage)
+	admin.GET("/api/v1/admin/items", adminHandler.list)
+	admin.GET("/api/v1/admin/items/:id", adminHandler.getItem)
+	admin.POST("/api/v1/items", adminHandler.create)
+	admin.PUT("/api/v1/items/:id", adminHandler.update)
+	admin.DELETE("/api/v1/items/:id", adminHandler.remove)
+	admin.POST("/api/v1/items/:id/restore", adminHandler.restore)
+	admin.GET("/api/v1/audit", adminHandler.auditList)
+	admin.GET("/api/v1/audit/:id", adminHandler.auditEntry)
 
 	r.NoRoute(notFound)
 	r.NoMethod(methodNotAllowed)

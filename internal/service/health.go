@@ -1,5 +1,5 @@
-// Package service implements business logic for setup, identity, sessions
-// and settings. Inventory, import and audit services arrive with later phases.
+// Package service implements business logic for setup, identity, sessions,
+// settings, import, public inventory and administrative inventory.
 // Handlers talk to services, services talk to interfaces that repositories
 // implement (Design.md L109-L120).
 package service

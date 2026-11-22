@@ -182,6 +182,8 @@ type CommitResult struct {
 
 // GuildBankItem is the import-owned projection of one GuildBankItems row.
 // Dates are calendar dates at 00:00 UTC; the repository writes them as DATE.
+// LocationGroup and LocationSort are the persisted D-05 values staged at
+// upload; the repository never recomputes them.
 type GuildBankItem struct {
 	GuildBankItemID   int64
 	ItemType          ItemType
@@ -195,6 +197,8 @@ type GuildBankItem struct {
 	DateBazaar        time.Time
 	Quantity          uint32
 	SourceLocation    string // nullable in the table; empty is written as NULL
+	LocationGroup     string // nullable; empty is written as NULL
+	LocationSort      string // nullable; empty is written as NULL
 	GivenTo           string // nullable in the table; empty is written as NULL
 	DeletedFg         bool
 	ModAt             time.Time
@@ -203,8 +207,10 @@ type GuildBankItem struct {
 	NameSort          string
 }
 
-// AuditEntry maps the D-10 Audit columns.
+// AuditEntry maps the D-10 Audit columns. AuditID is filled only by audit
+// reads; writers never supply it.
 type AuditEntry struct {
+	AuditID       int64
 	EventDate     time.Time
 	UserID        int64
 	UserName      string

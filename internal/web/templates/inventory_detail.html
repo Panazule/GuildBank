@@ -20,8 +20,8 @@
       <div><dt>Races</dt><dd{{if .Item.RaceUnknown}} class="unknown"{{end}}>{{.Item.RaceText}}</dd></div>
       <div><dt>Availability</dt><dd>{{.Item.AvailabilityLabel}}</dd></div>
       <div><dt>Date added</dt><dd><time datetime="{{.Item.DateAddedISO}}">{{.Item.DateAddedText}}</time></dd></div>
-      <div><dt>Date open</dt><dd><time datetime="{{.Item.DateOpenISO}}">{{.Item.DateOpenText}}</time></dd></div>
-      <div><dt>Date bazaar</dt><dd><time datetime="{{.Item.DateBazaarISO}}">{{.Item.DateBazaarText}}</time></dd></div>
+      <div><dt>Open to personas</dt><dd><time datetime="{{.Item.DateOpenISO}}">{{.Item.DateOpenText}}</time></dd></div>
+      <div><dt>Open to bazaar</dt><dd><time datetime="{{.Item.DateBazaarISO}}">{{.Item.DateBazaarText}}</time></dd></div>
     </dl>
 
     {{if .Item.EQResourceURL}}

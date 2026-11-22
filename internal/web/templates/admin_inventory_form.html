@@ -1,0 +1,96 @@
+{{define "admin_inventory_form.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-card">
+    <p class="eyebrow">Administration</p>
+    <h1>{{if .Edit}}Edit record{{else}}Add inventory record{{end}}</h1>
+
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    {{if not .Ready}}
+      <div class="alert alert-error" role="status">The guild inventory store is unavailable, so nothing can be saved.</div>
+    {{end}}
+
+    {{if .Edit}}
+      <dl class="detail-list">
+        <div><dt>Inventory ID</dt><dd class="mono">{{.Item.ID}}</dd></div>
+        <div><dt>EQUID</dt><dd class="mono">{{.Item.EQUID}}</dd></div>
+        <div><dt>Name</dt><dd>{{.Item.Name}}</dd></div>
+        <div><dt>Type</dt><dd>{{.Item.ItemType}}</dd></div>
+        <div><dt>Date added (immutable)</dt><dd><time datetime="{{.Item.DateAddedISO}}">{{.Item.DateAddedText}}</time></dd></div>
+        <div><dt>Current availability</dt><dd><span class="availability-badge availability-{{.Item.Availability}}">{{.Item.AvailabilityLabel}}</span></dd></div>
+      </dl>
+    {{end}}
+
+    <form method="post" action="{{if .Edit}}/admin/inventory/{{.Item.ID}}{{else}}/admin/inventory{{end}}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      {{if .Edit}}<input type="hidden" name="expectedModAt" value="{{.Form.ExpectedModAt}}">{{end}}
+      {{if .Edit}}<input type="hidden" name="itemType" value="{{.Form.ItemType}}">{{end}}
+
+      {{if not .Edit}}
+        <div class="field-row">
+          <label>Item type
+            <select name="itemType" required>
+              <option value="Item"{{if eq .Form.ItemType "Item"}} selected{{end}}>Item (one row per unit)</option>
+              <option value="Spell"{{if eq .Form.ItemType "Spell"}} selected{{end}}>Spell (merged quantity)</option>
+            </select>
+          </label>
+          <label>EQUID
+            <input name="equid" type="text" inputmode="numeric" required value="{{.Form.EQUID}}" aria-describedby="equid-help">
+            <span class="help" id="equid-help">The item's EQUID from the game.</span>
+            {{with index .ErrorFields "equid"}}<span class="field-error">{{.}}</span>{{end}}
+          </label>
+          <label>Fallback name
+            <input name="name" type="text" maxlength="128" value="{{.Form.Name}}" aria-describedby="name-help">
+            <span class="help" id="name-help">Used only when the EQUID has no item metadata.</span>
+            {{with index .ErrorFields "name"}}<span class="field-error">{{.}}</span>{{end}}
+          </label>
+        </div>
+      {{end}}
+
+      <div class="field-row">
+        <label>Quantity
+          <input name="quantity" type="text" inputmode="numeric" required value="{{.Form.Quantity}}"
+                 {{if .Form.QuantityReadOnly}}readonly aria-readonly="true"{{end}} aria-describedby="quantity-help">
+          <span class="help" id="quantity-help">{{if .Form.QuantityReadOnly}}An item record always stores quantity 1.{{else}}A new item expands to one row per unit; a spell stores one row.{{end}}</span>
+          {{with index .ErrorFields "quantity"}}<span class="field-error">{{.}}</span>{{end}}
+        </label>
+        <label>Source location
+          <input name="sourceLocation" type="text" maxlength="128" value="{{.Form.SourceLocation}}" placeholder="General5-Slot1">
+          <span class="help">Raw value as it appears in game; the group is derived by the server.</span>
+          {{with index .ErrorFields "sourceLocation"}}<span class="field-error">{{.}}</span>{{end}}
+        </label>
+        <label>Recipient
+          <input name="givenTo" type="text" maxlength="128" value="{{.Form.GivenTo}}">
+          {{with index .ErrorFields "givenTo"}}<span class="field-error">{{.}}</span>{{end}}
+        </label>
+      </div>
+
+      <div class="field-row">
+        <label>Open to personas
+          <input name="dateOpen" type="date" value="{{.Form.DateOpen}}">
+          <span class="help">{{if .Edit}}Blank resets to Date added + GuildOpenDays.{{else}}Blank uses the guild default.{{end}}</span>
+          {{with index .ErrorFields "dateOpen"}}<span class="field-error">{{.}}</span>{{end}}
+        </label>
+        <label>Open to bazaar
+          <input name="dateBazaar" type="date" value="{{.Form.DateBazaar}}">
+          <span class="help">{{if .Edit}}Blank resets to Date added + BazaarDays.{{else}}Blank uses the guild default.{{end}}</span>
+          {{with index .ErrorFields "dateBazaar"}}<span class="field-error">{{.}}</span>{{end}}
+        </label>
+      </div>
+
+      {{with index .ErrorFields "expectedModAt"}}<div class="alert alert-error" role="alert">{{.}}</div>{{end}}
+
+      <div class="wizard-actions">
+        <a class="link" href="{{if .Edit}}/admin/inventory/{{.Item.ID}}{{else}}/admin/inventory{{end}}">Cancel</a>
+        <button type="submit" class="primary"{{if not .Ready}} disabled{{end}}>{{if .Edit}}Save changes{{else}}Add record{{end}}</button>
+      </div>
+    </form>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

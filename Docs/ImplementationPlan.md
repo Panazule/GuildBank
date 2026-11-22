@@ -169,7 +169,7 @@ Critical path: Phase 0 → 2 → 3 → 4 → 6 → 8. Phases 5 and 7 have slack.
 4. `GET /api/items` and `GET /api/items/{id}` with documented query parameters (`search`, `class`, `race`, `itemtype`, `sort`, `page`, `pageSize`) and a paginated envelope.
 5. Public UI: inventory list, filters, sorting, pagination, empty state, item detail with decoded class/race, dates and quantity; server-rendered HTMX fragments for filter/sort changes.
 6. EQResource link construction from the validated base URL, with escaping and `target="_blank" rel="noopener noreferrer"`.
-7. Availability presentation: define and test the comparison (`DateOpen <= today`, `DateBazaar >= today` per E-10) and label states consistently.
+7. Availability presentation: define and test the comparison (`DateOpen <= today`, `DateBazaar >= today` per E-10) and label states consistently. *(The upper boundary was made inclusive by the Phase 5 owner decision `PD5-40`: `open` is `DateOpen <= today < DateBazaar`.)*
 8. Public/admin projection separation so `DeletedFg`, `ModBy` and `ModByUserID` never serialize publicly.
 
 **Acceptance criteria**

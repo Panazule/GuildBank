@@ -27,8 +27,11 @@ func mapStoreError(operation string, err error) error {
 	var mysqlErr *mysql.MySQLError
 	if errors.As(err, &mysqlErr) {
 		switch mysqlErr.Number {
-		case 1213, 1205:
+		case 1213:
 			return &domain.RetryableError{Err: fmt.Errorf("%s: transient database conflict", operation)}
+		case 1205:
+			// A lock wait timeout is not retried by the caller (Phase 5 §6.6).
+			return fmt.Errorf("%w: %s", domain.ErrUnavailable, operation)
 		case 1062:
 			return fmt.Errorf("%w: %s", domain.ErrConflict, operation)
 		case 1044, 1045, 1049, 2002, 2003, 2006, 2013:

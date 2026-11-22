@@ -1,0 +1,84 @@
+{{define "admin_inventory_detail.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-card">
+    <p class="eyebrow">Administration · {{.Item.ItemType}}</p>
+    <h1>{{.Item.Name}}</h1>
+    <p class="item-identity">Inventory ID {{.Item.ID}} · EQUID {{.Item.EQUID}}</p>
+
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+
+    <p>
+      <span class="availability-badge availability-{{.Item.Availability}}">{{.Item.AvailabilityLabel}}</span>
+      <span class="status-badge {{if .Item.Deleted}}status-Failed{{else}}status-Completed{{end}}">{{if .Item.Deleted}}Removed{{else}}Active{{end}}</span>
+      {{if .Item.MetadataMissing}}<span class="warning-badge">Metadata missing</span>{{end}}
+    </p>
+
+    <dl class="detail-list">
+      <div><dt>Quantity</dt><dd>{{.Item.Quantity}}</dd></div>
+      <div><dt>Classes</dt><dd>{{.Item.ClassText}}</dd></div>
+      <div><dt>Races</dt><dd>{{.Item.RaceText}}</dd></div>
+      <div><dt>Source location</dt><dd>{{if .Item.SourceLocation}}{{.Item.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</dd></div>
+      <div><dt>Location group</dt><dd><span class="group-badge">{{.Item.LocationGroup}}</span></dd></div>
+      <div><dt>Recipient</dt><dd>{{if .Item.GivenTo}}{{.Item.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</dd></div>
+      <div><dt>Date added</dt><dd><time datetime="{{.Item.DateAddedISO}}">{{.Item.DateAddedText}}</time></dd></div>
+      <div><dt>Open to personas</dt><dd><time datetime="{{.Item.DateOpenISO}}">{{.Item.DateOpenText}}</time></dd></div>
+      <div><dt>Open to bazaar</dt><dd><time datetime="{{.Item.DateBazaarISO}}">{{.Item.DateBazaarText}}</time></dd></div>
+      <div><dt>Last modified</dt><dd><time datetime="{{.Item.ModAtValue}}">{{.Item.ModAtText}}</time> by {{.Item.ModBy}}</dd></div>
+    </dl>
+
+    <div class="wizard-actions">
+      <a class="link" href="/admin/inventory">Back to inventory</a>
+      {{if not .Item.Deleted}}
+        <a class="link primary" href="/admin/inventory/{{.Item.ID}}/edit">Edit record</a>
+        <a class="link" href="/admin/inventory/{{.Item.ID}}/remove">Remove record</a>
+      {{else}}
+        <form method="post" action="/admin/inventory/{{.Item.ID}}/restore" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+          <input type="hidden" name="expectedModAt" value="{{.Item.ModAtValue}}">
+          <button type="submit" class="primary">Restore record</button>
+        </form>
+      {{end}}
+    </div>
+
+    <h2>Recent history</h2>
+    {{if .History}}
+      <div class="table-scroll" role="region" aria-label="Recent audit history" tabindex="0">
+        <table class="audit-table">
+          <caption class="sr-only">Recent audit events for this record</caption>
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Event</th>
+              <th scope="col">By</th>
+              <th scope="col">Notes</th>
+              <th scope="col">Old</th>
+              <th scope="col">New</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .History}}
+            <tr>
+              <td class="cell-nowrap"><time datetime="{{.EventDate}}">{{.EventDateText}}</time></td>
+              <td class="cell-nowrap"><span class="status-badge">{{.EventType}}</span></td>
+              <td class="cell-nowrap">{{.UserName}}</td>
+              <td>{{if .Notes}}{{.Notes}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td><code class="audit-json">{{.OldValues}}</code></td>
+              <td><code class="audit-json">{{.NewValues}}</code></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      <p><a class="link" href="/admin/audit?table=GuildBankItems&amp;recordId={{.Item.ID}}">Open the full history</a></p>
+    {{else}}
+      <p class="muted">No audit events have been recorded for this record.</p>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

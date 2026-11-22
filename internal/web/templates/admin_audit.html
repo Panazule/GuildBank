@@ -1,0 +1,105 @@
+{{define "admin_audit.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-card">
+    <p class="eyebrow">Administration</p>
+    <h1>Audit</h1>
+    <p class="muted">Read-only history, newest first. Filters are exact matches; dates are inclusive UTC days.</p>
+
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <form method="get" action="/admin/audit" class="inventory-filters">
+      <div class="filter-grid admin-filter-grid">
+        <label>Event
+          <select name="eventType">
+            {{range .EventTypeOpts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>User
+          <input name="user" type="text" maxlength="64" value="{{.Filter.User}}" autocomplete="off">
+        </label>
+        <label>Table
+          <input name="table" type="text" maxlength="64" value="{{.Filter.Table}}" autocomplete="off">
+        </label>
+        <label>Record ID
+          <input name="recordId" type="text" maxlength="64" value="{{.Filter.RecordID}}" autocomplete="off">
+        </label>
+        <label>Correlation ID
+          <input name="correlationId" type="text" maxlength="36" value="{{.Filter.CorrelationID}}" autocomplete="off">
+        </label>
+        <label>From
+          <input name="from" type="date" value="{{.Filter.From}}">
+        </label>
+        <label>To
+          <input name="to" type="date" value="{{.Filter.To}}">
+        </label>
+        <div class="filter-actions">
+          <button type="submit" class="primary">Apply</button>
+          <a class="link" href="/admin/audit">Clear</a>
+        </div>
+      </div>
+    </form>
+
+    <p class="result-summary" aria-live="polite">
+      {{if .Total}}{{.Total}} event{{if ne .Total 1}}s{{end}} · page {{.Page}} of {{.TotalPages}}{{else}}No matching events{{end}}
+    </p>
+
+    {{if .Empty}}
+      <div class="empty-state"><p>No audit events match these filters.</p></div>
+    {{else}}
+      <div class="table-scroll" role="region" aria-label="Audit results" tabindex="0">
+        <table class="audit-table">
+          <caption class="sr-only">Audit events</caption>
+          <thead>
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">When</th>
+              <th scope="col">Event</th>
+              <th scope="col">By</th>
+              <th scope="col">Table</th>
+              <th scope="col">Record</th>
+              <th scope="col">Correlation</th>
+              <th scope="col">Notes</th>
+              <th scope="col">Old</th>
+              <th scope="col">New</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Entries}}
+            <tr>
+              <td class="cell-nowrap mono">{{.AuditID}}</td>
+              <td class="cell-nowrap"><time datetime="{{.EventDate}}">{{.EventDateText}}</time></td>
+              <td class="cell-nowrap"><span class="status-badge">{{.EventType}}</span></td>
+              <td class="cell-nowrap">{{.UserName}}</td>
+              <td class="cell-nowrap">{{if .TableName}}{{.TableName}}{{else}}<span class="muted" aria-label="No table">—</span>{{end}}</td>
+              <td class="cell-nowrap mono">{{if .RecordID}}{{.RecordID}}{{else}}<span class="muted" aria-label="No record">—</span>{{end}}</td>
+              <td class="cell-nowrap mono">{{if .CorrelationID}}{{.CorrelationID}}{{else}}<span class="muted" aria-label="No correlation id">—</span>{{end}}</td>
+              <td>{{if .Notes}}{{.Notes}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td><code class="audit-json">{{.OldValues}}</code></td>
+              <td><code class="audit-json">{{.NewValues}}</code></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{end}}
+
+    {{if or .PrevURL .NextURL .PageLinks}}
+    <nav class="pager inventory-pager" aria-label="Audit pages">
+      {{if .FirstURL}}<a href="{{.FirstURL}}">First</a>{{end}}
+      {{if .PrevURL}}<a href="{{.PrevURL}}" rel="prev">Previous</a>{{end}}
+      {{range .PageLinks}}
+        {{if .Current}}<span class="page-current" aria-current="page">{{.Page}}</span>{{else}}<a href="{{.URL}}">{{.Page}}</a>{{end}}
+      {{end}}
+      {{if .NextURL}}<a href="{{.NextURL}}" rel="next">Next</a>{{end}}
+      {{if .LastURL}}<a href="{{.LastURL}}">Last</a>{{end}}
+    </nav>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

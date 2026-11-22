@@ -1,6 +1,6 @@
 # Public Inventory API v1
 
-**Status:** Implemented in Phase 4 (2026-11-22 UTC)
+**Status:** Implemented in Phase 4 (2026-11-22 UTC); availability boundary amended by Phase 5 `PD5-40` (2026-11-22)
 **Base:** `/api/v1`
 **Authentication:** None for the four public routes. An invalid cookie is ignored; an authenticated administrator receives the same item projection.
 
@@ -98,18 +98,25 @@ Absent, non-positive, malformed or soft-deleted IDs return `404 not_found`.
 
 ## Availability
 
-One UTC calendar date is captured per request. `DateOpen` and `DateBazaar` are
-inclusive:
+One UTC calendar date is captured per request. Both thresholds are inclusive
+(the owner decision of 2026-11-22, `PD5-40`):
 
 | State | Condition |
 |---|---|
 | `upcoming` | `today < DateOpen` |
-| `open` | `DateOpen <= today <= DateBazaar` |
-| `bazaar` | `today > DateBazaar` and `today >= DateOpen` |
+| `open` | `DateOpen <= today < DateBazaar` |
+| `bazaar` | `today >= DateBazaar` and `today >= DateOpen` |
+
+`DateBazaar` is the first bazaar day: a record whose `DateBazaar` is today is
+already `bazaar`, matching the meaning of "open to the bazaar" and the
+inclusive treatment of `DateOpen`. Because the `open` interval is half-open,
+equal `DateOpen`/`DateBazaar` values leave no `open` day and such a record is
+`bazaar` from its open date.
 
 An inverted stored window (`DateBazaar < DateOpen`) is never presented as open:
 it remains upcoming until its open date, then becomes bazaar. Phase 5 is
-responsible for validating `DateOpen <= DateBazaar` on new writes.
+responsible for validating `DateOpen <= DateBazaar` on new writes, so inverted
+rows can only be legacy data.
 
 ## EQResource URL
 

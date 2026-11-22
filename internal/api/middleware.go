@@ -19,7 +19,7 @@ const requestIDKey = "request_id"
 
 // Correlation IDs supplied by a trusted proxy are kept only when they are
 // short and syntactically safe; anything else is replaced.
-var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{8,64}$`)
+var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{8,36}$`)
 
 // RequestID assigns a correlation ID, echoes it in X-Request-ID and stores
 // it in the Gin and request contexts for the access log and error bodies.

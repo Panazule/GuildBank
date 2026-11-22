@@ -75,34 +75,40 @@
               <th scope="col">Type</th>
               <th scope="col">Class</th>
               <th scope="col">Race</th>
-              <th scope="col">Quantity</th>
+              <th scope="col">Qty</th>
               <th scope="col">Availability</th>
-              <th scope="col">EQResource</th>
+              <th scope="col">Link</th>
             </tr>
           </thead>
           <tbody>
             {{range .Items}}
             <tr>
-              <td>
+              <td class="cell-nowrap">
                 <a href="/inventory/{{.ID}}">{{.Name}}</a>
-                <span class="item-identity">ID {{.ID}} · EQUID {{.EQUID}}</span>
+                {{if and $.User $.User.IsAdmin}}<a class="row-edit" href="/admin/inventory/{{.ID}}/edit">Edit</a>{{end}}
               </td>
-              <td>{{.ItemType}}</td>
-              <td{{if .ClassUnknown}} class="unknown"{{end}}>
+              <td class="cell-nowrap">{{.ItemType}}</td>
+              <td class="cell-nowrap{{if .ClassUnknown}} unknown{{end}}">
                 {{.ClassText}}
                 {{if and .MetadataNote .ClassUnknown}}<span class="unknown-note">{{.MetadataNote}}</span>{{end}}
               </td>
-              <td{{if .RaceUnknown}} class="unknown"{{end}}>
+              <td class="cell-nowrap{{if .RaceUnknown}} unknown{{end}}">
                 {{.RaceText}}
                 {{if and .MetadataNote .RaceUnknown}}<span class="unknown-note">{{.MetadataNote}}</span>{{end}}
               </td>
-              <td>{{.Quantity}}</td>
-              <td><span class="availability-badge availability-{{.Availability}}">{{.AvailabilityLabel}}</span></td>
-              <td>
+              <td class="cell-nowrap">{{.Quantity}}</td>
+              <td class="cell-nowrap"><span class="availability-badge availability-{{.Availability}}">{{.AvailabilityLabel}}</span></td>
+              <td class="cell-nowrap cell-link">
                 {{if .EQResourceURL}}
-                  <a href="{{.EQResourceURL}}" target="_blank" rel="noopener noreferrer" aria-label="Open {{.Name}} on EQResource (new tab)">EQResource</a>
+                  <a class="external-link" href="{{.EQResourceURL}}" target="_blank" rel="noopener noreferrer"
+                     title="View on EQResource" aria-label="View {{.Name}} on EQResource (opens in a new tab)">
+                    <svg class="external-link-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+                      <path fill="currentColor" d="M9.5 1H15v5.5h-1.5V3.56L7.28 9.78 6.22 8.72 12.44 2.5H9.5V1z"/>
+                      <path fill="currentColor" d="M2.5 2.5h4V4h-4v9.5H12V9.5h1.5v5.5h-11v-12.5z"/>
+                    </svg>
+                  </a>
                 {{else}}
-                  <span class="muted">Unavailable</span>
+                  <span class="muted" aria-hidden="true">—</span><span class="sr-only">No EQResource link</span>
                 {{end}}
               </td>
             </tr>

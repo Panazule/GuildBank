@@ -83,6 +83,12 @@ func Run(ctx context.Context, opts Options) error {
 			} else if n > 0 {
 				logger.Warn("failed interrupted import batches", "count", n)
 			}
+			logger.Info("location backfill starting")
+			backfilled, err := guildStore.BackfillInventoryLocations(ctx, 500)
+			if err != nil {
+				return fmt.Errorf("app: backfill inventory locations: %w", err)
+			}
+			logger.Info("location backfill complete", "rows", backfilled)
 			defer func() {
 				if cerr := guildStore.Close(); cerr != nil {
 					logger.Warn("mariadb close failed", "error", cerr)
@@ -108,13 +114,16 @@ func Run(ctx context.Context, opts Options) error {
 
 	var importService *service.ImportService
 	var inventoryService *service.InventoryService
+	var adminService *service.AdminInventoryService
 	if guildStore != nil {
 		metadata := service.NewItemMetadataService(guildStore)
 		importService = service.NewImportService(guildStore, metadata, settingsService, time.Now, logger)
 		inventoryService = service.NewInventoryService(guildStore, settingsService, time.Now, logger)
+		adminService = service.NewAdminInventoryService(guildStore, settingsService, metadata, time.Now, logger)
 	} else {
 		importService = service.NewImportService(nil, nil, settingsService, time.Now, logger)
 		inventoryService = service.NewInventoryService(nil, settingsService, time.Now, logger)
+		adminService = service.NewAdminInventoryService(nil, settingsService, nil, time.Now, logger)
 	}
 
 	purgeCtx, stopPurge := context.WithCancel(ctx)
@@ -149,6 +158,7 @@ func Run(ctx context.Context, opts Options) error {
 		Settings:       settingsService,
 		Imports:        importService,
 		Inventory:      inventoryService,
+		Admin:          adminService,
 		Version:        opts.Version,
 		TrustedProxies: cfg.TrustedProxies,
 		SecureCookies:  cfg.SecureCookies,

@@ -314,14 +314,9 @@ func inventoryItemViewOf(item domain.PublicInventoryItem, detail bool) inventory
 		DateBazaarISO: item.DateBazaar.Format("2006-01-02"), DateBazaarText: item.DateBazaar.Format("Jan 2, 2006"),
 		Availability: item.Availability, EQResourceURL: item.EQResourceURL,
 	}
-	switch item.Availability {
-	case domain.AvailabilityUpcoming:
-		view.AvailabilityLabel = "Opens " + view.DateOpenText
-	case domain.AvailabilityBazaar:
-		view.AvailabilityLabel = "Bazaar eligible"
-	default:
-		view.AvailabilityLabel = "Available now"
-	}
+	// PD5-37: the visible label names the audience state (Mains/Persona/
+	// Bazaar); the JSON availability enum is unchanged.
+	view.AvailabilityLabel = availabilityLabel(item.Availability)
 	return view
 }
 

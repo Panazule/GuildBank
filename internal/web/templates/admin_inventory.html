@@ -1,0 +1,142 @@
+{{define "admin_inventory.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-card">
+    <p class="eyebrow">Administration</p>
+    <h1>Guild inventory</h1>
+    <p class="muted">Every field here is server-owned except the editable values on each record. Removed rows stay visible with <em>status</em> set to <em>removed</em>.</p>
+    <p><a class="link primary" href="/admin/inventory/new">Add item</a> <a class="link" href="/admin/audit">Audit viewer</a></p>
+
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    {{if .Ready}}
+    <form method="get" action="/admin/inventory" class="inventory-filters">
+      <div class="filter-grid admin-filter-grid">
+        <label>Search
+          <input name="q" type="search" maxlength="128" value="{{.Filter.Search}}" autocomplete="off">
+        </label>
+        <label>ID
+          <input name="id" type="text" inputmode="numeric" value="{{.Filter.ID}}" autocomplete="off">
+        </label>
+        <label>EQUID
+          <input name="equid" type="text" inputmode="numeric" value="{{.Filter.EQUID}}" autocomplete="off">
+        </label>
+        <label>Location group
+          <select name="locationGroup">
+            {{range .LocationGroups}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{if .Value}}{{.Value}}{{else}}Any location{{end}}</option>{{end}}
+          </select>
+        </label>
+        <label>Recipient
+          <input name="givenTo" type="text" maxlength="128" value="{{.Filter.GivenTo}}" autocomplete="off">
+        </label>
+        <label>Metadata
+          <select name="metadata">
+            {{range .MetadataOpts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Item type
+          <select name="itemType">
+            {{range .ItemTypeOpts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Status
+          <select name="status">
+            {{range .StatusOpts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Sort
+          <select name="sort">
+            {{range .SortOpts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Page size
+          <select name="pageSize">
+            {{range .PageSizeOpts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <div class="filter-actions">
+          <button type="submit" class="primary">Apply</button>
+          <a class="link" href="{{.ClearURL}}">Clear</a>
+        </div>
+      </div>
+    </form>
+
+    <p class="result-summary" aria-live="polite">
+      {{if .Total}}{{.Total}} record{{if ne .Total 1}}s{{end}} · page {{.Page}} of {{.TotalPages}}{{else}}No matching records{{end}}
+    </p>
+
+    {{if .BeyondLast}}
+      <div class="alert" role="status">This page is beyond the available results.
+        {{if .LastPageURL}}<a href="{{.LastPageURL}}">Go to the last page</a>.{{end}}
+      </div>
+    {{end}}
+
+    {{if .Empty}}
+      <div class="empty-state"><p>No inventory records match these filters.</p><p><a href="{{.ClearURL}}">Clear filters</a></p></div>
+    {{else}}
+      <div class="table-scroll" role="region" aria-label="Administrative inventory results" tabindex="0">
+        <table class="inventory-table admin-table">
+          <caption class="sr-only">Administrative guild inventory records</caption>
+          <thead>
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">EQUID</th>
+              <th scope="col">Name</th>
+              <th scope="col">Type</th>
+              <th scope="col">Qty</th>
+              <th scope="col">Location</th>
+              <th scope="col">Group</th>
+              <th scope="col">Recipient</th>
+              <th scope="col">Status</th>
+              <th scope="col">Modified</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Items}}
+            <tr{{if .Deleted}} class="row-removed"{{end}}>
+              <td class="cell-nowrap mono">{{.ID}}</td>
+              <td class="cell-nowrap mono">{{.EQUID}}</td>
+              <td class="cell-nowrap"><a href="/admin/inventory/{{.ID}}">{{.Name}}</a></td>
+              <td class="cell-nowrap">{{.ItemType}}</td>
+              <td class="cell-nowrap">{{.Quantity}}</td>
+              <td class="cell-nowrap">{{if .SourceLocation}}{{.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</td>
+              <td class="cell-nowrap"><span class="group-badge">{{.LocationGroup}}</span></td>
+              <td class="cell-nowrap">{{if .GivenTo}}{{.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</td>
+              <td class="cell-nowrap"><span class="status-badge {{if .Deleted}}status-Failed{{else}}status-Completed{{end}}">{{if .Deleted}}Removed{{else}}Active{{end}}</span></td>
+              <td class="cell-nowrap">{{.ModAtText}}</td>
+              <td class="cell-nowrap actions-cell">
+                <a href="/admin/inventory/{{.ID}}/edit">Edit</a>
+                <a href="/admin/inventory/{{.ID}}">History</a>
+                {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/remove">Remove</a>{{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{end}}
+
+    {{if or .PrevURL .NextURL .PageLinks}}
+    <nav class="pager inventory-pager" aria-label="Admin inventory pages">
+      {{if .FirstURL}}<a href="{{.FirstURL}}">First</a>{{end}}
+      {{if .PrevURL}}<a href="{{.PrevURL}}" rel="prev">Previous</a>{{end}}
+      {{range .PageLinks}}
+        {{if .Current}}<span class="page-current" aria-current="page">{{.Page}}</span>{{else}}<a href="{{.URL}}">{{.Page}}</a>{{end}}
+      {{end}}
+      {{if .NextURL}}<a href="{{.NextURL}}" rel="next">Next</a>{{end}}
+      {{if .LastURL}}<a href="{{.LastURL}}">Last</a>{{end}}
+    </nav>
+    {{end}}
+    {{else}}
+      <div class="alert alert-error" role="status">The guild inventory store is unavailable, so administrative changes are disabled.</div>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

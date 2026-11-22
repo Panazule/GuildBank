@@ -222,8 +222,16 @@ func publicInventoryItem(record domain.InventoryRecord, today time.Time, baseURL
 	}
 }
 
-// Availability implements PD4-11 with inclusive DateOpen/DateBazaar boundaries
-// and a single UTC calendar date. An inverted window is never reported open.
+// Availability implements PD4-11 as amended by PD5-40: both date thresholds are
+// inclusive and every comparison uses one UTC calendar date.
+//
+//	today <  DateOpen              -> upcoming
+//	DateOpen <= today <  DateBazaar -> open
+//	DateOpen <= DateBazaar <= today -> bazaar
+//
+// An inverted stored window is never reported open: it is upcoming until its
+// open date and bazaar from then on. Equal open/bazaar dates have no persona
+// interval, so the item is bazaar from the open date.
 func Availability(today, dateOpen, dateBazaar time.Time) domain.AvailabilityState {
 	today = utcDate(today)
 	dateOpen = utcDate(dateOpen)
@@ -231,7 +239,7 @@ func Availability(today, dateOpen, dateBazaar time.Time) domain.AvailabilityStat
 	if today.Before(dateOpen) {
 		return domain.AvailabilityUpcoming
 	}
-	if today.After(dateBazaar) {
+	if !today.Before(dateBazaar) {
 		return domain.AvailabilityBazaar
 	}
 	return domain.AvailabilityOpen

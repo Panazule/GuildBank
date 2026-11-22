@@ -242,7 +242,13 @@ func TestPublicInventoryValidationAndMethods(t *testing.T) {
 			t.Fatalf("%s = %d: %s", tc.path, resp.StatusCode, body)
 		}
 	}
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+	// Phase 5 adds the admin POST route, so an anonymous POST now stops at
+	// authentication (401) while the still-unregistered methods stay 405.
+	resp, _ := h.request(http.MethodPost, "/api/v1/items", "", []byte(`{}`), "application/json")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("POST status = %d, want 401", resp.StatusCode)
+	}
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
 		resp, _ := h.request(method, "/api/v1/items", "bad", []byte(`{}`), "application/json")
 		if resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Fatalf("%s status = %d, want 405", method, resp.StatusCode)
@@ -289,8 +295,9 @@ func TestPublicInventoryHTMLRenderingAndSessionParity(t *testing.T) {
 		`<html lang="en">`, `<h1>Guild inventory</h1>`, `<caption class="sr-only">`,
 		`name="q"`, `name="class"`, `name="race"`, `name="itemType"`, `name="sort"`,
 		`href="/inventory/7"`, `target="_blank"`, `rel="noopener noreferrer"`,
-		`aria-label="Open Blade of Carnage on EQResource (new tab)"`,
-		`All`, `Opens Dec 5, 2026`, `1 inventory record`,
+		`title="View on EQResource"`,
+		`aria-label="View Blade of Carnage on EQResource (opens in a new tab)"`,
+		`All`, `Mains`, `1 inventory record`,
 	} {
 		if !bytes.Contains(body, []byte(want)) {
 			t.Fatalf("HTML missing %q\n%s", want, body)
@@ -339,7 +346,8 @@ func TestPublicInventoryDetailHTMLAndUnsafeSetting(t *testing.T) {
 		t.Fatalf("status = %d: %s", resp.StatusCode, body)
 	}
 	for _, want := range []string{
-		"Blade of Carnage", "WAR, PAL", "All races", "Opens Dec 5, 2026",
+		"Blade of Carnage", "WAR, PAL", "All races", "Mains",
+		"Date added", "Open to personas", "Open to bazaar",
 		`<time datetime="2026-11-21">Nov 21, 2026</time>`,
 		`<time datetime="2026-12-05">Dec 5, 2026</time>`,
 		`<time datetime="2026-12-21">Dec 21, 2026</time>`,

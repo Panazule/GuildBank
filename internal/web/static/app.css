@@ -236,6 +236,8 @@ button:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
   .import-layout { grid-template-columns: 1fr; }
   .location-list { max-height: none; }
   .commit-bar { align-items: flex-start; flex-direction: column; }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -247,7 +249,7 @@ button:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
   white-space: nowrap;
   border: 0;
 }
-main.card.inventory-card { width: min(80rem, calc(100% - 2rem)); }
+main.card.inventory-card { width: min(120rem, calc(100% - 1.5rem)); }
 .inventory-filters { margin: 1rem 0 0.5rem; padding: 0.9rem; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(0, 0, 0, 0.12); }
 .filter-grid { display: grid; grid-template-columns: minmax(14rem, 2fr) repeat(4, minmax(9rem, 1fr)); gap: 0.75rem; align-items: start; }
 .filter-grid label { font-size: 0.85rem; }
@@ -283,4 +285,61 @@ main.card.inventory-card { width: min(80rem, calc(100% - 2rem)); }
   .filter-actions { align-items: flex-start; flex-direction: column; }
   .site-header { align-items: flex-start; flex-direction: column; }
 }
+
+/* Phase 5 administrative inventory and public inventory UI amendments */
+
+/* PD5-33: content expands with the desktop viewport instead of an 80 rem cap. */
+main.card.admin-card {
+  width: min(120rem, calc(100% - 1.5rem));
+}
+
+/* PD5-35: one compact multi-column filter grid for the admin screens. */
+.admin-filter-grid {
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+.admin-filter-grid .filter-actions { min-height: 2.6rem; }
+
+.admin-table { min-width: 72rem; }
+.actions-cell a { margin-right: 0.6rem; white-space: nowrap; }
+.group-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.12);
+  font-size: 0.78rem;
+}
+.row-removed { opacity: 0.72; }
+.row-removed td a { color: var(--muted); }
+.row-edit { margin-left: 0.45rem; font-size: 0.78rem; }
+
+/* PD5-36: icon-only external link. */
+.external-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+.external-link:hover { border-color: var(--accent); color: #fff0c0; }
+.external-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.external-link-icon { display: block; }
+.cell-link { text-align: center; }
+
+/* Admin audit tables stay readable without forcing the inventory width. */
+.audit-table { width: 100%; min-width: 64rem; border-collapse: collapse; font-size: 0.85rem; }
+.audit-table th, .audit-table td { padding: 0.55rem 0.6rem; border-top: 1px solid var(--border); text-align: left; vertical-align: top; }
+.audit-table th { background: rgba(0, 0, 0, 0.16); color: var(--accent-strong); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.audit-json { display: block; max-width: 24rem; max-height: 8rem; overflow: auto; font-family: "Cascadia Mono", Consolas, monospace; font-size: 0.75rem; white-space: pre-wrap; word-break: break-word; }
+
+/* PD5-38: dense single-line cells on desktop; natural wrapping below 900 px. */
+@media (min-width: 900px) {
+  .inventory-table .cell-nowrap { white-space: nowrap; }
+}
+@media (max-width: 900px) {
+  .admin-table, .audit-table { min-width: 44rem; }
 }

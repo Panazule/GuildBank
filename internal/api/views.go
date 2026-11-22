@@ -101,6 +101,156 @@ type inventoryDetailPageData struct {
 	Item inventoryItemView
 }
 
+// adminItemView is the shared administrative presentation of one row. The list,
+// detail, edit and remove pages all use it so the identity fields rendered in
+// the admin area cannot drift.
+type adminItemView struct {
+	ID                int64
+	EQUID             uint64
+	Name              string
+	ItemType          string
+	Quantity          uint32
+	ClassText         string
+	RaceText          string
+	MetadataMissing   bool
+	SourceLocation    string
+	LocationGroup     string
+	GivenTo           string
+	Deleted           bool
+	DateAddedISO      string
+	DateAddedText     string
+	DateOpenISO       string
+	DateOpenText      string
+	DateBazaarISO     string
+	DateBazaarText    string
+	Availability      domain.AvailabilityState
+	AvailabilityLabel string
+	ModAtValue        string
+	ModAtText         string
+	ModBy             string
+}
+
+type adminFilterView struct {
+	Search        string
+	ID            string
+	EQUID         string
+	GivenTo       string
+	Metadata      string
+	LocationGroup string
+	ItemType      string
+	Status        string
+	Sort          string
+	PageSize      string
+}
+
+type adminLocationOption struct {
+	Value    string
+	Selected bool
+}
+
+type adminListPageData struct {
+	pageData
+	Ready          bool
+	Items          []adminItemView
+	Filter         adminFilterView
+	LocationGroups []adminLocationOption
+	ItemTypeOpts   []inventorySelectOption
+	MetadataOpts   []inventorySelectOption
+	StatusOpts     []inventorySelectOption
+	SortOpts       []inventorySortOption
+	PageSizeOpts   []inventorySelectOption
+	Total          int
+	Page           int
+	PageSize       int
+	TotalPages     int
+	Empty          bool
+	BeyondLast     bool
+	Notice         string
+	ClearURL       string
+	PrevURL        string
+	NextURL        string
+	FirstURL       string
+	LastURL        string
+	LastPageURL    string
+	PageLinks      []inventoryPageLink
+}
+
+type adminFormValues struct {
+	ItemType         string
+	EQUID            string
+	Quantity         string
+	SourceLocation   string
+	GivenTo          string
+	Name             string
+	DateOpen         string
+	DateBazaar       string
+	ExpectedModAt    string
+	QuantityReadOnly bool
+}
+
+type adminFormPageData struct {
+	pageData
+	Ready    bool
+	Edit     bool
+	Item     adminItemView
+	Form     adminFormValues
+	Conflict bool
+}
+
+type auditEntryView struct {
+	AuditID       int64
+	EventDate     string
+	EventDateText string
+	UserName      string
+	EventType     string
+	TableName     string
+	RecordID      string
+	CorrelationID string
+	SourceIP      string
+	Notes         string
+	OldValues     string
+	NewValues     string
+}
+
+type adminDetailPageData struct {
+	pageData
+	Item    adminItemView
+	History []auditEntryView
+	Notice  string
+}
+
+type adminRemovePageData struct {
+	pageData
+	Item adminItemView
+}
+
+type auditFilterView struct {
+	EventType     string
+	User          string
+	Table         string
+	RecordID      string
+	CorrelationID string
+	From          string
+	To            string
+}
+
+type adminAuditPageData struct {
+	pageData
+	Entries       []auditEntryView
+	Filter        auditFilterView
+	EventTypeOpts []inventorySelectOption
+	Total         int
+	Page          int
+	PageSize      int
+	TotalPages    int
+	Empty         bool
+	PrevURL       string
+	NextURL       string
+	FirstURL      string
+	LastURL       string
+	PageLinks     []inventoryPageLink
+}
+
 type errorPageData struct {
 	pageData
 	Status int
@@ -152,6 +302,26 @@ func (v *views) inventoryList(c *gin.Context, status int, data inventoryListPage
 
 func (v *views) inventoryDetail(c *gin.Context, status int, data inventoryDetailPageData) {
 	v.render(c, status, "inventory_detail.html", data)
+}
+
+func (v *views) adminInventoryList(c *gin.Context, status int, data adminListPageData) {
+	v.render(c, status, "admin_inventory.html", data)
+}
+
+func (v *views) adminInventoryForm(c *gin.Context, status int, data adminFormPageData) {
+	v.render(c, status, "admin_inventory_form.html", data)
+}
+
+func (v *views) adminInventoryDetail(c *gin.Context, status int, data adminDetailPageData) {
+	v.render(c, status, "admin_inventory_detail.html", data)
+}
+
+func (v *views) adminRemove(c *gin.Context, status int, data adminRemovePageData) {
+	v.render(c, status, "admin_remove.html", data)
+}
+
+func (v *views) adminAudit(c *gin.Context, status int, data adminAuditPageData) {
+	v.render(c, status, "admin_audit.html", data)
 }
 
 func (v *views) errorPage(c *gin.Context, status int, message string) {

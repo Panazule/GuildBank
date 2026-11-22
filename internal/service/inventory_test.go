@@ -113,16 +113,18 @@ func TestAvailabilityUTCBoundaries(t *testing.T) {
 		{"day before", time.Date(2026, 12, 4, 23, 59, 0, 0, time.UTC), domain.AvailabilityUpcoming},
 		{"exact open", time.Date(2026, 12, 5, 0, 0, 0, 0, time.UTC), domain.AvailabilityOpen},
 		{"inside", time.Date(2026, 12, 10, 12, 0, 0, 0, time.UTC), domain.AvailabilityOpen},
-		{"exact bazaar", time.Date(2026, 12, 21, 23, 59, 0, 0, time.UTC), domain.AvailabilityOpen},
+		{"day before bazaar", time.Date(2026, 12, 20, 23, 59, 0, 0, time.UTC), domain.AvailabilityOpen},
+		{"exact bazaar", time.Date(2026, 12, 21, 0, 0, 0, 0, time.UTC), domain.AvailabilityBazaar},
+		{"bazaar same day late hour", time.Date(2026, 12, 21, 23, 59, 0, 0, time.UTC), domain.AvailabilityBazaar},
 		{"day after", time.Date(2026, 12, 22, 0, 0, 0, 0, time.UTC), domain.AvailabilityBazaar},
 		{"non UTC date normalized", time.Date(2026, 12, 5, 0, 30, 0, 0, time.FixedZone("east", 3600)), domain.AvailabilityUpcoming},
-		{"equal dates open", time.Date(2026, 12, 5, 8, 0, 0, 0, time.UTC), domain.AvailabilityOpen},
+		{"equal dates open day", time.Date(2026, 12, 5, 8, 0, 0, 0, time.UTC), domain.AvailabilityBazaar},
 		{"equal dates next day", time.Date(2026, 12, 6, 8, 0, 0, 0, time.UTC), domain.AvailabilityBazaar},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			bazaarDate := bazaar
-			if tc.name == "equal dates open" || tc.name == "equal dates next day" {
+			if strings.HasPrefix(tc.name, "equal dates") {
 				bazaarDate = open
 			}
 			if got := Availability(tc.today, open, bazaarDate); got != tc.want {
@@ -134,6 +136,9 @@ func TestAvailabilityUTCBoundaries(t *testing.T) {
 	invertedBazaar := time.Date(2026, 12, 5, 0, 0, 0, 0, time.UTC)
 	if got := Availability(time.Date(2026, 12, 10, 0, 0, 0, 0, time.UTC), invertedOpen, invertedBazaar); got != domain.AvailabilityUpcoming {
 		t.Fatalf("inverted window before open = %q", got)
+	}
+	if got := Availability(invertedOpen, invertedOpen, invertedBazaar); got != domain.AvailabilityBazaar {
+		t.Fatalf("inverted window on open date = %q", got)
 	}
 	if got := Availability(time.Date(2026, 12, 22, 0, 0, 0, 0, time.UTC), invertedOpen, invertedBazaar); got != domain.AvailabilityBazaar {
 		t.Fatalf("inverted window after open = %q", got)

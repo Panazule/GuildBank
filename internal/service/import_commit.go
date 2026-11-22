@@ -271,6 +271,7 @@ func buildCommitPlan(rows []domain.ImportRow, active []domain.GuildBankItem,
 				Name: name, ClassString: classString, RaceString: raceString,
 				DateAdded: dates.added, DateOpen: dates.open, DateBazaar: dates.bazaar,
 				Quantity: 1, SourceLocation: row.LocationRaw, DeletedFg: false,
+				LocationGroup: row.LocationGroup, LocationSort: row.LocationSort,
 				ModAt: now.UTC(), ModBy: actor.UserName, ModByUserID: &actor.UserID,
 				NameSort: TruncateRunes(NaturalSortKey(name), 160),
 			})
@@ -291,7 +292,9 @@ func buildCommitPlan(rows []domain.ImportRow, active []domain.GuildBankItem,
 				Name: aggregate.first.Name, DateAdded: dates.added, DateOpen: dates.open,
 				DateBazaar: dates.bazaar, Quantity: uint32(aggregate.quantity),
 				SourceLocation: aggregate.first.LocationRaw, DeletedFg: false,
-				ModAt: now.UTC(), ModBy: actor.UserName, ModByUserID: &actor.UserID,
+				LocationGroup: aggregate.first.LocationGroup,
+				LocationSort:  aggregate.first.LocationSort,
+				ModAt:         now.UTC(), ModBy: actor.UserName, ModByUserID: &actor.UserID,
 				NameSort: TruncateRunes(NaturalSortKey(aggregate.first.Name), 160),
 			})
 			plan.newSpellCount++
