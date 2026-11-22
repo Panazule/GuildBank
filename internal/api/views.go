@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"html/template"
@@ -26,13 +27,19 @@ func newViews(fs embed.FS) (*views, error) {
 	return &views{templates: t}, nil
 }
 
+// render buffers the template output so a rendering failure cannot emit a
+// status with a partial or empty body. Errors become a logged 500 envelope,
+// which is diagnosable instead of a blank page.
 func (v *views) render(c *gin.Context, status int, name string, data any) {
-	c.Status(status)
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	if err := v.templates.ExecuteTemplate(c.Writer, name, data); err != nil {
-		// The header is already written; log through Gin's error channel.
+	var buf bytes.Buffer
+	if err := v.templates.ExecuteTemplate(&buf, name, data); err != nil {
 		_ = c.Error(err)
+		writeError(c, http.StatusInternalServerError, "internal_error", "the page could not be rendered")
+		return
 	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Status(status)
+	_, _ = c.Writer.Write(buf.Bytes())
 }
 
 type pageData struct {
@@ -105,29 +112,30 @@ type inventoryDetailPageData struct {
 // detail, edit and remove pages all use it so the identity fields rendered in
 // the admin area cannot drift.
 type adminItemView struct {
-	ID                int64
-	EQUID             uint64
-	Name              string
-	ItemType          string
-	Quantity          uint32
-	ClassText         string
-	RaceText          string
-	MetadataMissing   bool
-	SourceLocation    string
-	LocationGroup     string
-	GivenTo           string
-	Deleted           bool
-	DateAddedISO      string
-	DateAddedText     string
-	DateOpenISO       string
-	DateOpenText      string
-	DateBazaarISO     string
-	DateBazaarText    string
-	Availability      domain.AvailabilityState
-	AvailabilityLabel string
-	ModAtValue        string
-	ModAtText         string
-	ModBy             string
+	ID                 int64
+	EQUID              uint64
+	Name               string
+	ItemType           string
+	Quantity           uint32
+	ClassText          string
+	RaceText           string
+	MetadataMissing    bool
+	SourceLocation     string
+	LocationGroup      string
+	LocationGroupLabel string
+	GivenTo            string
+	Deleted            bool
+	DateAddedISO       string
+	DateAddedText      string
+	DateOpenISO        string
+	DateOpenText       string
+	DateBazaarISO      string
+	DateBazaarText     string
+	Availability       domain.AvailabilityState
+	AvailabilityLabel  string
+	ModAtValue         string
+	ModAtText          string
+	ModBy              string
 }
 
 type adminFilterView struct {
@@ -145,6 +153,7 @@ type adminFilterView struct {
 
 type adminLocationOption struct {
 	Value    string
+	Label    string
 	Selected bool
 }
 
@@ -176,16 +185,15 @@ type adminListPageData struct {
 }
 
 type adminFormValues struct {
-	ItemType         string
-	EQUID            string
-	Quantity         string
-	SourceLocation   string
-	GivenTo          string
-	Name             string
-	DateOpen         string
-	DateBazaar       string
-	ExpectedModAt    string
-	QuantityReadOnly bool
+	ItemType       string
+	EQUID          string
+	Quantity       string
+	SourceLocation string
+	GivenTo        string
+	Name           string
+	DateOpen       string
+	DateBazaar     string
+	ExpectedModAt  string
 }
 
 type adminFormPageData struct {
@@ -222,6 +230,14 @@ type adminDetailPageData struct {
 type adminRemovePageData struct {
 	pageData
 	Item adminItemView
+}
+
+// adminBulkRemovePageData is the page-local bulk-removal preview (AI-01).
+// Targets are the opaque "id|modAt" tokens re-posted by the apply form.
+type adminBulkRemovePageData struct {
+	pageData
+	Items   []adminItemView
+	Targets []string
 }
 
 type auditFilterView struct {
@@ -264,6 +280,7 @@ type importBatchView struct {
 	Status           domain.ImportStatus
 	SourceRowCount   int
 	AcceptedRowCount int
+	IgnoredRowCount  int
 	FailureReason    string
 	ImportedBy       string
 	ImportedAt       string
@@ -320,6 +337,10 @@ func (v *views) adminRemove(c *gin.Context, status int, data adminRemovePageData
 	v.render(c, status, "admin_remove.html", data)
 }
 
+func (v *views) adminBulkRemove(c *gin.Context, status int, data adminBulkRemovePageData) {
+	v.render(c, status, "admin_bulk_remove.html", data)
+}
+
 func (v *views) adminAudit(c *gin.Context, status int, data adminAuditPageData) {
 	v.render(c, status, "admin_audit.html", data)
 }
@@ -364,7 +385,8 @@ func importBatchViewOf(batch domain.ImportBatch) importBatchView {
 		ID: batch.ImportBatchID, FileName: batch.FileName, SHA256: sha,
 		SHA256Prefix: prefix, Status: batch.Status,
 		SourceRowCount: intValue(batch.SourceRowCount), AcceptedRowCount: intValue(batch.AcceptedRowCount),
-		ImportedBy: batch.ImportedBy, ImportedAt: batch.ImportedAt.UTC().Format("2006-01-02 15:04 UTC"),
+		IgnoredRowCount: intValue(batch.IgnoredRowCount),
+		ImportedBy:      batch.ImportedBy, ImportedAt: batch.ImportedAt.UTC().Format("2006-01-02 15:04 UTC"),
 		ReadOnly: batch.Status != domain.ImportStatusUploaded,
 	}
 	if batch.FailureReason != nil {

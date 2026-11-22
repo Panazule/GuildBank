@@ -1,0 +1,54 @@
+{{define "admin_bulk_remove.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-card">
+    <p class="eyebrow"><a href="/admin/inventory">Administration</a></p>
+    <h1>Remove {{len .Items}} record{{if ne (len .Items) 1}}s{{end}}</h1>
+
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <p>Removing these records is reversible. They stay in the guild bank's history and each can be restored individually later. This page removes only the records selected on the inventory page; no filter-wide or inventory-wide action is performed.</p>
+
+    <div class="table-scroll" role="region" aria-label="Records selected for removal" tabindex="0">
+      <table class="inventory-table admin-table">
+        <caption class="sr-only">Records selected for removal</caption>
+        <thead>
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Qty</th>
+            <th scope="col">Location</th>
+            <th scope="col">Recipient</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Items}}
+          <tr>
+            <td class="cell-nowrap mono">{{.ID}}</td>
+            <td class="cell-nowrap">{{.Name}}</td>
+            <td class="cell-nowrap">{{.ItemType}}</td>
+            <td class="cell-nowrap">{{.Quantity}}</td>
+            <td class="cell-nowrap">{{if .SourceLocation}}{{.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</td>
+            <td class="cell-nowrap">{{if .GivenTo}}{{.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+
+    <form method="post" action="/admin/inventory/bulk-remove/apply" class="wizard-actions">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      {{range .Targets}}<input type="hidden" name="remove" value="{{.}}">{{end}}
+      <a class="link" href="/admin/inventory">Cancel</a>
+      <button type="submit" class="primary">Remove {{len .Items}} record{{if ne (len .Items) 1}}s{{end}}</button>
+    </form>
+    <p class="help">The whole selection is written in one transaction. If any selected record was changed or already removed since this page was loaded, nothing is removed and you are asked to reload the list.</p>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

@@ -95,11 +95,19 @@
   var commitButton = document.getElementById("commit-button");
   var selectAllButton = document.getElementById("select-all");
   var clearAllButton = document.getElementById("clear-all");
+  var resetDefaultsButton = document.getElementById("reset-defaults");
+  var checkAllLocationsButton = document.getElementById("check-all-locations");
+  var uncheckAllLocationsButton = document.getElementById("uncheck-all-locations");
 
   var selected = {};
   var lastSaved = {};
   var locations = [];
   var locationIDs = {};
+  // includedGroups is the page-local group scope (IMP-06). A group is in scope
+  // while its location checkbox is checked; unchecked groups are hidden from the
+  // row grid and their rows are cleared from the selection. The scope is never
+  // persisted, so reloading the page restores every group.
+  var includedGroups = {};
   var summary = null;
   var currentPage = 1;
   var pageSize = parseInt(main.getAttribute("data-page-size"), 10) || 50;
@@ -119,6 +127,33 @@
   function isSelected(id) { return selected[String(id)] === true; }
   function setSelected(id, value) {
     if (value) { selected[String(id)] = true; } else { delete selected[String(id)]; }
+  }
+
+  // IMP-C: every staged location group is a bank location. Rows classified as
+  // Other/Unspecified never reach this page because the review API excludes
+  // them, so the panel has no Other bucket to render.
+  function inScope(group) { return includedGroups[group] !== false; }
+
+  function excludedGroupsInOrder() {
+    var out = [];
+    locations.forEach(function (location) {
+      if (!inScope(location.group)) { out.push(location.group); }
+    });
+    return out;
+  }
+
+  // scopeParams translates the page-local group scope into the rows/row-ids
+  // query. The unselected view deliberately ignores the scope so an unchecked
+  // group can still be reviewed and re-selected row by row (IMP-06).
+  function scopeParams() {
+    if (selectedFilter && selectedFilter.value === "unselected") {
+      return ["ignoreGroups=1"];
+    }
+    var excluded = excludedGroupsInOrder();
+    if (excluded.length) {
+      return ["excludeGroups=" + encodeURIComponent(excluded.join(","))];
+    }
+    return [];
   }
 
   function showStatus(message, isError) {
@@ -157,10 +192,12 @@
     if (!locationListNode) { return; }
     var boxes = locationListNode.querySelectorAll("input[type=checkbox]");
     Array.prototype.forEach.call(boxes, function (box) {
+      var group = box.getAttribute("data-location");
       var rowCount = parseInt(box.getAttribute("data-row-count"), 10) || 0;
       var selectedCount = parseInt(box.getAttribute("data-selected-count"), 10) || 0;
-      box.checked = rowCount > 0 && selectedCount === rowCount;
-      box.indeterminate = selectedCount > 0 && selectedCount < rowCount;
+      var scoped = inScope(group);
+      box.checked = scoped && rowCount > 0 && selectedCount === rowCount;
+      box.indeterminate = scoped && selectedCount < rowCount;
     });
   }
 
@@ -170,19 +207,20 @@
     if (locationFilter) {
       var current = locationFilter.value;
       locationFilter.textContent = "";
-      var all = el("option", null, "All locations");
+      var all = el("option", null, "All locations in scope");
       all.value = "";
       locationFilter.appendChild(all);
-      var seen = {};
       locations.forEach(function (location) {
-        if (!seen[location.group]) {
-          seen[location.group] = true;
-          var option = el("option", null, location.group);
-          option.value = location.group;
-          locationFilter.appendChild(option);
-        }
+        if (!inScope(location.group)) { return; }
+        var option = el("option", null, location.group);
+        option.value = location.group;
+        locationFilter.appendChild(option);
       });
-      locationFilter.value = current;
+      var stillListed = false;
+      Array.prototype.forEach.call(locationFilter.options, function (option) {
+        if (option.value === current) { stillListed = true; }
+      });
+      locationFilter.value = stillListed ? current : "";
     }
     locations.forEach(function (location) {
       var item = el("div", "location-item");
@@ -192,6 +230,7 @@
       checkbox.setAttribute("data-location", location.group);
       checkbox.setAttribute("data-row-count", location.rowCount);
       checkbox.setAttribute("data-selected-count", location.selectedCount);
+      checkbox.setAttribute("aria-label", "Include " + location.group + " in the review scope");
       if (editable) {
         checkbox.addEventListener("change", function () {
           toggleLocation(location.group, checkbox.checked);
@@ -202,7 +241,9 @@
       label.appendChild(checkbox);
       label.appendChild(document.createTextNode(" " + location.group));
       item.appendChild(label);
-      item.appendChild(el("span", "help", location.selectedCount + " / " + location.rowCount + " selected"));
+      var detail = location.selectedCount + " / " + location.rowCount + " selected";
+      if (!inScope(location.group)) { detail += " · hidden"; }
+      item.appendChild(el("span", "help", detail));
       locationListNode.appendChild(item);
     });
     updateLocationCheckboxes();
@@ -225,7 +266,7 @@
     if (!rows.length) {
       var empty = el("tr");
       var cell = el("td", "muted", "No staged rows match these filters.");
-      cell.colSpan = editable ? 8 : 7;
+      cell.colSpan = editable ? 9 : 8;
       empty.appendChild(cell);
       rowBody.appendChild(empty);
       return;
@@ -250,6 +291,7 @@
       tr.appendChild(el("td", null, row.name));
       tr.appendChild(el("td", "mono", row.equid));
       tr.appendChild(el("td", null, row.quantity));
+      tr.appendChild(el("td", null, row.container ? "Container" : "Slot"));
       var locationCell = el("td");
       locationCell.appendChild(el("span", null, row.locationGroup));
       if (row.locationRaw && row.locationRaw !== row.locationGroup) {
@@ -295,6 +337,7 @@
     if (searchFilter && searchFilter.value.trim()) {
       params.push("q=" + encodeURIComponent(searchFilter.value.trim()));
     }
+    params = params.concat(scopeParams());
     return api("/rows?" + params.join("&")).then(function (body) {
       totalRows = body.data.total;
       renderRows(body.data.rows);
@@ -341,6 +384,8 @@
     }).catch(function (error) {
       if (generation === saveGeneration) {
         selected = lastSaved;
+        includedGroups = {};
+        renderLocations();
         showStatus(error.message, true);
         loadRows(currentPage);
       }
@@ -379,19 +424,17 @@
 
   function applyLocationIDs(group, ids, value) {
     ids.forEach(function (id) { setSelected(id, value); });
-    var boxes = locationListNode.querySelectorAll("input[type=checkbox]");
-    Array.prototype.forEach.call(boxes, function (box) {
-      if (box.getAttribute("data-location") === group) {
-        box.checked = value;
-        box.indeterminate = false;
-      }
-    });
-    loadRows(currentPage);
+    if (!value && locationFilter && locationFilter.value === group) {
+      locationFilter.value = "";
+    }
+    renderLocations();
+    loadRows(1);
     scheduleSave();
   }
 
   function toggleLocation(group, value) {
-    showStatus("Updating " + group + "…", false);
+    includedGroups[group] = value;
+    showStatus((value ? "Including " : "Hiding ") + group + "…", false);
     if (locationIDs[group]) {
       applyLocationIDs(group, locationIDs[group], value);
       return;
@@ -400,15 +443,31 @@
       locationIDs[group] = body.data.importIds || [];
       applyLocationIDs(group, locationIDs[group], value);
     }).catch(function (error) {
+      includedGroups[group] = !value;
       showStatus(error.message, true);
-      refreshLocations();
+      renderLocations();
     });
   }
 
+  // IMP-B: these actions change only the page-local location-group scope. They
+  // never change the persisted row selection.
+  function setAllLocationsScope(value) {
+    locations.forEach(function (location) { includedGroups[location.group] = value; });
+    showStatus(value ? "All locations are in the review scope." : "All locations are outside the review scope.", false);
+    renderLocations();
+    loadRows(1);
+  }
+
+  function scopedRowIDs() {
+    var excluded = excludedGroupsInOrder();
+    if (!excluded.length) { return api("/row-ids"); }
+    return api("/row-ids?excludeGroups=" + encodeURIComponent(excluded.join(",")));
+  }
+
   function loadAll(mode) {
-    api("/row-ids").then(function (body) {
+    scopedRowIDs().then(function (body) {
       var ids = body.data.importIds || [];
-      if (ids.length > 1000 && !window.confirm((mode === "all" ? "Select" : "Clear") + " " + ids.length + " rows?")) {
+      if (ids.length > 1000 && !window.confirm((mode === "all" ? "Select" : "Clear") + " " + ids.length + " rows in scope?")) {
         return;
       }
       ids.forEach(function (id) { setSelected(id, mode === "all"); });
@@ -416,6 +475,29 @@
       loadRows(currentPage);
       scheduleSave();
       refreshLocations();
+    }).catch(function (error) {
+      showStatus(error.message, true);
+    });
+  }
+
+  // IMP-04: recompute the staging-time defaults on demand. The rule never
+  // rewrites an existing batch by itself; this button is the explicit opt-in.
+  function resetToDefaults() {
+    var message = "Replace the current selection with the documented defaults? " +
+      "Container rows in General, Bank and SharedBank will be cleared and every manual selection is replaced; Hoard rows stay selected.";
+    if (!window.confirm(message)) { return; }
+    showStatus("Loading the default selection…", false);
+    api("/default-selection").then(function (body) {
+      var ids = body.data.defaultImportIds || [];
+      selected = {};
+      ids.forEach(function (id) { setSelected(id, true); });
+      locationIDs = {};
+      includedGroups = {};
+      locations.forEach(function (location) { includedGroups[location.group] = true; });
+      renderLocations();
+      showStatus(ids.length + " default rows selected; saving…", false);
+      loadRows(1);
+      scheduleSave();
     }).catch(function (error) {
       showStatus(error.message, true);
     });
@@ -432,6 +514,15 @@
   }
   if (clearAllButton) {
     clearAllButton.addEventListener("click", function () { loadAll("none"); });
+  }
+  if (resetDefaultsButton) {
+    resetDefaultsButton.addEventListener("click", function () { resetToDefaults(); });
+  }
+  if (checkAllLocationsButton) {
+    checkAllLocationsButton.addEventListener("click", function () { setAllLocationsScope(true); });
+  }
+  if (uncheckAllLocationsButton) {
+    uncheckAllLocationsButton.addEventListener("click", function () { setAllLocationsScope(false); });
   }
   if (commitButton) {
     commitButton.addEventListener("click", function () {

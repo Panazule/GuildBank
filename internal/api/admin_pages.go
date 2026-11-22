@@ -23,6 +23,18 @@ func availabilityLabel(state domain.AvailabilityState) string {
 	}
 }
 
+// adminOtherGroupLabel is the IMP-02 presentation of the persisted
+// "Unspecified" group. The stored value and the API contract keep
+// "Unspecified"; only the rendered label changes.
+const adminOtherGroupLabel = "Other (not a bank location)"
+
+func adminGroupLabel(group string) string {
+	if group == "Unspecified" {
+		return adminOtherGroupLabel
+	}
+	return group
+}
+
 func adminClassText(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -46,7 +58,8 @@ func adminItemViewOf(item domain.AdminInventoryItem) adminItemView {
 		Quantity: item.Quantity, ClassText: adminClassText(item.ClassString),
 		RaceText: adminClassText(item.RaceString), MetadataMissing: item.MetadataMissingFg,
 		SourceLocation: item.SourceLocation, LocationGroup: item.LocationGroup,
-		GivenTo: item.GivenTo, Deleted: item.DeletedFg,
+		LocationGroupLabel: adminGroupLabel(item.LocationGroup),
+		GivenTo:            item.GivenTo, Deleted: item.DeletedFg,
 		DateAddedISO:   item.DateAdded.Format("2006-01-02"),
 		DateAddedText:  item.DateAdded.Format("Jan 2, 2006"),
 		DateOpenISO:    item.DateOpen.Format("2006-01-02"),
@@ -209,10 +222,10 @@ func adminListPageOf(page domain.AdminInventoryPage, groups []string) adminListP
 		ClearURL:   "/admin/inventory",
 	}
 	selected := filter.LocationGroup
-	data.LocationGroups = []adminLocationOption{{Value: "", Selected: selected == ""}}
+	data.LocationGroups = []adminLocationOption{{Value: "", Label: "Any location", Selected: selected == ""}}
 	for _, group := range groups {
 		data.LocationGroups = append(data.LocationGroups, adminLocationOption{
-			Value: group, Selected: group == selected,
+			Value: group, Label: adminGroupLabel(group), Selected: group == selected,
 		})
 	}
 	if page.TotalPages > 0 {

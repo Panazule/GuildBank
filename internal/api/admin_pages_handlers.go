@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -38,7 +40,24 @@ func (h *adminInventoryHandler) page(c *gin.Context) {
 	data := adminListPageOf(page, groups)
 	data.pageData = pageData{Title: "Admin inventory", CSRF: CSRF(c), User: currentUserPointer(c)}
 	data.Notice = adminNotice(c.Query("notice"))
+	if c.Query("notice") == "bulk-removed" {
+		data.Notice = adminBulkRemovedNotice(c.Query("count"))
+	}
 	h.views.adminInventoryList(c, http.StatusOK, data)
+}
+
+// adminBulkRemovedNotice renders the bounded, machine-generated result of a
+// page-local bulk removal. The raw query value is parsed as a number; no text is
+// reflected.
+func adminBulkRemovedNotice(raw string) string {
+	count, err := strconv.Atoi(raw)
+	if err != nil || count < 1 || count > service.AdminMaxBulkRemove {
+		return "The selected records were removed."
+	}
+	if count == 1 {
+		return "1 record was removed."
+	}
+	return fmt.Sprintf("%d records were removed.", count)
 }
 
 func adminValidationMessage(fields map[string]string) string {
@@ -81,6 +100,10 @@ func adminNotice(code string) string {
 		return "The record was removed."
 	case "restored":
 		return "The record was restored."
+	case "updated-removed":
+		return "The record was updated and removed."
+	case "bulk-removed":
+		return "The selected records were removed."
 	default:
 		return ""
 	}
@@ -97,6 +120,12 @@ func (h *adminInventoryHandler) respondAdminPageError(c *gin.Context, err error)
 	case errors.Is(err, domain.ErrUnavailable):
 		h.views.errorPage(c, http.StatusServiceUnavailable,
 			"The guild inventory is temporarily unavailable. Please try again after the database connection is restored.")
+	case errors.Is(err, domain.ErrConflict):
+		h.views.errorPage(c, http.StatusConflict,
+			"One or more selected records changed since the page was loaded. Reload the inventory list and try again.")
+	case errors.Is(err, domain.ErrNotFound):
+		h.views.errorPage(c, http.StatusNotFound,
+			"One or more selected records no longer exist. Reload the inventory list and try again.")
 	default:
 		h.logger.Error("admin inventory page failed", "request_id", GetRequestID(c), "error", err)
 		h.views.errorPage(c, http.StatusInternalServerError, "The inventory could not be displayed.")
@@ -168,8 +197,7 @@ func adminFormValuesOf(item adminItemView) adminFormValues {
 		Quantity:       strconv.FormatUint(uint64(item.Quantity), 10),
 		SourceLocation: item.SourceLocation, GivenTo: item.GivenTo,
 		DateOpen: item.DateOpenISO, DateBazaar: item.DateBazaarISO,
-		ExpectedModAt:    item.ModAtValue,
-		QuantityReadOnly: item.ItemType == string(domain.ItemTypeItem),
+		ExpectedModAt: item.ModAtValue,
 	}
 }
 
@@ -311,7 +339,6 @@ func (h *adminInventoryHandler) createForm(c *gin.Context) {
 	}
 	in, values, fields := createInputFromForm(c)
 	if len(fields) > 0 {
-		values.QuantityReadOnly = in.ItemType == domain.ItemTypeItem
 		h.renderForm(c, http.StatusUnprocessableEntity, false, values, domain.AdminInventoryItem{},
 			"The record was not added. Correct the highlighted fields.", fields, false)
 		return
@@ -340,22 +367,28 @@ func (h *adminInventoryHandler) updateForm(c *gin.Context) {
 		h.respondAdminPageError(c, err)
 		return
 	}
-	current := adminItemViewOf(item)
 	in, values, fields := updateInputFromForm(c, id)
-	values.QuantityReadOnly = current.ItemType == string(domain.ItemTypeItem)
 	if len(fields) > 0 {
 		h.renderForm(c, http.StatusUnprocessableEntity, true, values, item,
 			"The record was not updated. Correct the highlighted fields.", fields, false)
 		return
 	}
 	in.Actor, in.CorrelationID, in.SourceIP = actor, GetRequestID(c), c.ClientIP()
+	if c.PostForm("action") == "save-remove" {
+		in.Remove = true
+	}
 	result, err := h.admin.Update(c.Request.Context(), in)
 	if err != nil {
 		h.renderFormError(c, true, values, item, err)
 		return
 	}
 	notice := "updated"
-	if !result.Changed {
+	if in.Remove {
+		notice = "removed"
+		if result.FieldsChanged {
+			notice = "updated-removed"
+		}
+	} else if !result.Changed {
 		notice = "unchanged"
 	}
 	c.Redirect(http.StatusSeeOther,
@@ -459,4 +492,104 @@ func (h *adminInventoryHandler) restoreForm(c *gin.Context) {
 		return
 	}
 	c.Redirect(http.StatusSeeOther, "/admin/inventory/"+strconv.FormatInt(id, 10)+"?notice=restored")
+}
+
+// bulkTargetsFrom reads the page-local bulk-removal selection. Each checkbox
+// value is the opaque "<id>|<modAt>" token rendered by the list, so a stale page
+// can never remove a record it did not display.
+func bulkTargetsFrom(c *gin.Context) ([]domain.RemoveItemTarget, []string, map[string]string) {
+	raw := c.PostFormArray("remove")
+	fields := make(map[string]string)
+	targets := make([]domain.RemoveItemTarget, 0, len(raw))
+	tokens := make([]string, 0, len(raw))
+	switch {
+	case len(raw) == 0:
+		fields["remove"] = "Select at least one record to remove."
+		return nil, nil, fields
+	case len(raw) > service.AdminMaxBulkRemove:
+		fields["remove"] = fmt.Sprintf("Select at most %d records.", service.AdminMaxBulkRemove)
+		return nil, nil, fields
+	}
+	seen := make(map[int64]bool, len(raw))
+	for _, value := range raw {
+		idPart, modPart, ok := strings.Cut(value, "|")
+		if !ok {
+			fields["remove"] = "One selection token is malformed; reload the inventory list."
+			continue
+		}
+		id, err := strconv.ParseInt(strings.TrimSpace(idPart), 10, 64)
+		if err != nil || id <= 0 {
+			fields["remove"] = "One selection token has an invalid ID; reload the inventory list."
+			continue
+		}
+		expected, valid := parseExpectedModAt(modPart)
+		if !valid {
+			fields["remove"] = "One selection token has an invalid version; reload the inventory list."
+			continue
+		}
+		if seen[id] {
+			fields["remove"] = "A record was selected more than once; reload the inventory list."
+			continue
+		}
+		seen[id] = true
+		targets = append(targets, domain.RemoveItemTarget{ID: id, ExpectedModAt: expected})
+		tokens = append(tokens, value)
+	}
+	if len(fields) > 0 {
+		return nil, nil, fields
+	}
+	return targets, tokens, nil
+}
+
+// bulkRemovePreview validates the page-local selection and renders the removal
+// confirmation. It writes nothing.
+func (h *adminInventoryHandler) bulkRemovePreview(c *gin.Context) {
+	if !h.admin.Ready() {
+		h.views.errorPage(c, http.StatusServiceUnavailable,
+			"The guild inventory is temporarily unavailable. Please try again after the database connection is restored.")
+		return
+	}
+	targets, tokens, fields := bulkTargetsFrom(c)
+	if len(fields) > 0 {
+		h.views.errorPage(c, http.StatusUnprocessableEntity, adminValidationMessage(fields))
+		return
+	}
+	items, err := h.admin.PreviewRemoveMany(c.Request.Context(), targets)
+	if err != nil {
+		h.respondAdminPageError(c, err)
+		return
+	}
+	views := make([]adminItemView, 0, len(items))
+	for _, item := range items {
+		views = append(views, adminItemViewOf(item))
+	}
+	h.views.adminBulkRemove(c, http.StatusOK, adminBulkRemovePageData{
+		pageData: pageData{Title: "Remove records", CSRF: CSRF(c), User: currentUserPointer(c)},
+		Items:    views, Targets: tokens,
+	})
+}
+
+// bulkRemoveForm applies the previewed selection in one all-or-nothing
+// transaction. The service re-validates every version token under lock.
+func (h *adminInventoryHandler) bulkRemoveForm(c *gin.Context) {
+	targets, _, fields := bulkTargetsFrom(c)
+	if len(fields) > 0 {
+		h.views.errorPage(c, http.StatusUnprocessableEntity, adminValidationMessage(fields))
+		return
+	}
+	actor, ok := adminActor(c)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), adminWriteTimeout)
+	defer cancel()
+	result, err := h.admin.RemoveMany(ctx, targets, actor, GetRequestID(c), c.ClientIP())
+	if err != nil {
+		h.respondAdminPageError(c, err)
+		return
+	}
+	h.logger.Info("admin inventory bulk removed", "request_id", GetRequestID(c),
+		"user_id", actor.UserID, "removed", result.Removed)
+	c.Redirect(http.StatusSeeOther,
+		"/admin/inventory?notice=bulk-removed&count="+strconv.Itoa(result.Removed))
 }

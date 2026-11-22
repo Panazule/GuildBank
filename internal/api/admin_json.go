@@ -221,6 +221,8 @@ type updateItemRequest struct {
 	GivenTo        *json.RawMessage `json:"givenTo"`
 	DateOpen       *json.RawMessage `json:"dateOpen"`
 	DateBazaar     *json.RawMessage `json:"dateBazaar"`
+	// Remove asks for the same transaction to soft-delete the record (AI-02).
+	Remove *bool `json:"remove"`
 
 	ID              *json.RawMessage `json:"id"`
 	EQUID           *json.RawMessage `json:"equid"`

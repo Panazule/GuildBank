@@ -22,7 +22,7 @@
       <div><dt>Classes</dt><dd>{{.Item.ClassText}}</dd></div>
       <div><dt>Races</dt><dd>{{.Item.RaceText}}</dd></div>
       <div><dt>Source location</dt><dd>{{if .Item.SourceLocation}}{{.Item.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</dd></div>
-      <div><dt>Location group</dt><dd><span class="group-badge">{{.Item.LocationGroup}}</span></dd></div>
+      <div><dt>Location group</dt><dd><span class="group-badge">{{.Item.LocationGroupLabel}}</span></dd></div>
       <div><dt>Recipient</dt><dd>{{if .Item.GivenTo}}{{.Item.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</dd></div>
       <div><dt>Date added</dt><dd><time datetime="{{.Item.DateAddedISO}}">{{.Item.DateAddedText}}</time></dd></div>
       <div><dt>Open to personas</dt><dd><time datetime="{{.Item.DateOpenISO}}">{{.Item.DateOpenText}}</time></dd></div>

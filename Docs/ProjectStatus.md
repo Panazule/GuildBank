@@ -1,12 +1,12 @@
-﻿# Project Status — Aeternus Guild Bank
+# Project Status — Aeternus Guild Bank
 
 | Field | Value |
 |---|---|
 | Document ID | PS-001 |
 | As-of date | 2026-11-22 |
 | Source specification | `Design.md` v1.6.1 (1,274 lines: body L1–L854, decisions D-01–D-13 at L855–L1161, amendments AM-01–AM-05 at L1163–L1263, informational implementation status at L1265–L1274) |
-| Repository state | Phase 1 identity/settings layer, Phase 2 item-metadata integration, Phase 3 import pipeline, Phase 4 public inventory read path and Phase 5 administrative inventory management are implemented. Administrative add/edit/remove/restore, the audit viewer, the location backfill and the owner-reviewed UI amendments are implemented and live-validated on the Compose development topology (`Phase5Validation.md`) |
-| Documents issued | `ArchitectureReview.md` (AR-001), `DatabaseDesign.md` (DD-001), `ImplementationPlan.md` (IP-001), `ProjectStructure.md` (PS-002), `ItemsDataProfile.md` (DP-001), `Phase3ImplementationPlan.md`, `Phase4ImplementationPlan.md`, `Phase4Validation.md`, `Phase5ImplementationPlan.md`, `Phase5ApprovalReview.md`, `Phase5Validation.md`, `PublicInventoryAPI.md`, this status report |
+| Repository state | Phase 1 identity/settings layer, Phase 2 item-metadata integration, Phase 3 import pipeline, Phase 4 public inventory read path and Phase 5 administrative inventory management are implemented. Administrative add/edit/remove/restore, the audit viewer, the location backfill, the owner-reviewed UI amendments, the post-Phase-5 import/admin usability improvements, the follow-up import-review adjustments (IMP-A/IMP-B/IMP-C), the DEFECT-01 spell metadata correction and the item quantity model (QTY-01–QTY-12) are implemented and live-validated on the Compose development topology (`Phase5Validation.md`, `ImportAdminImprovements.md`, `ItemQuantityModelImplementation.md`) |
+| Documents issued | `ArchitectureReview.md` (AR-001), `DatabaseDesign.md` (DD-001), `ImplementationPlan.md` (IP-001), `ProjectStructure.md` (PS-002), `ItemsDataProfile.md` (DP-001), `Phase3ImplementationPlan.md`, `Phase4ImplementationPlan.md`, `Phase4Validation.md`, `Phase5ImplementationPlan.md`, `Phase5ApprovalReview.md`, `Phase5Validation.md`, `PublicInventoryAPI.md`, `ItemQuantityModelReview.md`, `ItemQuantityModelImplementation.md`, this status report |
 | Overall status | **v1.6.1 published; Phases 0–2 approved and complete; Phase 3 approved, implemented and live-validated; Phase 4 approved, implemented and live-validated; Phase 5 approved, implemented and live-validated, awaiting owner review of the implementation and the one open availability-boundary wording question** |
 
 ---
@@ -19,10 +19,10 @@
 | Architecture review | Complete, revised | AR-001 rev 1.3: 22 missing requirements, 25 conflicts, 22 security risks, 28 implementation concerns, D-01–D-13 and AM-01–AM-05 adopted, E-01–E-16 registered, Phase 3 dispositions recorded |
 | Data design | Complete and approved for the implemented scope | DD-001: DDL for 4 SQLite tables (`AuditOutbox` remains a later-phase addition), 5 MariaDB tables (`Audit` specified by D-10, `MetadataMissingFg` by AM-02); the guild-store tables match migrations `0001_guild_store` and the index-only `0002_public_inventory_indexes` |
 | Delivery plan | Complete | IP-001: 9 phases, estimates, test and deployment strategy |
-| Source code | Phases 1–5 are present | `cmd/guildbank`, `internal/{domain,service,repository,api,web,platform}`; setup, auth, sessions, settings, read-only item metadata, import parser/staging/selection/commit, public inventory list/detail/API, admin inventory CRUD/audit viewer, location backfill, MariaDB migrations `0001`–`0003` and the import/public/admin UI |
+| Source code | Phases 1–5 are present | `cmd/guildbank`, `internal/{domain,service,repository,api,web,platform}`; setup, auth, sessions, settings, read-only item metadata, import parser/staging/selection/commit, public inventory list/detail/API, admin inventory CRUD/audit viewer, location and spell-metadata backfills, MariaDB migrations `0001`–`0005` and the import/public/admin UI |
 | Build/CI | Complete for the current scope | `go.mod`/`go.sum` (Go 1.27.3), `Makefile`, `.github/workflows/ci.yml`, `Dockerfile`, `docker-compose.yml` |
 | Environments | Development topology defined; item metadata provisioned | Compose app + MariaDB 11.4; 144,712-row read-only `items` copy in `GuildBank`; disposable credentials; no production environment |
-| Test assets | Canonical import sample, development item metadata plus Phase 0–5 tests | `Docs/Samples/InventoryExport-Sample.txt` (548 physical lines); `GuildBank.items` profile in DP-001; tests for config, logging, app, sqlite migrations/repositories, mariadb item mapping/batch/page reads and admin SQL builders, mask decoders, metadata resolution, parser/natural sort/location normalization, commit planning, multipart CSRF, import handlers, admin service/API/decoder contracts, admin/public templates and the migration hash manifest; opt-in full-table Items test |
+| Test assets | Canonical import sample, development item metadata plus Phase 0–5 tests | `Docs/Samples/InventoryExport-Sample.txt` (548 physical lines); `GuildBank.items` profile in DP-001; tests for config, logging, app, sqlite migrations/repositories, mariadb item mapping/batch/page reads, admin SQL builders and startup repair helpers, mask decoders, metadata resolution, parser/natural sort/location normalization, commit planning (items and spells), multipart CSRF, import handlers (including the Other exclusion), admin service/API/decoder contracts, admin/public templates and the migration hash manifest; opt-in full-table Items test |
 | Deployment | Configured, not deployed | Multi-stage static image, non-root UID 10001, `/config` volume, `EXPOSE 8080`, healthcheck `/healthz` |
 | Operations | Health/logs and session purge implemented; backup/support pending | `/healthz`, `/readyz`, JSON logs with request IDs, hourly session purge, graceful shutdown with WAL checkpoint |
 
@@ -33,9 +33,9 @@
 | Setup wizard | Partial — gate/order implemented; recovery undefined | **Implemented** for the four-step flow | E-02 offline recovery |
 | Authentication/sessions | Defined — lifecycle approved as PD-15 | **Implemented** (login/logout, hashed sessions, expiry, CSRF, lockout) | — |
 | Public inventory browsing | Defined; PD4-01–PD4-17 approved | **Implemented** — public list/detail/API, search, class/race/type filters, eight sorts, pagination, UTC availability, EQResource links and public DTO | Proxy-level anonymous rate limiting remains operational; no in-app limiter |
-| Class/race decoding | Defined with permanent fixtures; PD-19/PD-20 approved | **Implemented** repository-independent decoders plus service metadata generation; import warnings persist to `ImportList.WarningText` | — |
-| Inventory administration | Partial — dev metadata loaded; loader procedure/freshness open | **Implemented** — manual create (item expansion, spell merge, duplicate warning, metadata fallback), edit, remove, restore, filters/sorts, admin HTML/JSON routes and audit viewer | E-01 (loader/freshness) remains operational |
-| Import pipeline | Approved by `Phase3ImplementationPlan.md`; D-04/AM-03 contract, D-08/AM-01/AM-02 metadata rule | **Implemented** — upload, durable failures, normalized staging, `LocationGroup` selector, persisted selection, unit-aware summary, atomic commit, `409` terminal state and admin UI/API | Production grants and real collector exports remain operational follow-ups |
+| Class/race decoding | Defined with permanent fixtures; PD-19/PD-20 approved | **Implemented** repository-independent decoders plus service metadata generation; import commit stores the decoded strings for item and spell rows and import warnings persist to `ImportList.WarningText`; `BackfillSpellMetadata` repairs pre-DEFECT-01 spell rows at startup | — |
+| Inventory administration | Partial — dev metadata loaded; loader procedure/freshness open | **Implemented** — manual create (one row with the entered quantity under QTY-07, spell merge, duplicate warning, metadata fallback), edit including item quantity (QTY-08), remove, restore, filters/sorts, admin HTML/JSON routes and audit viewer; rows absorbed by QTY-09 consolidation cannot be restored | E-01 (loader/freshness) remains operational |
+| Import pipeline | Approved by `Phase3ImplementationPlan.md`; D-04/AM-03 contract, D-08/AM-01/AM-02 metadata rule | **Implemented** — upload, durable failures, normalized staging, `LocationGroup` selector, persisted selection, unit-aware summary, atomic commit, `409` terminal state and admin UI/API. One item row per staged line carries the line quantity; later imports of the same EQUID create separate rows (QTY-01/QTY-03). Rows classified `Unspecified` stay staged but are excluded from review, selection and commit (IMP-C) | Production grants and real collector exports remain operational follow-ups |
 | Spell merge/lifecycle dates | Defined by D-06; import provenance resolved by PD3-03/PD3-04/PD3-14 | **Implemented for imports and admin writes** — merge by active EQUID into the lowest active row, staged/merged quantity sum, `ITEM_UPDATED` audit provenance; admin create/update applies the PD5-27/PD5-32 date rule (defaults from Settings, per-row override, non-retroactive) | Live `Bazaar` label branch cannot be produced by a new row and the availability boundary wording is open (see §1.7) |
 | Settings | Partial — typed/secrets implemented; policy review open | **Implemented** (read/update/redaction) | E-11 |
 | User management | Partial — policy/last-admin rules | Not started | E-07 |
@@ -174,7 +174,7 @@ is retained only for traceability and audit.
 | Classification and metadata | Complete | `Spell`/`Song`/`Ancient` prefix classification; classification-conflict failure; batch metadata resolution; `metadata_missing` fallback for items and spells |
 | Durable staging | Complete | Batch created as `Processing`; parse/stage failures retained with line-numbered reasons; rows and `Uploaded` transition plus `IMPORT_CREATED` audit commit atomically |
 | Selection and summary | Complete | Full replacement selection, foreign/duplicate rejection, persisted per-row `SelectedFg`, `LocationGroup`-based group toggles, unit-aware summary and merged-spell preview |
-| Atomic commit | Complete | Advisory lock and `FOR UPDATE`; item expansion to individual units; spell aggregation and merge into lowest active ID; metadata/date rules; 100,000-record guard; `Completed` terminal state and one-retry deadlock handling |
+| Atomic commit | Complete | Advisory lock and `FOR UPDATE`; one item row per imported line with the line quantity (QTY-01/QTY-03); spell aggregation and merge into lowest active ID; metadata/date rules; 100,000-record guard; `Completed` terminal state and one-retry deadlock handling |
 | Transactional audit | Complete | `IMPORT_CREATED`, `IMPORT_COMMITTED`, one summary `ITEM_CREATED` and one `ITEM_UPDATED` per merged spell in the same MariaDB transaction; audit failure rolls back the commit |
 | REST API | Complete | Admin-only upload, history, detail, locations, rows, row IDs, selection GET/PUT, summary and commit; path-aware body limits, multipart CSRF, `409`/`413`/`422`/`503` mappings |
 | Admin UI | Complete | `/admin/imports` history/upload and `/admin/imports/:id` review; `imports.js` handles upload state, summary, selector, paging, debounced selection and commit; degraded mode remains visible with upload disabled |
@@ -300,10 +300,10 @@ screens captured and the items still outstanding.
 | Startup backfill | Implemented | `Store.BackfillInventoryLocations` uses a dedicated advisory lock, keyset batches of 500, one transaction per batch, fills only the derived columns, never touches `SourceLocation`/`ModAt`/audit and is restartable; wired in `app.Run` after migration/recovery and before serving |
 | Location normalization | Implemented | One `normalizeLocationValue` computation behind `NormalizeLocation` (import contract unchanged) and `NormalizeAdminLocation` (adds `location_unrecognized`); unit tests cover the D-05 vectors and identical group/sort |
 | Shared row insert | Implemented | `insertInventoryRows` is used by import commit and admin create with one 19-column list including `LocationGroup`/`LocationSort`; `GuildBankItem` carries both staged fields |
-| Domain/service | Implemented | `internal/domain/inventory_admin.go`, `internal/domain/audit.go`; `AdminInventoryService` owns list/get/location groups, create (item expansion, spell merge, duplicate-target warning, metadata-missing fallback), update (spell-only quantity, immutable fields, date reset), remove/restore, audit list/get, deadlock retry once and one audit row per write |
+| Domain/service | Implemented | `internal/domain/inventory_admin.go`, `internal/domain/audit.go`; `AdminInventoryService` owns list/get/location groups, create (one row with the entered quantity under QTY-07, spell merge, duplicate-target warning, metadata-missing fallback), update (quantity for both types under QTY-08, immutable fields, date reset), remove/restore (absorbed-row restore rejected), audit list/get, deadlock retry once and one audit row per write |
 | Repository | Implemented | `admin_inventory.go`, `admin_audit.go` add explicit projections, allowlisted sort/filter predicates, repeatable-read snapshot reads, the dedicated-lock write transaction and nullable-column scans |
 | API | Implemented | `internal/api/admin_json.go` implements the strict 64 KiB decoder (content type, duplicate-key pre-pass, `DisallowUnknownFields`, single-value check) and `admin_inventory.go`/`admin_audit.go` implement the documented JSON routes, field-keyed `422`, `409` conflicts, `404`/`413`/`503` mappings and fixed `Location` header |
-| HTML admin UI | Implemented | `/admin/inventory`, `/new`, `/{id}`, `/{id}/edit`, `/{id}/remove`, `/admin/audit` plus POST adapters; server-rendered forms with CSRF, confirmation page, fixed notices, conflict banners, `readonly` item quantity and nav links |
+| HTML admin UI | Implemented | `/admin/inventory`, `/new`, `/{id}`, `/{id}/edit`, `/{id}/remove`, `/admin/audit` plus POST adapters; server-rendered forms with CSRF, confirmation page, fixed notices, conflict banners, editable quantity for both types and nav links |
 | Audit viewer | Implemented | Admin-only newest-first viewer with `eventType`/`user`/`table`/`recordId`/`correlationId`/`from`/`to` filters, page size 50/200 cap and per-record history panel |
 | Correlation-ID bound | Implemented | `requestIDPattern` narrowed to `{8,36}` so `Audit.CorrelationID CHAR(36)` cannot break a valid write (PD5-31) |
 | UI amendments | Implemented | Responsive 120 rem content width, `ID`/`EQUID` removed from the public grid only, one compact multi-column filter grid per screen, icon-only EQResource link with `title`/`aria-label`/`noopener noreferrer`, nowrap density above 900 px, and `Mains`/`Persona`/`Bazaar` availability labels with the three specific dates on the detail page. The label boundary is inclusive per PD5-40: `Persona` while `DateOpen <= today < DateBazaar`, `Bazaar` from the `DateBazaar` day on |
@@ -339,6 +339,122 @@ Known deviations and open items:
 - The downstream documentation corrections of §12.5 and the owner review of the
   implementation remain outstanding.
 
+### 1.8 Post-Phase-5 UI defect corrections (2026-11-22)
+
+Two defects found by owner review of the running Compose deployment were fixed
+in a contained change; no new phase or feature work was started.
+
+| Defect | Root cause | Correction |
+|---|---|---|
+| `/admin/settings` returned `200` with a zero-byte body (blank page) | `settings.html` assembled one `<input>` tag with a `{{if}}`/`{{else if}}` chain *inside the tag* to choose `type`/`min`/`max`. `html/template`'s contextual escaper rejects an action in attribute-name position, and because the error surfaces at execute time — after `views.render` had already written the status and content type — the response was a `200` with an empty body and no visible error. No test rendered the settings page, so the gate never caught it | Each input variant is now a complete static tag selected by an `{{else if eq .Key …}}` branch; no dynamic attribute names remain. `views.render` additionally buffers the template output and answers `500 internal_error` (logged through Gin's error channel) if execution fails, so a future template error cannot produce a blank page |
+| Anonymous visitors saw `Inventory` but no way to sign in | The `nav` partial only rendered authenticated entries and the sign-out form, so the login page was reachable only by typing its URL | The partial renders `Login` (`/login`) when `.User` is nil and keeps `Inventory`, `Settings`, `Admin inventory`, `Imports`, `Audit` and `Sign out` for authenticated sessions; `Audit`/`Imports` are now ordered as documented |
+
+Authorization is unchanged: `/admin/*` is still `RequireAuth → CSRF →
+RequireAdmin`, anonymous admin requests still answer `303 /login?next=…`, and
+the nav only *links* to routes the middleware guards.
+
+Validation (2026-11-22): `gofmt -l cmd internal` prints nothing, `go vet ./...`
+is clean, `go test -count=1 ./...` passes including the new
+`internal/api/navigation_test.go` regression tests (anonymous nav exposes only
+`Inventory`/`Login`, administrator nav order and `Sign out`, settings page body
+non-empty with all eleven inputs, `?saved=1` notice). Live on the rebuilt
+Compose app: anonymous `GET /` `200` with `Inventory`+`Login` and no `/admin`
+links; `GET /login` `200`; `POST /api/v1/auth/login` as `phase5admin` `200`;
+`GET /admin/settings` `200` with a full body (heading, CSRF field, eleven
+inputs, `Configured — leave blank to keep` on the MariaDB password);
+`GET /admin/inventory`, `/admin/imports` and `/admin/audit` `200`, and
+`/admin` `303 /admin/settings`, as designed for an administrator; anonymous
+`GET /admin/settings` and `/admin/inventory` still `303` to
+`/login?next=…`.
+
+### 1.9 Post-Phase-5 import and admin usability improvements (2026-11-22)
+
+The owner approved the review of eight post-Phase-5 items and implementation was
+carried out in a contained change; the Phase 3 commit path, the import advisory
+lock, the Phase 5 single-record contracts and the closed audit vocabulary are
+unchanged. Full evidence is in `Docs/ImportAdminImprovements.md`.
+
+- **IMP-01 (latent defect)** — a populated row at a nested bank slot
+  (`General 1-Slot2-Slot1`) is no longer staged as `Unspecified`; it is ignored
+  and counted in the new nullable `ImportBatch.IgnoredRowCount`
+  (migration `0004_import_ignored_rows.sql`), the upload result and the
+  `IMPORT_CREATED` audit payload. The canonical sample is unchanged: its 139
+  nested rows are empty (`ID 0`) discards, so ignored = 0 and accepted = 197.
+- **IMP-02/IMP-03** — `Unspecified` is presented as **Other (not a bank
+  location)** in admin inventory and is never selected by default; the review
+  grid adds a **Kind** column (`Slot`/`Container`). The import review itself no
+  longer exposes the group or its banner (superseded by IMP-C, §1.10).
+- **IMP-04/IMP-05** — staging now applies one default rule: container rows (a bag
+  occupying a slot) are not selected in General, Bank and SharedBank; all Hoard
+  rows are selected; Unspecified is never selected. A new
+  `GET /api/v1/imports/{id}/default-selection` plus **Reset to defaults** lets an
+  existing batch adopt the rule explicitly. Existing batches are not rewritten.
+  For the sample the default selection is 138 rows, down from 197. After IMP-C
+  the review exposes 166 rows (197 accepted minus 31 Other) in 29 groups.
+- **IMP-06** — the location panel is the page-local group scope: unchecking a
+  group hides its rows and clears them from the selection, and the `Unselected`
+  filter ignores the scope so those rows remain reviewable.
+- **AI-01** — page-local bulk removal only: a checkbox column (≤200 rows), a
+  preview page, then `RemoveMany` in one all-or-nothing transaction with
+  ascending-ID `FOR UPDATE` locks and one `ITEM_REMOVED` audit row per record
+  sharing the request correlation ID. No filter-wide or inventory-wide action,
+  and no new event type.
+- **AI-02** — **Save and remove** performs the edit and the soft delete in one
+  transaction, writing `ITEM_UPDATED` only when fields changed plus
+  `ITEM_REMOVED`, both under one correlation ID; restore does not undo the edits.
+
+Validation (2026-11-22): `gofmt -l cmd internal` prints nothing, `go vet ./...` is
+clean and `go test -count=1 ./...` passes, including new parser/selection, admin
+bulk, template and migration-manifest tests. The rebuilt Compose app applied
+`schema_version=0004_import_ignored_rows` and the live probe passed: sample upload
+197 accepted / 0 ignored / 138 default-selected, group-scope counts of 59 and 163,
+the new review/admin markup present, AI-02 returning `deleted + fieldsChanged`
+with `ITEM_REMOVED`+`ITEM_UPDATED` sharing one correlation ID, AI-01 preview/apply
+removing both records under one correlation ID, and the `2 records were removed.`
+notice. Probe records are soft-removed; no batch was committed, so inventory is
+unchanged. Evidence is in `ImportAdminImprovements.md` §6.
+
+### 1.10 Post-Phase-5 follow-up review and DEFECT-01 (2026-11-22)
+
+The owner accepted the Scope concept (IMP-A) and requested two changes, and
+reported a high-priority spell-metadata defect. All work is contained; no phase
+was reopened.
+
+- **IMP-B** — the import-review location panel adds **Check all locations** and
+  **Uncheck all locations** above the existing scope actions. They change only
+  the page-local location-group checkboxes; row selection, **Select all in
+  scope**, **Clear scope** and **Reset to defaults** are unchanged.
+- **IMP-C** — the `Unspecified` classification is internal only. A single
+  repository predicate excludes it from the location selector, the staged-row
+  list, `row-ids`, the persisted selection, the summary and the commit; the
+  selection API rejects an Other row with `422`; the Other banner and label are
+  removed from the import review. Admin inventory keeps its Other label.
+  Staging counts are unchanged: the sample is still 197 accepted, but the review
+  exposes 166 rows in 29 groups and the default selection remains 138.
+- **DEFECT-01 (spell metadata)** — root cause: `buildCommitPlan` resolved
+  `ItemMetadata` for spell rows but its new-spell insert copied only the staged
+  name, never `ClassString`/`RaceString`. Metadata lookup is by EQUID (never by
+  name) and the `Spell:`/`Song:`/`Ancient:` prefixes are classification-only and
+  never stripped. With blank stored strings the DTO/template layer rendered
+  **Unknown**; the data was missing, not the decode. The commit plan now applies
+  the same metadata rule as items (authoritative Items name, decoded class/race,
+  blanks only when the EQUID is unresolved), and the startup
+  `BackfillSpellMetadata` repairs existing spell rows. Merges still never
+  rewrite an existing row's stored metadata or dates.
+
+Validation (2026-11-22): `gofmt -l cmd internal` prints nothing, `go vet ./...`
+is clean and `go test -count=1 ./...` passes, including new tests for the Other
+exclusion, the IMP-B markup and spell metadata planning/backfill. The rebuilt
+Compose app logged `spell metadata backfill complete rows=7`; `Ancient: Lcea's
+Lament` (739) now renders `BRD` / `All races` instead of Unknown, `Spell:
+Transon's Phantasmal Protection` (730) renders `MAG` / `All races`, and a fresh
+two-row commit created `Spell: Warder's Protection` (`RNG`) and `Song: Magical
+Monologue` (`BRD`) with `ALL` races; the two probe records were then soft-removed,
+so the active inventory count is net-neutral (712 active / 29 soft-deleted).
+Sample batch 12 returned 29 groups (no `Unspecified`), 166 rows, `stagedRows`
+166 and 138 default-selected, and the review page contained both IMP-B buttons
+with no Other banner. Evidence is in `ImportAdminImprovements.md` §7–§8.
+
 ---
 
 ## 2. Documents produced in this review
@@ -357,6 +473,7 @@ Known deviations and open items:
 | `Docs/Phase5ApprovalReview.md` | Phase 5 decision rationale | Per-decision rationale, tradeoffs, future-phase impact, risk classification, §1.2 batch justification for PD5-33–PD5-39 |
 | `Docs/Phase5Validation.md` | Phase 5 evidence | Migration/backfill proof, schema and `EXPLAIN` evidence, live admin CRUD/audit/date-rule/UI results, latency observations, open boundary question |
 | `Docs/PublicInventoryAPI.md` | Public read-path contract | Routes, filters, sorts, DTO fields, availability values, error envelope |
+| `Docs/ImportAdminImprovements.md` | Post-Phase-5 improvement record (IMP-01–06, AI-01–02) | Decisions, implementation map, import count changes, audit impact, validation evidence |
 
 Phases 2–5 are implemented and validated, and each has a plan and (from Phase 3 on) a validation record. Phase 0 created the buildable service, configuration, logging, both connection layers, health endpoints, deployment files and tests. Phase 1 added the SQLite schema, setup, authentication, sessions, CSRF, login lockout, settings and the first screens; the full file map is in `Docs/ProjectStructure.md`.
 
@@ -395,12 +512,12 @@ Status legend: **Defined** = implementable as written; **Partial** = exists but 
 | FR-04 | Class and race filtering | L25–L26, L821–L824 | Resolved by PD4-07/08 | **Implemented** | DD §9.1, §9.6, `Docs/PublicInventoryAPI.md` |
 | FR-05 | Search, sort, natural sort, pagination | L699–L728, L817–L824 | Resolved by PD4-05/06/10/13 | **Implemented**; 250k/1M gates passed | DD §9.5, `Phase4Validation.md` |
 | FR-06 | EQResource links in new tab | L30, L784–L795 | Resolved by PD4-12 | **Implemented** with server-side URL revalidation | AR SR-08, `Phase4Validation.md` |
-| FR-07 | Admin add inventory | L37–L39, L741–L745 | Resolved by PD5-01–PD5-32 | **Implemented** (item expansion, spell merge, metadata fallback, dates) | DD §7.2, `Phase5ImplementationPlan.md`, `Phase5Validation.md` |
-| FR-08 | Admin update inventory | L37, L744 | Resolved by PD5-27/PD5-32 | **Implemented** (immutable identity, `quantity` rule, per-row dates, `422` field errors) | DD §7.3, `Phase5ImplementationPlan.md`, `Phase5Validation.md` |
+| FR-07 | Admin add inventory | L37–L39, L741–L745 | Resolved by PD5-01–PD5-32; QTY-07 | **Implemented** (one row with the entered quantity, spell merge, metadata fallback, dates) | DD §7.2, `Phase5ImplementationPlan.md`, `ItemQuantityModelImplementation.md` |
+| FR-08 | Admin update inventory | L37, L744 | Resolved by PD5-27/PD5-32; QTY-08 | **Implemented** (immutable identity, editable quantity for both types, per-row dates, `422` field errors) | DD §7.3, `Phase5ImplementationPlan.md`, `ItemQuantityModelImplementation.md` |
 | FR-09 | Admin remove inventory (soft delete) | L38, L359–L368 | Resolved by PD5 (remove/restore) | **Implemented** (soft delete, restore, audit row per write, public exclusion) | DD §7.3, `Phase5ImplementationPlan.md`, `Phase5Validation.md` |
 | FR-10 | Import inventory upload | L41, L607–L630; D-04, AM-03 | Defined | **Implemented** | AR MR-02, IP Phase 6, `Phase3ImplementationPlan.md` |
 | FR-11 | Review import, deselect rows/locations | L646–L670; D-11 | Defined | **Implemented** | DD §7.9, `Phase3ImplementationPlan.md` |
-| FR-12 | Commit import with quantity expansion | L673–L698; D-06, D-07 | Defined | **Implemented** | DD §7.5, `Phase3ImplementationPlan.md` |
+| FR-12 | Commit import with quantity preservation | L673–L698; D-06, D-07; QTY-01/QTY-03 | Defined | **Implemented** (one row per item line, spells merged) | DD §7.5, `Phase3ImplementationPlan.md`, `ItemQuantityModelImplementation.md` |
 | FR-13 | Retain import history | L549–L556 | Defined | **Implemented** (batches, staging and terminal states retained) | DD §4.3–4.4, §10.4, `Phase3ImplementationPlan.md` |
 | FR-14 | Manage settings | L35, L190–L214 | Partial (types/secrets) | **Implemented** (read/update/redaction) | DD §3.2, IP Phases 2–3 |
 | FR-15 | Manage users | L43, L756–L763 | Partial (policy/delete) | Not started | DD §3.1, §7.7, IP Phase 7 |
@@ -472,7 +589,7 @@ No requirement is classed **Missing** after v1.6.1. The former contradictions ar
 | D-04 import contract | **Adopted** | Sample at `Docs/Samples/`; AM-03 fixes delimiter, header, mapping, UTF-8 and row rejection |
 | D-05 location normalization | **Adopted** | `Area n-Slot m`→`Area n`; `Hoard n`→`Hoard` |
 | D-06 spell merge | **Adopted** | `(Spell, EQUID)`; quantity adds; dates unchanged |
-| D-07 item import | **Adopted** | Never merge; one row per unit |
+| D-07 item import | **Adopted; amended 2026-11-22 by QTY-01/QTY-02** | Never merge; one row per imported line with that line's quantity. Manual create follows the same rule (QTY-07) |
 | D-08 missing metadata | **Adopted** | AM-01/AM-02: `EQUID` preserved, `MetadataMissingFg`, no sentinel, FK relaxed |
 | D-09 session security | **Adopted** | `TokenHash` stored; no plaintext tokens |
 | D-10 audit table | **Adopted** | Ten fields; append-only; example event types |
@@ -486,10 +603,10 @@ No requirement is classed **Missing** after v1.6.1. The former contradictions ar
 |---|---|---|---|
 | E-01 | `Items` provisioning/freshness | Partial | Dev `items` copy loaded 2026-11-21; loader procedure, refresh cadence and production `SELECT`-only grants remain open |
 | E-05 | Spell merge provenance/concurrency | **Resolved for imports; later phases TBD** | PD3-03/PD3-04: active targets only, aggregate by EQUID, lowest active ID, advisory lock; PD3-14 writes `ITEM_UPDATED` provenance |
-| E-06 | Unknown location patterns/vocabulary | **Resolved for imports and admin writes** | PD3-01: equipment/blank/unknown → `Unspecified` with warnings; all `Hoard<n>` → `Hoard` (AM-04); PD5 shared normalization adds `location_unrecognized` for admin writes |
+| E-06 | Unknown location patterns/vocabulary | **Resolved for imports and admin writes** | PD3-01: equipment/blank/unknown → `Unspecified` with warnings; all `Hoard<n>` → `Hoard` (AM-04); PD5 shared normalization adds `location_unrecognized` for admin writes; IMP-01 ignores nested-slot contents before staging; IMP-02 presents `Unspecified` as "Other (not a bank location)" without changing the stored value |
 | E-07 | Authorization matrix/projections | Partial | Admin-only routes enforced (setup/auth/settings/imports/inventory/audit); public inventory projection implemented in Phase 4; the user-management routes remain a later phase |
 | E-08 | Session lifecycle | **Implemented; approved as PD-15** | 8 h absolute, 30 min idle, sliding refresh, purge; lifecycle review may refine values |
-| E-09 | Audit taxonomy closure | Partial | Import and inventory-admin subsets closed by PD3-14/PD5 (`IMPORT_CREATED`, `IMPORT_COMMITTED`, `ITEM_CREATED`, `ITEM_UPDATED`, `ITEM_REMOVED`) with a filterable viewer; general taxonomy/`AuditOutbox` open |
+| E-09 | Audit taxonomy closure | Partial | Import and inventory-admin subsets closed by PD3-14/PD5 (`IMPORT_CREATED`, `IMPORT_COMMITTED`, `ITEM_CREATED`, `ITEM_UPDATED`, `ITEM_REMOVED`) with a filterable viewer; IMP-01 adds `ignoredRows` to `IMPORT_CREATED`; AI-01/AI-02 reuse the existing event types (one `ITEM_REMOVED` per bulk record; `ITEM_UPDATED` + `ITEM_REMOVED` for a combined edit/remove); general taxonomy/`AuditOutbox` open |
 | E-10 | Date comparison semantics | **Resolved by PD-11/PD4-11/PD5-27/PD5-40** | UTC date boundaries; `DateOpen <= today < DateBazaar` means open and `today >= DateBazaar` means bazaar (both thresholds inclusive, PD5-40); `DateOpen <= DateBazaar` enforced for all new admin writes |
 | E-11 | Settings validation/secrets | **Implemented; PD-11/PD-18 approved** | Typed settings, redaction, volume-permission reliance; secret-at-rest review remains |
 | E-12 | API versioning/pagination | **Resolved** | `/api/v1`, import paging and the public inventory pagination contract (Phase 4) are implemented; admin list/audit paging caps at 200 |
@@ -499,6 +616,25 @@ No requirement is classed **Missing** after v1.6.1. The former contradictions ar
 | E-16 | HTMX error/auth semantics | Deferred | Implemented UI uses plain forms and vanilla `fetch`; revisit only if HTMX is adopted for inventory UI |
 
 D-01–D-13 are specification decisions and do not require engineering approval. PD-10–PD-20 were approved on 2026-11-21; PD-10–PD-18 are recorded in `Docs/ProjectStructure.md` §4.2 and PD-19/PD-20 in §4.3. PD3-01–PD3-14 and all six Phase 3 plan defaults are also approved; the decoders, the two named fixtures and the import pipeline are part of the approved baseline. PD4-01–PD4-17 and PD5-01–PD5-39 are approved and implemented; PD5-27 (lifecycle date rule), PD5-31 (correlation-ID bound) and PD5-32 (per-row date editing) supersede nothing earlier and are recorded in `Docs/Phase5ImplementationPlan.md` §3, with the rationale in `Docs/Phase5ApprovalReview.md`. Phase 3 did not adopt a Settings-backed MariaDB pool, so PD-18 remains in force as an explicit later change.
+
+### 6.7 Item quantity model (QTY-01–QTY-12, approved and implemented 2026-11-22)
+
+| ID | Decision | Status |
+|---|---|---|
+| QTY-01 | One `GuildBankItems` row per imported item line with that line's quantity | **Adopted** |
+| QTY-02 | Migration `0005` drops `ck_gbi_item_one`, keeps `ck_gbi_quantity`, adds no unique `EQUID` index and adds `ConsolidatedInto` | **Adopted** |
+| QTY-03 | `buildCommitPlan` emits one item row per staged line; spell planning unchanged | **Adopted** |
+| QTY-04 | Import guard and `InventoryRecordsToCreate`/`TotalRecordsToImport` count item rows; `ItemUnits` stays informational | **Adopted** |
+| QTY-05 | Import audit keeps `itemUnits`, adds `itemRecords`; `TotalRecordsAffected` counts records | **Adopted** |
+| QTY-06 | Review/help/form copy describes one record with a stored quantity | **Adopted** |
+| QTY-07 | Manual item create writes one row with the entered quantity (1..100000) | **Adopted** |
+| QTY-08 | Item quantity is editable (1..100000) and audited; the HTML form is editable | **Adopted** |
+| QTY-09 | Option C: owner-run, dry-run-first `-consolidate-items`; lowest ID survives, quantity summed, absorbed rows soft deleted and audited, restore rejected; no data mutation in a migration | **Adopted** |
+| QTY-10 | D-07/§One Row Per Imported Item Line, PD3-05/06/12/14, PD5-06/07/10, DatabaseDesign, ProjectStructure, R5-14 and this report amended | **Adopted** |
+| QTY-11 | Spells, read projections, sorts, indexes and audit vocabulary unchanged | **Adopted** |
+| QTY-12 | Migration and code ship together; consolidation only after a clean dry run; rollback is forward-fix only | **Adopted** |
+
+Evidence and before/after examples are in `ItemQuantityModelImplementation.md`.
 
 ---
 
@@ -519,8 +655,9 @@ D-01–D-13 are specification decisions and do not require engineering approval.
 **Immediate next:** Phase 5 is approved, implemented and live-validated
 (§1.7, `Phase5Validation.md`), including the PD5-40 boundary ruling; its
 remaining items are #8–#9 plus the §12.5 documentation corrections. The owner
-review of the Phase 5 implementation is the gate for any post-Phase-5 work,
-which has not been authorized. Operational items #1–#6 continue independently.
+authorized the post-Phase-5 review items and they are implemented in §1.9
+(`ImportAdminImprovements.md`), including the live Compose pass over the new
+review and bulk-removal pages. Operational items #1–#6 continue independently.
 
 ---
 
@@ -596,6 +733,8 @@ has been authorized; the owner review of the Phase 5 implementation is the gate.
 | 2.2 | 2026-11-22 | Phase 4 approved and completed: PD4-01–PD4-17 with UTC availability, public `DateAdded`/`metadataMissing`, public list/detail/API, search/class/race/type filters, eight sorts, pagination, EQResource revalidation, index-only `0002` migration, public templates/CSS and security tests; 250k design and 1M stress performance gates passed; live Compose restart/outage/recovery validation passed; Phase 5 not started |
 | 2.3 | 2026-11-22 | Phase 5 approved, implemented and live-validated: PD5-01–PD5-39 (including the owner UI amendments PD5-33–PD5-39 and the reaffirmed lifecycle date rule), migration `0003_admin_inventory` applied over the existing 706-row store, startup backfill with no data/`ModAt`/audit change, admin create/edit/remove/restore with one audit row per write, filterable audit viewer with per-record history, strict 64 KiB JSON decoder, `DateOpen <= DateBazaar` enforcement, settings non-retroactivity, responsive/compact UI amendments and `Mains`/`Persona`/`Bazaar` labels; `gofmt`/`go vet`/`go test` clean; §10.1 performance gates, §13.2/§13.3 suites, CI `-race` and the §13.5 manual checklist outstanding, plus one availability-boundary wording ruling for the owner |
 | 2.4 | 2026-11-22 | Phase 5 final approval with PD5-40: availability thresholds are inclusive, so `Bazaar` begins on the `DateBazaar` day (`Mains` while `today < DateOpen`; `Persona` while `DateOpen <= today < DateBazaar`; `Bazaar` when `today >= DateBazaar`). `service.Availability` changed one comparison, the service and API boundary tests were updated and extended, `PublicInventoryAPI.md`, `Phase4ImplementationPlan.md` PD4-11/§5.4/§7.3, `Phase5ImplementationPlan.md` PD5-37/PD5-40/§9.5 and `Phase5Validation.md` were aligned; three admin probe rows (718–720) verified `Bazaar`/`Persona`/`Mains` in HTML and JSON and were removed through the admin form; `gofmt`/`go vet`/`go test ./...` clean; final state 706 active rows, 29 audit rows. No post-Phase-5 work started |
+| 2.5 | 2026-11-22 | Owner-approved post-Phase-5 review items implemented: IMP-01 nested-slot rows ignored and counted (`IgnoredRowCount`, migration `0004`); IMP-02/IMP-03 Other label, Kind column and banner; IMP-04/IMP-05 container-aware default selection with the Hoard exception and non-retroactive reset; IMP-06 page-local group scope with an unselected view that ignores it; AI-01 page-local bulk removal through a preview and one all-or-nothing transaction; AI-02 combined edit+remove in one transaction with `ITEM_UPDATED`+`ITEM_REMOVED` under one correlation ID. Audit vocabulary, import commit path and advisory lock unchanged; the migration hash manifest is now LF-normalized so the gate passes on both Windows and Linux; `gofmt`/`go vet`/`go test ./...` clean; live Compose verification passed. Recorded in `ImportAdminImprovements.md` and §1.9 |
+| 2.6 | 2026-11-22 | Item quantity model approved and implemented (QTY-01–QTY-12): migration `0005` drops `ck_gbi_item_one` and adds `ConsolidatedInto`; import commit and manual create write one row with the line/entered quantity; later imports of the same EQUID do not merge; item quantity is editable/audited; spells keep merge-by-EQUID; owner-run `-consolidate-items` (dry-run first) folds legacy expanded rows into the lowest ID with summed quantity, soft deletes and per-row audit, and restore of absorbed rows is rejected; review, implementation summary, D-07/PD3/PD5/DatabaseDesign/ProjectStructure amendments recorded; `gofmt`/`go vet`/`go test ./...` clean. Recorded in `ItemQuantityModelReview.md` and `ItemQuantityModelImplementation.md` |
 
 ---
 
@@ -617,20 +756,25 @@ passwords are bcrypt hashes and only session-token hashes are stored.
 The guild store now has embedded migrations for `ImportBatch`, `ImportList`,
 `GuildBankItems` and `Audit`, plus the approved index-only public-inventory
 migration and the approved `0003_admin_inventory` migration that adds the
-derived location columns and the admin/audit indexes. Phase 3 supports upload,
+derived location columns and the admin/audit indexes. Migration `0005` drops
+the old item quantity constraint, adds `ConsolidatedInto` and enables the
+one-row-per-line model. Phase 3 supports upload,
 durable parse failures, normalized staging, a selector derived from distinct
 `LocationGroup` values (with every `Hoard<n>` collapsed to `Hoard`), persisted
-selection, unit-aware summary, and an advisory-locked atomic commit that expands
-item units and merges spells into the lowest active EQUID target. Phase 4
+selection, unit-aware summary, and an advisory-locked atomic commit that writes
+one item row per line with its quantity and merges spells into the lowest active
+EQUID target. Phase 4
 exposes those records anonymously with bounded search, class/race/type filters,
 natural/date sorts, pagination, UTC availability states, EQResource links and a
 dedicated public DTO. Phase 5 adds the startup location backfill, manual
-create/edit/remove/restore with the same advisory lock and one audit row per
-write, the filterable audit viewer with per-record history, the admin HTML/JSON
-routes under the existing admin group, and the owner UI amendments. Import and
+create (one row with the entered quantity)/edit/remove/restore with the same
+advisory lock and one audit row per write, editable item quantity, the
+filterable audit viewer with per-record history, the admin HTML/JSON
+routes under the existing admin group, the owner UI amendments and the
+owner-run item-stack consolidation command. Import and
 admin audit rows are written in the same transaction as the data change. The
-general audit outbox, user management and dashboard remain later phases; no
-post-Phase-5 work has been started.
+general audit outbox, user management and dashboard remain later phases; the
+item quantity model is the latest completed change.
 
 A development copy of the item metadata is available as `GuildBank.items`
 (144,712 rows, read-only in use). The profile in DP-001 confirms both permanent

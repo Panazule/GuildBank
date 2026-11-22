@@ -27,7 +27,7 @@
         </label>
         <label>Location group
           <select name="locationGroup">
-            {{range .LocationGroups}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{if .Value}}{{.Value}}{{else}}Any location{{end}}</option>{{end}}
+            {{range .LocationGroups}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
           </select>
         </label>
         <label>Recipient
@@ -78,11 +78,14 @@
     {{if .Empty}}
       <div class="empty-state"><p>No inventory records match these filters.</p><p><a href="{{.ClearURL}}">Clear filters</a></p></div>
     {{else}}
-      <div class="table-scroll" role="region" aria-label="Administrative inventory results" tabindex="0">
+      <form method="post" action="/admin/inventory/bulk-remove" id="bulk-remove">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <div class="table-scroll" role="region" aria-label="Administrative inventory results" tabindex="0">
         <table class="inventory-table admin-table">
           <caption class="sr-only">Administrative guild inventory records</caption>
           <thead>
             <tr>
+              <th scope="col">Select</th>
               <th scope="col">ID</th>
               <th scope="col">EQUID</th>
               <th scope="col">Name</th>
@@ -99,13 +102,14 @@
           <tbody>
             {{range .Items}}
             <tr{{if .Deleted}} class="row-removed"{{end}}>
+              <td class="cell-nowrap">{{if not .Deleted}}<input type="checkbox" name="remove" value="{{.ID}}|{{.ModAtValue}}" aria-label="Select record {{.ID}} {{.Name}} for removal">{{else}}<span class="muted" aria-label="Removed records cannot be selected">—</span>{{end}}</td>
               <td class="cell-nowrap mono">{{.ID}}</td>
               <td class="cell-nowrap mono">{{.EQUID}}</td>
               <td class="cell-nowrap"><a href="/admin/inventory/{{.ID}}">{{.Name}}</a></td>
               <td class="cell-nowrap">{{.ItemType}}</td>
               <td class="cell-nowrap">{{.Quantity}}</td>
               <td class="cell-nowrap">{{if .SourceLocation}}{{.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</td>
-              <td class="cell-nowrap"><span class="group-badge">{{.LocationGroup}}</span></td>
+              <td class="cell-nowrap"><span class="group-badge">{{.LocationGroupLabel}}</span></td>
               <td class="cell-nowrap">{{if .GivenTo}}{{.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</td>
               <td class="cell-nowrap"><span class="status-badge {{if .Deleted}}status-Failed{{else}}status-Completed{{end}}">{{if .Deleted}}Removed{{else}}Active{{end}}</span></td>
               <td class="cell-nowrap">{{.ModAtText}}</td>
@@ -118,7 +122,12 @@
             {{end}}
           </tbody>
         </table>
-      </div>
+        </div>
+        <div class="bulk-bar">
+          <p class="help">Bulk removal applies only to the records selected on this page (maximum 200). The preview re-reads every record and the apply step re-checks every version token in one transaction; if one record changed, nothing is removed.</p>
+          <button type="submit" class="secondary">Remove selected…</button>
+        </div>
+      </form>
     {{end}}
 
     {{if or .PrevURL .NextURL .PageLinks}}

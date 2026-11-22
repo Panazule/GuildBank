@@ -31,6 +31,7 @@ type batchResponse struct {
 	Status           domain.ImportStatus `json:"status"`
 	SourceRowCount   *int                `json:"sourceRowCount"`
 	AcceptedRowCount *int                `json:"acceptedRowCount"`
+	IgnoredRowCount  *int                `json:"ignoredRowCount"`
 	FailureReason    *string             `json:"failureReason"`
 	ImportedBy       string              `json:"importedBy"`
 	ImportedByUserID *int64              `json:"importedByUserId"`
@@ -46,6 +47,7 @@ type rowResponse struct {
 	Quantity      uint32                 `json:"quantity"`
 	LocationRaw   string                 `json:"locationRaw"`
 	LocationGroup string                 `json:"locationGroup"`
+	Container     bool                   `json:"container"`
 	Selected      bool                   `json:"selected"`
 	Warnings      []domain.ImportWarning `json:"warnings"`
 }
@@ -224,8 +226,9 @@ func (h *importsHandler) upload(c *gin.Context) {
 	}
 	c.JSON(http.StatusCreated, gin.H{"data": gin.H{
 		"batch": batchResponseOf(result.Batch), "structuralRows": result.StructuralRows,
-		"discardedRows": result.DiscardedRows, "blankRows": result.BlankRows,
-		"duplicateOf": result.DuplicateOf, "warningCounts": result.WarningCounts,
+		"discardedRows": result.DiscardedRows, "ignoredRows": result.IgnoredRows,
+		"blankRows": result.BlankRows, "duplicateOf": result.DuplicateOf,
+		"warningCounts": result.WarningCounts,
 	}})
 }
 
@@ -293,6 +296,8 @@ func (h *importsHandler) rows(c *gin.Context) {
 	selected := c.DefaultQuery("selected", "all")
 	filter := domain.ImportRowFilter{
 		LocationGroup: strings.TrimSpace(c.Query("locationGroup")),
+		ExcludeGroups: parseGroupList(c.Query("excludeGroups")),
+		IgnoreGroups:  c.Query("ignoreGroups") == "1",
 		Selected:      selected, Search: strings.TrimSpace(c.Query("q")),
 		Page: page, PageSize: pageSize,
 	}
@@ -311,7 +316,8 @@ func (h *importsHandler) rows(c *gin.Context) {
 			ImportID: row.ImportID, SourceLine: row.SourceLine, ItemType: row.ItemType,
 			EQUID: row.EQUID, Name: row.Name, Quantity: row.Quantity,
 			LocationRaw: row.LocationRaw, LocationGroup: row.LocationGroup,
-			Selected: row.SelectedFg, Warnings: warnings,
+			Container: service.IsContainerLocation(row.LocationRaw),
+			Selected:  row.SelectedFg, Warnings: warnings,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
@@ -325,7 +331,7 @@ func (h *importsHandler) rowIDs(c *gin.Context) {
 		return
 	}
 	locationGroup := strings.TrimSpace(c.Query("locationGroup"))
-	ids, err := h.imports.RowIDs(c.Request.Context(), batchID, locationGroup)
+	ids, err := h.imports.RowIDs(c.Request.Context(), batchID, locationGroup, parseGroupList(c.Query("excludeGroups")))
 	if err != nil {
 		h.respondImportError(c, err)
 		return
@@ -334,6 +340,42 @@ func (h *importsHandler) rowIDs(c *gin.Context) {
 		ids = []int64{}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"importIds": ids, "total": len(ids)}})
+}
+
+// defaultSelection returns the IDs the staging-time default rule would select
+// for this batch (IMP-04). It is a read: the client applies it through the
+// ordinary full-replacement selection PUT.
+func (h *importsHandler) defaultSelection(c *gin.Context) {
+	batchID, ok := parseBatchID(c)
+	if !ok {
+		return
+	}
+	ids, err := h.imports.DefaultSelection(c.Request.Context(), batchID)
+	if err != nil {
+		h.respondImportError(c, err)
+		return
+	}
+	if ids == nil {
+		ids = []int64{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"batchId": batchID, "defaultImportIds": ids, "total": len(ids)}})
+}
+
+// parseGroupList splits the comma-separated group scope used by the review
+// page. Empty entries are dropped; the service enforces the count and length
+// bounds so a malformed list cannot widen a query.
+func parseGroupList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func (h *importsHandler) selection(c *gin.Context) {
@@ -480,8 +522,9 @@ func batchResponseOf(batch domain.ImportBatch) batchResponse {
 	return batchResponse{
 		ID: batch.ImportBatchID, FileName: batch.FileName, SHA256: batch.FileSha256,
 		Status: batch.Status, SourceRowCount: batch.SourceRowCount,
-		AcceptedRowCount: batch.AcceptedRowCount, FailureReason: batch.FailureReason,
-		ImportedBy: batch.ImportedBy, ImportedByUserID: batch.ImportedByUserID,
+		AcceptedRowCount: batch.AcceptedRowCount, IgnoredRowCount: batch.IgnoredRowCount,
+		FailureReason: batch.FailureReason,
+		ImportedBy:    batch.ImportedBy, ImportedByUserID: batch.ImportedByUserID,
 		ImportedAt: batch.ImportedAt.UTC(),
 	}
 }

@@ -80,14 +80,14 @@ func TestAdminTemplatesExistAndCarryCSRF(t *testing.T) {
 	form := readEmbedded(t, "templates/admin_inventory_form.html")
 	for _, want := range []string{
 		`name="csrf_token"`, `name="expectedModAt"`, `name="dateOpen"`, `name="dateBazaar"`,
-		`name="quantity"`, "readonly",
+		`name="quantity"`, "One record stores this quantity",
 	} {
 		if !strings.Contains(form, want) {
 			t.Fatalf("admin form is missing %q", want)
 		}
 	}
-	if strings.Contains(form, "disabled aria-readonly") {
-		t.Fatal("the item quantity input must be readonly, not disabled")
+	if strings.Contains(form, "readonly") {
+		t.Fatal("item quantity is editable under QTY-08")
 	}
 	audit := readEmbedded(t, "templates/admin_audit.html")
 	for _, want := range []string{"name=\"eventType\"", "name=\"correlationId\"", "name=\"from\"", "name=\"to\""} {

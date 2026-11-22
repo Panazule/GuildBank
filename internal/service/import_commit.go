@@ -28,6 +28,7 @@ type commitPlan struct {
 	warnings         []domain.ImportWarning
 	spellQuantity    uint64
 	itemCount        int
+	itemUnits        uint64
 	newSpellCount    int
 	duplicateRecords int
 }
@@ -172,7 +173,7 @@ func (s *ImportService) commitAttempt(ctx context.Context, batchID int64, actor 
 	}
 	if uint64(plan.itemCount+plan.newSpellCount) > ImportMaxRows {
 		return domain.CommitResult{}, domain.NewValidationError("selection",
-			"the selection expands to more than 100,000 inventory records")
+			"the selection would create more than 100,000 inventory records")
 	}
 	if len(plan.items) > 0 {
 		if _, err := tx.InsertItems(plan.items); err != nil {
@@ -265,18 +266,20 @@ func buildCommitPlan(rows []domain.ImportRow, active []domain.GuildBankItem,
 			classString, raceString = item.ClassString, item.RaceString
 			missing = item.MetadataMissing
 		}
-		for unit := uint32(0); unit < row.Quantity; unit++ {
-			plan.items = append(plan.items, domain.GuildBankItem{
-				ItemType: domain.ItemTypeItem, EQUID: row.EQUID, MetadataMissingFg: missing,
-				Name: name, ClassString: classString, RaceString: raceString,
-				DateAdded: dates.added, DateOpen: dates.open, DateBazaar: dates.bazaar,
-				Quantity: 1, SourceLocation: row.LocationRaw, DeletedFg: false,
-				LocationGroup: row.LocationGroup, LocationSort: row.LocationSort,
-				ModAt: now.UTC(), ModBy: actor.UserName, ModByUserID: &actor.UserID,
-				NameSort: TruncateRunes(NaturalSortKey(name), 160),
-			})
-			plan.itemCount++
-		}
+		// QTY-01/QTY-03: one inventory row per staged item line carries the line
+		// quantity. Items are never merged into an existing row, so a later
+		// import of the same EQUID produces a second row with its own quantity.
+		plan.items = append(plan.items, domain.GuildBankItem{
+			ItemType: domain.ItemTypeItem, EQUID: row.EQUID, MetadataMissingFg: missing,
+			Name: name, ClassString: classString, RaceString: raceString,
+			DateAdded: dates.added, DateOpen: dates.open, DateBazaar: dates.bazaar,
+			Quantity: row.Quantity, SourceLocation: row.LocationRaw, DeletedFg: false,
+			LocationGroup: row.LocationGroup, LocationSort: row.LocationSort,
+			ModAt: now.UTC(), ModBy: actor.UserName, ModByUserID: &actor.UserID,
+			NameSort: TruncateRunes(NaturalSortKey(name), 160),
+		})
+		plan.itemCount++
+		plan.itemUnits += uint64(row.Quantity)
 	}
 	for _, equid := range spellOrder {
 		aggregate := spells[equid]
@@ -285,17 +288,28 @@ func buildCommitPlan(rows []domain.ImportRow, active []domain.GuildBankItem,
 		}
 		item := metadata[equid]
 		missing := item.EQUID == 0 || item.MetadataMissing
+		// DEFECT-01: a spell row uses exactly the same Items metadata rule as
+		// an item row. The resolved Items row supplies the authoritative name
+		// and the decoded class/race strings; only an unresolved EQUID keeps
+		// the imported name with blank metadata (AM-01/AM-02).
+		name := aggregate.first.Name
+		classString, raceString := "", ""
+		if !missing {
+			name = item.Name
+			classString, raceString = item.ClassString, item.RaceString
+		}
 		targets := activeByEQUID[equid]
 		if len(targets) == 0 {
 			plan.newSpells = append(plan.newSpells, domain.GuildBankItem{
 				ItemType: domain.ItemTypeSpell, EQUID: equid, MetadataMissingFg: missing,
-				Name: aggregate.first.Name, DateAdded: dates.added, DateOpen: dates.open,
+				Name: name, ClassString: classString, RaceString: raceString,
+				DateAdded: dates.added, DateOpen: dates.open,
 				DateBazaar: dates.bazaar, Quantity: uint32(aggregate.quantity),
 				SourceLocation: aggregate.first.LocationRaw, DeletedFg: false,
 				LocationGroup: aggregate.first.LocationGroup,
 				LocationSort:  aggregate.first.LocationSort,
 				ModAt:         now.UTC(), ModBy: actor.UserName, ModByUserID: &actor.UserID,
-				NameSort: TruncateRunes(NaturalSortKey(aggregate.first.Name), 160),
+				NameSort: TruncateRunes(NaturalSortKey(name), 160),
 			})
 			plan.newSpellCount++
 			plan.spellQuantity += aggregate.quantity
@@ -344,14 +358,16 @@ func commitAuditEntries(batchID int64, actor domain.Actor, plan commitPlan,
 	oldStatus, _ := json.Marshal(map[string]any{"status": domain.ImportStatusUploaded})
 	newStatus, _ := json.Marshal(map[string]any{
 		"status": domain.ImportStatusCompleted, "selectedRows": selectedRows,
-		"itemUnits": plan.itemCount, "spellsCreated": plan.newSpellCount,
-		"spellsMerged": len(plan.merges), "spellQuantity": plan.spellQuantity,
+		"itemUnits": plan.itemUnits, "itemRecords": plan.itemCount,
+		"spellsCreated": plan.newSpellCount,
+		"spellsMerged":  len(plan.merges), "spellQuantity": plan.spellQuantity,
 		"duplicateSpellRecords": plan.duplicateRecords,
 		"durationMs":            elapsed.Milliseconds(),
 	})
 	createdSummary, _ := json.Marshal(map[string]any{
-		"itemUnits": plan.itemCount, "spellsCreated": plan.newSpellCount,
-		"spellsMerged": len(plan.merges), "batchId": batchID,
+		"itemUnits": plan.itemUnits, "itemRecords": plan.itemCount,
+		"spellsCreated": plan.newSpellCount,
+		"spellsMerged":  len(plan.merges), "batchId": batchID,
 	})
 	entries := []domain.AuditEntry{
 		{

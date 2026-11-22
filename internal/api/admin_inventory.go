@@ -284,13 +284,14 @@ func (h *adminInventoryHandler) update(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
 		"item": adminItemResponseOf(result.Item), "changed": result.Changed,
-		"warnings": adminWarningsOf(result.Warnings),
+		"fieldsChanged": result.FieldsChanged, "warnings": adminWarningsOf(result.Warnings),
 	}})
 }
 
 func updateInputFrom(id int64, req updateItemRequest) (domain.UpdateItemInput, *requestError) {
 	fields := make(map[string]string)
 	in := domain.UpdateItemInput{ID: id}
+	in.Remove = req.Remove != nil && *req.Remove
 	if req.ExpectedModAt == nil || strings.TrimSpace(*req.ExpectedModAt) == "" {
 		fields["expectedModAt"] = "expectedModAt is required"
 	} else if value, ok := parseExpectedModAt(*req.ExpectedModAt); !ok {

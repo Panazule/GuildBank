@@ -107,13 +107,16 @@ type AdminInventoryItem struct {
 	LocationSort      string
 	GivenTo           string
 	DeletedFg         bool
-	NameSort          string
-	DateAdded         time.Time
-	DateOpen          time.Time
-	DateBazaar        time.Time
-	ModAt             time.Time
-	ModBy             string
-	ModByUserID       *int64
+	// ConsolidatedInto is set on a row absorbed by the item-consolidation
+	// maintenance command. It names the surviving row and blocks restore.
+	ConsolidatedInto *int64
+	NameSort         string
+	DateAdded        time.Time
+	DateOpen         time.Time
+	DateBazaar       time.Time
+	ModAt            time.Time
+	ModBy            string
+	ModByUserID      *int64
 }
 
 // AdminInventoryPage is one page of administrative records plus the total from
@@ -173,6 +176,9 @@ type CreateItemInput struct {
 
 // UpdateItemInput is the validated manual-edit command. All editable fields are
 // required keys; a nil date value resets that date to the settings default.
+// Remove asks the same transaction to soft-delete the row after the field
+// update (AI-02), so the edit and the removal share one commit and one
+// correlation ID.
 type UpdateItemInput struct {
 	ID             int64
 	ExpectedModAt  time.Time
@@ -181,13 +187,27 @@ type UpdateItemInput struct {
 	GivenTo        OptionalString
 	DateOpen       OptionalDate
 	DateBazaar     OptionalDate
+	Remove         bool
 	Actor          Actor
 	CorrelationID  string
 	SourceIP       string
 }
 
-// AdminUpdateRow is the repository update projection. Quantity is nil for Item
-// rows; a nil date leaves the stored column untouched.
+// RemoveItemTarget is one record selected for the page-local bulk removal
+// (AI-01). ExpectedModAt is the per-row token rendered with the checkbox.
+type RemoveItemTarget struct {
+	ID            int64
+	ExpectedModAt time.Time
+}
+
+// BulkRemoveResult is the outcome of one all-or-nothing bulk removal.
+type BulkRemoveResult struct {
+	Items   []AdminInventoryItem
+	Removed int
+}
+
+// AdminUpdateRow is the repository update projection. Quantity updates either
+// item type; a nil date leaves the stored column untouched.
 type AdminUpdateRow struct {
 	ID             int64
 	Quantity       *uint32

@@ -73,7 +73,7 @@ Phase 4 is complete when the acceptance criteria in §1.2 and the performance/se
 
 ### 2.1 Phase 3 and schema baseline
 
-- Phase 3 is approved, implemented and live-validated. It writes `GuildBankItems` atomically, expands ordinary items to one row per unit, merges spells by EQUID, preserves imported names when metadata is absent, and persists structured import warnings.
+- Phase 3 is approved, implemented and live-validated. It writes `GuildBankItems` atomically, writes one ordinary-item row per imported line carrying the line quantity (amended 2026-11-22 by QTY-01), merges spells by EQUID, preserves imported names when metadata is absent, and persists structured import warnings.
 - `GuildBankItems` is the system of record for the public read path. Its current fields and indexes are fixed by migration `internal/repository/mariadb/migrations/0001_guild_store.sql` and `Docs/DatabaseDesign.md` §4.2.
 - `ClassString` and `RaceString` are already decoded at import time. Public browsing must not re-run mask decoding or call `Items` for every row.
 - `NameSort` is written by Phase 3 with `service.NaturalSortKey`, truncated to 160 runes. Production writes set it; it is nullable only for migration/backfill tolerance.

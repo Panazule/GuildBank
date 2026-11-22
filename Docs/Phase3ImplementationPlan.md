@@ -46,7 +46,10 @@ Acceptance is verified by the test matrix in §12, including a golden fixture de
 
 ## 2. Approved decisions
 
-The owner approved PD3-01 through PD3-14 and the six §14.1 defaults on 2026-11-21. The defaults below are the approved implementation contract, not pending proposals.
+The owner approved PD3-01 through PD3-14 on 2026-11-21. PD3-15 and PD3-16 were
+approved as follow-ups on 2026-11-22 (IMP-C and DEFECT-01); PD3-07's spell clause
+is superseded by PD3-16. The defaults below are the approved implementation
+contract, not pending proposals.
 
 | ID | Decision | Default / rationale | Impact if changed |
 |---|---|---|---|
@@ -54,16 +57,18 @@ The owner approved PD3-01 through PD3-14 and the six §14.1 defaults on 2026-11-
 | PD3-02 | Where row warnings live | `ImportList.WarningText` stores a compact JSON array of `ImportWarning` values (`code`, optional `field`/`equid`/`mask`/`highBits`, `detail`). `GuildBankItems` keeps only the normative `MetadataMissingFg`, not warning JSON. | A separate warning table is more normalized but not in the schema. |
 | PD3-03 | Spell merge target | Only existing rows with `DeletedFg=0` are merge targets (DD §7.5 and D-06). Soft-deleted spells are left untouched and a new active row is inserted. | Merging into deleted rows requires a restore policy that does not exist. |
 | PD3-04 | Spell merge multiplicity and concurrency | Staged rows are aggregated by `EQUID` before write. If more than one active spell row matches (data corruption), merge into the lowest `GuildBankItemID` and report the anomaly. All commits serialize on a MariaDB advisory lock so the “no duplicate active spell” invariant survives concurrent batches. | Opening the lock widens the race window; row locks alone cannot protect a non-existent-row gap reliably across all MariaDB versions. |
-| PD3-05 | What “counts” mean | `ImportBatch.SourceRowCount` counts physical lines, including blank and header lines, so it reconciles to the file. `AcceptedRowCount` is staged rows. Summary separately reports staged rows, item units, spell quantity and resulting records. | Counting only data rows makes discarded rows invisible. |
-| PD3-06 | Limits | Body 10 MiB; 50,000 physical lines; 64 KiB per line; 100,000 expanded inventory rows; 10,000 `Count` per row; field lengths per schema. Parser violations are parse failures with code `limit_exceeded`; the HTTP body cap returns `413 file_too_large` before parsing, and the commit expansion guard returns `422 validation_failed`. | Limits are implementation guardrails, not spec constants; they can be raised before implementation. |
-| PD3-07 | Canonical item name and missing-metadata flag | For every staged row, set `MetadataMissingFg=1` when the EQUID is absent from `Items`. For `ItemType='Item'`, use `Items.name` when present; when absent use the imported name and blank class/race. For `ItemType='Spell'`, always keep the imported name and blank class/race, but record the same missing-metadata flag. The original imported name always remains on `ImportList`. | Using the imported name for items always would preserve user formatting but diverge from D-01 canonical names; skipping the flag for spells would violate AM-02. |
+| PD3-05 | What “counts” mean | `ImportBatch.SourceRowCount` counts physical lines, including blank and header lines, so it reconciles to the file. `AcceptedRowCount` is staged rows. Summary separately reports staged rows, item units, spell quantity and resulting records. **Amended 2026-11-22 by QTY-04:** `InventoryRecordsToCreate` and `TotalRecordsToImport` count item rows (`ItemRows`), not item units; `ItemUnits` stays informational. | Counting only data rows makes discarded rows invisible. |
+| PD3-06 | Limits | Body 10 MiB; 50,000 physical lines; 64 KiB per line; 100,000 inserted inventory rows; 10,000 `Count` per row; field lengths per schema. Parser violations are parse failures with code `limit_exceeded`; the HTTP body cap returns `413 file_too_large` before parsing, and the commit row guard returns `422 validation_failed`. **Amended 2026-11-22 by QTY-04:** the guard counts committed records (one item row per line), not expanded units. | Limits are implementation guardrails, not spec constants; they can be raised before implementation. |
+| PD3-07 | Canonical item name and missing-metadata flag | For every staged row, set `MetadataMissingFg=1` when the EQUID is absent from `Items`. For both `ItemType='Item'` and `ItemType='Spell'`, use `Items.name` and the decoded `ClassString`/`RaceString` when the EQUID is present; when absent use the imported name and blank class/race. The original imported name always remains on `ImportList`. **The spell clause was amended by PD3-16 on 2026-11-22; the original text kept the imported name and blank class/race for spells and caused DEFECT-01.** | Using the imported name for items always would preserve user formatting but diverge from D-01 canonical names; skipping the flag for spells would violate AM-02. |
 | PD3-08 | Selection and upload audit | Upload and commit are audited. Selection changes are operational staging state and are not audited, because an audit row per checkbox would swamp the log; the selected set remains recoverable from `ImportList.SelectedFg` and the commit audit records the resulting counts. | Auditing selection requires a revision column and event-per-PUT design. |
 | PD3-09 | UI transport | Vanilla `imports.js` + JSON endpoints, following `setup.js`. No HTMX vendor file. | HTMX would add a new vendored JS file and HTML fragment endpoints; the service/API contract is unchanged. |
 | PD3-10 | Migration failure behavior | If MariaDB opens but migration fails, startup is fatal (exit non-zero) rather than serving a partially migrated guild store. If MariaDB cannot be opened while unconfigured, the existing degraded mode remains. | Continuing after a failed migration risks committing against a wrong schema. |
 | PD3-11 | Import grid sort columns | Phase 3 writes `ImportList.LocationSort` (DD-approved, DC-13) and adds **APPROVED** `ImportList.NameSort VARCHAR(160) NULL` so the import grid and location drill-down obey the natural-sort requirement for names as well as locations. Add `ix_import_batch_sort (ImportBatchID, LocationGroup, LocationSort, NameSort, ImportID)`. | Without `NameSort`, names sort by collation; location order still meets the explicit examples. |
-| PD3-12 | Sample counts | The supplied sample is a golden test with 548 physical lines, 197 accepted rows, 348 discarded data rows, 2 structural rows (header + one section row), 1 blank line, 30 location groups, 194 item rows → 723 item units, and 3 distinct spell rows → 3 spell quantity. These are asserted, not treated as production invariants. | Updating the fixture requires updating the golden test. |
+| PD3-12 | Sample counts | The supplied sample is a golden test with 548 physical lines, 197 accepted rows, 348 discarded data rows, 2 structural rows (header + one section row), 1 blank line, 30 staging location groups (29 reviewable after PD3-15), 194 item rows → 723 item units, and 3 distinct spell rows → 3 spell quantity. These are asserted, not treated as production invariants. **Amended 2026-11-22 by QTY-04:** the 163 reviewable item rows create 163 inventory records (not 723 expanded records); 668 reviewable units remain informational; with 3 new spells the total is 166 records. | Updating the fixture requires updating the golden test. |
 | PD3-13 | Timeouts | HTTP `ReadTimeout`/`WriteTimeout` become 120s and the guild-store DSN `ReadTimeout`/`WriteTimeout` become 120s so a 10 MiB upload or a 100,000-row commit is not cut off by the current 30s limits. `ReadHeaderTimeout` stays 10s and `IdleTimeout` stays 60s. | Slower clients can hold connections longer; the body, row and expansion limits remain the real guardrails. |
-| PD3-14 | Import audit granularity | Follow the D-10 allowlist and the taxonomy's "one row per logical operation": upload writes `IMPORT_CREATED`; commit writes `IMPORT_COMMITTED` plus one `ITEM_CREATED` summary (`RecordID=ImportBatchID`) and one `ITEM_UPDATED` per merged spell row for provenance. Do not write one audit row per expanded item unit. | Per-row item audit gives forensic detail but creates up to 100,000 audit rows per commit, contradicts the taxonomy, and bloats the append-only table. |
+| PD3-14 | Import audit granularity | Follow the D-10 allowlist and the taxonomy's "one row per logical operation": upload writes `IMPORT_CREATED`; commit writes `IMPORT_COMMITTED` plus one `ITEM_CREATED` summary (`RecordID=ImportBatchID`) and one `ITEM_UPDATED` per merged spell row for provenance. Do not write one audit row per expanded item unit. **Amended 2026-11-22 by QTY-05:** the summary keeps `itemUnits` and adds `itemRecords`; `TotalRecordsAffected` counts records. | Per-row item audit gives forensic detail but creates up to 100,000 audit rows per commit, contradicts the taxonomy, and bloats the append-only table. |
+| PD3-15 | Internal `Unspecified` group (IMP-C, 2026-11-22) | The `Unspecified` classification stays in `ImportList.LocationGroup` and still counts toward `AcceptedRowCount`, but the import review never lists it, never offers it as scope, never returns it from `rows`/`row-ids`/`selection`, rejects selecting one (`422`), and never commits one. `stagedRows`/`totalLocations` report the reviewable set. Admin inventory keeps its Other label. | Hiding staged rows from the review means an administrator cannot see or recover those rows through the import workflow; they remain in the staging table for forensics. |
+| PD3-16 | Spell metadata parity (DEFECT-01, 2026-11-22) | A spell row is created from the same resolved `ItemMetadata` rule as an item row: authoritative `Items.name` and decoded `ClassString`/`RaceString`; imported name and blanks only when the EQUID is unresolved. Existing rows written under PD3-07's old spell clause are repaired once by the startup `BackfillSpellMetadata`; merges still never rewrite stored metadata or dates. | Reverting to blank spell metadata would restore the `Unknown` display defect; backfilling on every start would add startup writes for rows that should already be correct. |
 ---
 
 ## 3. Current-state facts the implementation builds on
@@ -394,6 +399,7 @@ type ParseResult struct {
     SourceLines    int // physical lines, including blank and structural rows
     StructuralRows int // canonical header plus section rows
     DiscardedRows  int
+    IgnoredRows    int // nested-slot rows ignored by IMP-01
     BlankRows      int // empty lines; a trailing newline is not an extra line
 }
 
@@ -431,7 +437,14 @@ Read with a line reader that returns the last non-terminated line and does not e
     - 3 fields: `Quantity=1`.
     - `Quantity=0`, non-numeric, or `>10,000` in a 5-field row → fatal `invalid_quantity`.
 13. Location field 1 may be empty; it becomes `""` and is handled by normalization. Enforce ≤128 Unicode code points; longer → fatal `field_too_long` (field `Location`).
-14. Append the row.
+14. **IMP-01 nested-slot rule:** if the location begins with a reserved bank
+    prefix and ends with two or more slot suffixes
+    (`(?i)\s*-\s*Slot\s*\d+(?:\s*-\s*Slot\s*\d+)+$`), the row is the contents of
+    a container that occupies a bank slot. Increment `IgnoredRows` and skip the
+    row; it is never staged, never normalized to `Unspecified` and never a batch
+    failure. The check runs after the ID/name checks, so the canonical sample's
+    139 empty nested lines (`ID = 0`) remain ordinary discards.
+15. Append the row.
 
 `SourceLines` therefore equals the file's physical line count (548 in the sample; a trailing newline does not add a line), while `len(Rows)` equals accepted rows. `StructuralRows` counts the canonical header plus section rows (2 in the sample), while `DiscardedRows` and `BlankRows` explain the rest; all three are copied into the upload result. `SourceRowCount = SourceLines`; `AcceptedRowCount = len(Rows)`. Discarded/structural/blank counts are not new schema columns.
 
@@ -479,6 +492,8 @@ normalizes to the single `Hoard` option. `LocationRaw` is preserved only for
 traceability and auditing; it is never used as a filter key.
 
 The normalizer returns a canonical group, never the raw section, so `ImportList.LocationGroup` cannot become an unbounded enumeration. `LocationRaw` keeps the input for audit/display. If the resulting group exceeds 64 code points (possible only for an over-long numeric suffix), use `Unspecified` with `location_pattern_invalid` rather than truncating; this keeps the selector stable and satisfies the `VARCHAR(64)` column. `LocationSort` is truncated to 80 characters and `NameSort` to 160 characters at a rune boundary before staging; this keeps each value inside its column even when a long name produces a long sort key.
+
+IMP-01 removes nested-slot rows in the parser before this function sees them. `NormalizeLocation` continues to strip only one trailing slot suffix; an administrator who types a nested value into `SourceLocation` gets `Unspecified` with `location_unrecognized`, which is the intended admin-facing signal rather than a silent re-grouping.
 
 ### 5.5 Classification (`internal/service/import_classify.go`)
 
@@ -568,10 +583,11 @@ func (s *ImportService) Ready() bool
 5. Classify every row and reject mixed classifications for one EQUID (`classification_conflict`, line numbers). On conflict, call `FailBatch` with the counts/hash and return `*ImportFailure`; no rows are staged.
 6. Normalize each location, compute `LocationSort = NaturalSortKey(group)` and `NameSort = NaturalSortKey(name)`. Blank-location warnings are attached per row.
 7. Resolve metadata once for all distinct EQUIDs (items and spells) via `ItemMetadataService.ResolveBatch` with `[]domain.ItemReference{{EQUID, Name}}`. For items the metadata supplies canonical name/class/race; for spells it is used only for `MetadataMissingFg` and the warning, never for the spell name/class/race. `ResolveBatch` returns `[]ItemMetadata` in the same order as the distinct reference slice; build a `map[uint64]ItemMetadata` for the staging pass (it does not return a map). Convert each `service.ItemWarning` to `domain.ImportWarning` (preserving `EQUID`, `Mask`, `HighBits`, `Detail`). A resolution error calls `FailBatch` with `metadata_unavailable` and the counts/hash, then returns `*ImportFailure`; no rows are staged.
-8. Call `StageBatch` once: inserts staged rows in chunks of 500 inside one transaction, `SelectedFg=1`, updates the batch to `Uploaded` with `SourceRowCount`, `AcceptedRowCount` and `FileSha256`, and writes the upload-success audit row in the same transaction. If staging fails, the transaction rolls back rows and batch update; call `FailBatch` in a second transaction so the batch is not stranded in `Processing`. Return `503` (or `422` for a validation-class failure).
+7a. Set `SelectedFg` with the single default rule (IMP-04/IMP-05): `Unspecified` → false; `Hoard` → true; otherwise `!IsContainerLocation(raw)`. A container location is a raw value without a trailing `-Slot<n>`.
+8. Call `StageBatch` once: inserts staged rows in chunks of 500 inside one transaction, updates the batch to `Uploaded` with `SourceRowCount`, `AcceptedRowCount`, `IgnoredRowCount` and `FileSha256`, and writes the upload-success audit row (including `ignoredRows`) in the same transaction. If staging fails, the transaction rolls back rows and batch update; call `FailBatch` in a second transaction so the batch is not stranded in `Processing`. Return `503` (or `422` for a validation-class failure).
 9. Re-read the batch (or return it from `StageBatch`) so `UploadResult.Batch` reflects `Uploaded`, the counts and the hash. Duplicate detection: query for an earlier `Uploaded`/`Completed` batch with the same SHA-256 and return `DuplicateOf *int64` in `UploadResult` plus an `X-Import-Duplicate-Of` response header. Do **not** reject; re-uploading is legitimate.
 
-`UploadResult` carries `Batch`, `StructuralRows`, `DiscardedRows`, `BlankRows`, `DuplicateOf`, and warning counts. Filenames, counts and actor may be logged; file contents and names/IDs must not be logged at Info.
+`UploadResult` carries `Batch`, `StructuralRows`, `DiscardedRows`, `IgnoredRows`, `BlankRows`, `DuplicateOf`, and warning counts. Filenames, counts and actor may be logged; file contents and names/IDs must not be logged at Info.
 
 ### 6.3 Selection
 
@@ -586,13 +602,13 @@ func (s *ImportService) Ready() bool
 
 ### 6.4 Review reads
 
-- `ListLocations` implements DD §9.3, ordering by `MIN(LocationSort), LocationGroup`.
-- `ListRows` supports `locationGroup`, `selected` (`all|selected|unselected`), `search` (name contains, optional), `page`, `pageSize` (default 50, max 200), order `LocationSort, NameSort, ImportID`.
-- `RowIDs(locationGroup)` returns every staged ID in a location so the UI can toggle a group without paging.
-- `SelectedIDs` returns the full selected set for UI bootstrap.
-- `SelectedTotals` returns selected row count, item row count, item unit sum, spell row count, spell quantity sum, distinct spell count and the number of selected rows carrying at least one warning, in one or few aggregate queries.
+- `ListLocations` implements DD §9.3, ordering by `MIN(LocationSort), LocationGroup`. Rows whose `LocationGroup` is `Unspecified` are excluded (IMP-C), so the review never receives an Other entry.
+- `ListRows` supports `locationGroup`, `selected` (`all|selected|unselected`), `search` (name contains, optional), `page`, `pageSize` (default 50, max 200), order `LocationSort, NameSort, ImportID`. `Unspecified` rows are always excluded.
+- `RowIDs(locationGroup)` returns every staged ID in a location so the UI can toggle a group without paging; `Unspecified` rows are always excluded.
+- `SelectedIDs` returns the full selected set for UI bootstrap, excluding `Unspecified` rows even when a legacy batch still has `SelectedFg=1` on them.
+- `SelectedTotals` returns selected row count, item row count, item unit sum, spell row count, spell quantity sum, distinct spell count and the number of selected rows carrying at least one warning, in one or few aggregate queries; `Unspecified` rows are excluded.
 - `SpellPreview` returns staged spell aggregation and whether an active `GuildBankItems` spell exists for each EQUID. It never mutates.
-- `Summary` composes `SelectedTotals`, `ListLocations`, `SpellPreview` and `GetBatch`: `StagedRows=AcceptedRowCount` (0 when nil), `SelectedLocations` counts groups with `SelectedCount>0`, `NewSpells`/`MergedSpells` split the preview on `MergeTargetID`, `InventoryRecordsToCreate=ItemUnits+NewSpells`, `TotalRecordsToImport=ItemUnits+DistinctSpells`.
+- `Summary` composes `SelectedTotals`, `ListLocations`, `SpellPreview` and `GetBatch`: `StagedRows` is the sum of the reviewable `ListLocations` row counts (accepted rows minus the internal `Unspecified` rows), `SelectedLocations` counts groups with `SelectedCount>0`, `NewSpells`/`MergedSpells` split the preview on `MergeTargetID`, `InventoryRecordsToCreate=ItemUnits+NewSpells`, `TotalRecordsToImport=ItemUnits+DistinctSpells`.
 - Completed/failed batches support every read. The UI hides mutation controls when status is not `Uploaded`.
 
 ### 6.5 Commit
@@ -600,7 +616,7 @@ func (s *ImportService) Ready() bool
 `Commit(ctx, batchID, actor)`:
 
 1. Validate the actor with the same `Actor` check as §6.2, confirm the batch exists, and require state `Uploaded`; reject empty selection before opening the write transaction (`422 selection_empty`), and re-check after the in-transaction re-read of selected rows so a concurrent deselection cannot commit an empty set.
-2. Resolve metadata for all distinct EQUIDs in the batch (items and spells; superset of the current selection) before the transaction, so a metadata outage fails fast and the transaction stays short. Item metadata supplies name/class/race; spell metadata supplies only `MetadataMissingFg` and the warning. `Items` is read-only and treated as static during a commit.
+2. Resolve metadata for all distinct EQUIDs in the batch (items and spells; superset of the current selection) before the transaction, so a metadata outage fails fast and the transaction stays short. Item metadata supplies name/class/race; a spell row uses the same resolved name/class/race when its EQUID resolves and only `MetadataMissingFg` plus the warning when it does not (DEFECT-01). `Items` is read-only and treated as static during a commit.
 3. Read `GuildOpenDays`/`BazaarDays` from `SettingsService.Values` and parse them with the same 0–3650 range as settings validation; fall back to `SettingDefinitions` defaults only if a key is absent. Invalid values fail the commit with `settings_invalid` before the transaction. Never re-read settings inside the transaction.
 4. `BeginCommit` opens a dedicated connection, acquires `GET_LOCK(CONCAT('guildbank:commit:', LEFT(SHA2(DATABASE(), 256), 32)), 30)`, then starts a MariaDB transaction and locks/re-reads the batch `FOR UPDATE`. The hashed per-database lock name stays within MariaDB's 64-character advisory-lock limit, serializes commits without colliding with another GuildBank database on the same server, protects the active-spell invariant and makes concurrent commit attempts deterministic.
 5. `BeginCommit` has already rejected a non-`Uploaded` batch with `ErrConflict` and returns the locked snapshot through `Batch()`; re-read selected rows inside the transaction. If the snapshot is not `Uploaded` → `409 batch_not_editable`.
@@ -715,14 +731,14 @@ GET /api/v1/imports/12/row-ids?locationGroup=General%201
 GET /api/v1/imports/12/summary
 {"data":{
   "batchId":12,"status":"Uploaded",
-  "selectedRows":197,"stagedRows":197,"selectedLocations":30,"totalLocations":30,
-  "itemRows":194,"itemUnits":723,"spellRows":3,"spellQuantity":3,"distinctSpells":3,
-  "newSpells":3,"mergedSpells":0,"inventoryRecordsToCreate":726,
-  "warningRows":0,"totalRecordsToImport":726
+  "selectedRows":166,"stagedRows":166,"selectedLocations":29,"totalLocations":29,
+  "itemRows":163,"itemUnits":668,"spellRows":3,"spellQuantity":3,"distinctSpells":3,
+  "newSpells":3,"mergedSpells":0,"inventoryRecordsToCreate":671,
+  "warningRows":0,"totalRecordsToImport":671
 }}
 ```
 
-`nextBeforeId` is the last returned batch ID when another page may exist and `null` otherwise. `row-ids` returns `total` for the filtered group even though `importIds` is the complete list. `stagedRows` and `selectedRows` are row counts. `itemUnits` is the expanded inventory-row count for items. `inventoryRecordsToCreate` is itemUnits + newSpells (not + merged spells). `totalRecordsToImport` is itemUnits + distinct spells (created + merged). In the commit result, `spellQuantityAdded` is the total staged spell quantity applied, whether inserted or merged, and `totalRecordsAffected` is `itemRecordsCreated + spellRecordsCreated + spellRecordsMerged`. The UI labels each number with its unit rather than showing a single ambiguous “items” count (DC-18).
+`nextBeforeId` is the last returned batch ID when another page may exist and `null` otherwise. `row-ids` returns `total` for the filtered group even though `importIds` is the complete list. `stagedRows` and `selectedRows` are row counts of the reviewable set: accepted rows minus the internal `Unspecified` rows, which are never listed, selectable or committed (IMP-C). The example above uses the full reviewable selection (166 of 197 accepted rows; the 31 Other rows are excluded). `itemUnits` is the expanded inventory-row count for items. `inventoryRecordsToCreate` is itemUnits + newSpells (not + merged spells). `totalRecordsToImport` is itemUnits + distinct spells (created + merged). In the commit result, `spellQuantityAdded` is the total staged spell quantity applied, whether inserted or merged, and `totalRecordsAffected` is `itemRecordsCreated + spellRecordsCreated + spellRecordsMerged`. The UI labels each number with its unit rather than showing a single ambiguous “items” count (DC-18).
 
 ### 7.4 Selection and commit
 
@@ -798,6 +814,7 @@ Use typed service errors and handler mapping; do not leak MariaDB errors. The ex
 **`/admin/imports/:id` — review**
 
 - Header: file name, status, source/accepted counts, imported by/date, SHA prefix, failure reason (full text in a `<pre>` for failed batches).
+- Batch meta also shows the IMP-01 ignored nested-slot count. The review grid adds a Kind column (`Slot`/`Container`), and the `Unspecified` group is labelled **Other (not a bank location)**.
 - For `Uploaded`: summary cards, location panel, row grid, “Commit selected” button.
 - For `Completed`/`Failed`: the same read-only grid and summary, no checkboxes, no commit. Completed shows a “committed” banner; failed shows the parse reason.
 - `data-batch-id`, `data-status`, `data-page-size` on `<main>` are the only values the JS needs.
@@ -809,11 +826,26 @@ Use typed service errors and handler mapping; do not leak MariaDB errors. The ex
 - Toggle a row: update the set immediately, recalculate the visible checkbox/counters optimistically, debounce 300 ms, then `PUT /selection` with the complete set. Disable commit while a PUT is in flight; apply the canonical `summary` from the response; on failure revert the set and show an inline error.
 - Toggle a location:
   1. `GET /row-ids?locationGroup=…` once and cache the IDs.
-  2. Add/remove all IDs from the set.
-  3. PUT as above.
-  The location checkbox is checked when all cached group IDs are selected, unchecked when none, and `indeterminate` otherwise.
-- “Select all” uses `GET /row-ids` (no filter) and fills the set; “Clear all” empties it. Both are confirmed for >1,000 rows.
-- Row filters (`locationGroup`, selected state, search) re-request `/rows` with `page=1`; page links keep the current set in memory and do not re-fetch selection.
+  2. Add/remove all IDs from the set and update the page-local group scope.
+  3. PUT as above; reload `/rows` with `excludeGroups` so a hidden group's rows disappear.
+  The location checkbox is the **group scope** control (IMP-06): checked when the
+  group is in scope and fully selected, `indeterminate` while in scope and not
+  fully selected. Unchecking clears the group's rows from the selection and hides
+  them; the group stays listed as `hidden` so it can be re-included. The scope is
+  memory-only and resets to every group on reload.
+- The `Unselected` row filter sets `ignoreGroups=1` and drops `excludeGroups`, so
+  rows in a hidden group remain reviewable and can be re-selected individually.
+- “Select all” and “Clear” apply only to the groups in scope: they call
+  `GET /row-ids?excludeGroups=…`. The scope list is ordered by `/locations`.
+- The location panel presents `Unspecified` as **Other (not a bank location)**
+  (IMP-02) and shows a banner with its row count, explaining that it is never
+  selected automatically. The grid adds a **Kind** column (`Slot` / `Container`)
+  so the default exclusion of container rows is visible (IMP-03).
+- “Reset to defaults” (IMP-04) calls `GET /default-selection`, replaces the
+  selection with the returned IDs, re-includes every group and PUTs the set. It
+  is the only way an existing batch adopts a changed default rule; staging never
+  rewrites an existing batch.
+- Row filters (`locationGroup`, selected state, search) re-request `/rows` with `page=1`; page links keep the current set in memory and do not re-fetch selection. The location dropdown lists only in-scope groups; removing the active filter group resets the dropdown to “All locations in scope”.
 - Commit: confirm with the summary (“Import 726 inventory records?”), POST, disable the page, then reload the detail page on success. `409` shows “This batch has already been committed or is no longer editable”; `422 selection_empty` highlights the summary; `503` offers retry.
 - All fetch calls send `X-CSRF-Token` from the page meta tag on unsafe methods and send `Accept: application/json`.
 - Errors are rendered in an `aria-live="polite"` status area; no `alert()`.
@@ -877,7 +909,7 @@ With PD3-10 this is fatal after a successful `Open`; it does not replace the exi
 `StageBatch` uses one `*sql.Tx`:
 
 1. Insert `ImportList` rows in chunks of 500 using a multi-row `INSERT` with 12 placeholders per row (all columns except auto-increment `ImportID`, including nil `WarningText`).
-2. `UPDATE ImportBatch SET Status='Uploaded', SourceRowCount=?, AcceptedRowCount=?, FileSha256=? WHERE ImportBatchID=? AND Status='Processing'`; require exactly one affected row.
+2. `UPDATE ImportBatch SET Status='Uploaded', SourceRowCount=?, AcceptedRowCount=?, IgnoredRowCount=?, FileSha256=? WHERE ImportBatchID=? AND Status='Processing'`; require exactly one affected row.
 3. Insert the upload audit entry.
 4. Commit. On error roll back all inserts/status; the service then calls `FailBatch` in a separate transaction. No cleanup `DELETE` is needed because the staging transaction rolled back.
 
@@ -1203,9 +1235,10 @@ Tests follow the existing split: pure unit tests with table cases, service tests
 | `TestSelectionEmptyIsPersistable` | empty PUT succeeds, commit returns `selection_empty` |
 | `TestSelectionTerminalBatch` | completed/failed batch → `batch_not_editable`, store unchanged |
 | `TestSelectionChunkBoundary` | 1,001 / 50,000 IDs produce the right chunks; final selected count equals the requested set, including when every row was already selected |
-| `TestSummaryCounts` | 197 rows → 194 item rows, 723 units, 3 spells/quantity, 3 new, 0 merged, 30 groups, 726 records |
-| `TestSummaryMergedSpell` | existing active spell → `mergedSpells=1`, `inventoryRecordsToCreate = itemUnits + newSpells`, `totalRecordsToImport = itemUnits + distinct` |
-| `TestCommitPlanExpandsItems` | quantity 5 → five rows, all `Quantity=1`, `SourceLocation=LocationRaw`, same batch timestamp |
+| `TestSummaryCounts` | 197 rows → 194 item rows, 723 units, 3 spells/quantity, 3 new, 0 merged, 30 groups, 197 records (QTY-04) |
+| `TestSummaryMergedSpell` | existing active spell → `mergedSpells=1`, `inventoryRecordsToCreate = itemRows + newSpells`, `totalRecordsToImport = itemRows + distinct` (QTY-04) |
+| `TestCommitPlanCreatesOneRowPerLineAndAggregatesSpells` | two item lines (quantity 2 and 1) → two rows with those quantities, `SourceLocation=LocationRaw`, same batch timestamp (QTY-03) |
+| `TestBuildCommitPlanNeverMergesRepeatedItemEQUID` | two imports of one EQUID → separate rows, no merge (QTY-01) |
 | `TestCommitPlanAggregatesSpells` | duplicate spell rows summed into one insert; no per-row inserts; `Name`/`SourceLocation` come from the lowest `ImportID` row |
 | `TestCommitPlanDuplicateActiveSpellTargets` | two active rows → merge into lowest `GuildBankItemID`, warning recorded |
 | `TestCommitPlanMetadataFallback` | missing item EQUID → imported name, blank class/race, `MetadataMissingFg=1`, warning |

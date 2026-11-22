@@ -83,12 +83,50 @@ func TestAdminUpdateNoOpWritesNothing(t *testing.T) {
 	}
 }
 
-func TestAdminUpdateRejectsItemQuantityAboveOne(t *testing.T) {
+func TestAdminUpdateItemQuantityIsEditableAndAudited(t *testing.T) {
+	store := newFakeAdmin()
+	store.items[1] = seededItem()
+	svc := testAdminService(store, nil, testClock())
+	result, err := svc.Update(context.Background(), domain.UpdateItemInput{
+		ID: 1, ExpectedModAt: seededItem().ModAt, Quantity: 55,
+		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional("Guild Bank"),
+		DateOpen:   domain.OptionalDate{Value: datePtr(2026, 11, 15), Set: true},
+		DateBazaar: domain.OptionalDate{Value: datePtr(2026, 12, 1), Set: true},
+		Actor:      testActor(),
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if !result.Changed || !result.FieldsChanged || result.Item.Quantity != 55 {
+		t.Fatalf("quantity edit result = %+v", result)
+	}
+	if store.items[1].Quantity != 55 {
+		t.Fatalf("stored quantity = %d, want 55", store.items[1].Quantity)
+	}
+	if len(store.audits) != 1 || store.audits[0].EventType != "ITEM_UPDATED" {
+		t.Fatalf("audits = %+v", store.audits)
+	}
+	var oldValues, newValues map[string]any
+	if err := json.Unmarshal(store.audits[0].OldValues, &oldValues); err != nil {
+		t.Fatalf("old values: %v", err)
+	}
+	if err := json.Unmarshal(store.audits[0].NewValues, &newValues); err != nil {
+		t.Fatalf("new values: %v", err)
+	}
+	if len(oldValues) != 1 || oldValues["quantity"] != float64(1) {
+		t.Fatalf("old values = %v", oldValues)
+	}
+	if len(newValues) != 1 || newValues["quantity"] != float64(55) {
+		t.Fatalf("new values = %v", newValues)
+	}
+}
+
+func TestAdminUpdateRejectsItemQuantityAboveCap(t *testing.T) {
 	store := newFakeAdmin()
 	store.items[1] = seededItem()
 	svc := testAdminService(store, nil, testClock())
 	_, err := svc.Update(context.Background(), domain.UpdateItemInput{
-		ID: 1, ExpectedModAt: seededItem().ModAt, Quantity: 2,
+		ID: 1, ExpectedModAt: seededItem().ModAt, Quantity: AdminMaxItemQuantity + 1,
 		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional("Guild Bank"),
 		DateOpen:   domain.OptionalDate{Value: datePtr(2026, 11, 15), Set: true},
 		DateBazaar: domain.OptionalDate{Value: datePtr(2026, 12, 1), Set: true},
@@ -97,6 +135,26 @@ func TestAdminUpdateRejectsItemQuantityAboveOne(t *testing.T) {
 	var validation *domain.ValidationError
 	if !errors.As(err, &validation) || validation.Fields["quantity"] == "" {
 		t.Fatalf("err = %v, want quantity validation", err)
+	}
+}
+
+func TestAdminRestoreRejectsConsolidatedRow(t *testing.T) {
+	store := newFakeAdmin()
+	absorbed := seededItem()
+	absorbed.DeletedFg = true
+	survivorID := int64(9)
+	absorbed.ConsolidatedInto = &survivorID
+	store.items[1] = absorbed
+	svc := testAdminService(store, nil, testClock())
+	_, err := svc.Restore(context.Background(), 1, absorbed.ModAt, testActor(), "", "")
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+	if !store.items[1].DeletedFg {
+		t.Fatal("absorbed row was restored")
+	}
+	if len(store.audits) != 0 {
+		t.Fatalf("audits = %+v, want none", store.audits)
 	}
 }
 

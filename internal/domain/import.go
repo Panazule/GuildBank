@@ -30,6 +30,10 @@ type ImportBatch struct {
 	FileSha256       *string
 	SourceRowCount   *int
 	AcceptedRowCount *int
+	// IgnoredRowCount counts physical rows dropped by the nested-slot rule
+	// (IMP-01). It is separate from parser discards so an operator can tell an
+	// ignored bag slot from a blank inventory line. NULL on legacy batches.
+	IgnoredRowCount  *int
 	Status           ImportStatus
 	FailureReason    *string
 	ImportedBy       string
@@ -73,9 +77,14 @@ type ImportWarning struct {
 	Detail   string `json:"detail,omitempty"`
 }
 
-// ImportRowFilter is the validated paging/filter shape for staged rows.
+// ImportRowFilter is the validated paging/filter shape for staged rows. The
+// exclusion list is the review page's group scope (IMP-06): groups a reviewer
+// has unchecked are hidden unless IgnoreGroups asks for every group, which is
+// what the "unselected" view does so no row is lost from the review.
 type ImportRowFilter struct {
 	LocationGroup string
+	ExcludeGroups []string
+	IgnoreGroups  bool
 	Selected      string // "all", "selected" or "unselected"
 	Search        string
 	Page          int
@@ -138,6 +147,7 @@ type UploadResult struct {
 	Batch          ImportBatch
 	StructuralRows int
 	DiscardedRows  int
+	IgnoredRows    int
 	BlankRows      int
 	DuplicateOf    *int64
 	WarningCounts  map[string]int

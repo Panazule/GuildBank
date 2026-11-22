@@ -313,6 +313,19 @@ main.card.admin-card {
 .row-removed td a { color: var(--muted); }
 .row-edit { margin-left: 0.45rem; font-size: 0.78rem; }
 
+/* AI-01: page-local bulk removal controls. The bar stays below the table and
+   the whole selection is re-validated server-side. */
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0.1rem 0.25rem;
+}
+.bulk-bar .help { max-width: 60ch; margin: 0; }
+.admin-table td:first-child input[type="checkbox"] { margin: 0; }
+
 /* PD5-36: icon-only external link. */
 .external-link {
   display: inline-flex;

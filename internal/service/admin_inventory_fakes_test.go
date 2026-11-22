@@ -18,6 +18,11 @@ type fakeAdmin struct {
 	failAudit bool
 	committed int
 	rolled    int
+	// backupItems/backupAudits make the fake honour AdminWriteTx rollback so an
+	// all-or-nothing service path can be asserted without a live database.
+	backupItems  map[int64]domain.AdminInventoryItem
+	backupAudits []domain.AuditEntry
+	inTx         bool
 }
 
 func newFakeAdmin() *fakeAdmin {
@@ -48,7 +53,15 @@ func (f *fakeAdmin) ListLocationGroups(ctx context.Context) ([]string, error) {
 	return f.groups, nil
 }
 
-func (f *fakeAdmin) BeginAdminWrite(ctx context.Context) (AdminWriteTx, error) { return f, nil }
+func (f *fakeAdmin) BeginAdminWrite(ctx context.Context) (AdminWriteTx, error) {
+	f.backupItems = make(map[int64]domain.AdminInventoryItem, len(f.items))
+	for id, item := range f.items {
+		f.backupItems[id] = item
+	}
+	f.backupAudits = append([]domain.AuditEntry(nil), f.audits...)
+	f.inTx = true
+	return f, nil
+}
 
 func (f *fakeAdmin) ListAudit(ctx context.Context, filter domain.AuditFilter) (domain.AuditPage, error) {
 	return domain.AuditPage{Entries: f.audits, Total: len(f.audits), Page: 1, PageSize: 50}, nil
@@ -147,8 +160,27 @@ func (f *fakeAdmin) InsertAudit(ctx context.Context, entry domain.AuditEntry) er
 	return nil
 }
 
-func (f *fakeAdmin) Commit() error   { f.committed++; return nil }
-func (f *fakeAdmin) Rollback() error { f.rolled++; return nil }
+func (f *fakeAdmin) Commit() error {
+	f.committed++
+	f.inTx = false
+	f.backupItems = nil
+	f.backupAudits = nil
+	return nil
+}
+
+func (f *fakeAdmin) Rollback() error {
+	f.rolled++
+	if f.inTx {
+		if f.backupItems != nil {
+			f.items = f.backupItems
+		}
+		f.audits = f.backupAudits
+	}
+	f.inTx = false
+	f.backupItems = nil
+	f.backupAudits = nil
+	return nil
+}
 
 type fakeSettings map[string]string
 

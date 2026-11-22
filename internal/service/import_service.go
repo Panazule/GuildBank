@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Panazule/guildbank/internal/domain"
@@ -23,13 +24,13 @@ var (
 type ImportStore interface {
 	CreateBatch(ctx context.Context, b domain.ImportBatch) (int64, error)
 	FailBatch(ctx context.Context, batchID int64, reason *string, sourceRows *int, sha *string) error
-	StageBatch(ctx context.Context, batchID int64, rows []domain.ImportRow, sourceRows int, sha string, audit domain.AuditEntry) error
+	StageBatch(ctx context.Context, batchID int64, rows []domain.ImportRow, sourceRows, ignoredRows int, sha string, audit domain.AuditEntry) error
 	GetBatch(ctx context.Context, batchID int64) (domain.ImportBatch, error)
 	ListBatches(ctx context.Context, limit int, beforeID int64) ([]domain.ImportBatch, error)
 	FindDuplicateBatch(ctx context.Context, sha string, excludeID int64) (*int64, error)
 	ListLocations(ctx context.Context, batchID int64) ([]domain.ImportLocation, error)
 	ListRows(ctx context.Context, batchID int64, filter domain.ImportRowFilter) (domain.ImportRowPage, error)
-	RowIDs(ctx context.Context, batchID int64, locationGroup string) ([]int64, error)
+	RowIDs(ctx context.Context, batchID int64, locationGroup string, excludeGroups []string) ([]int64, error)
 	SelectedIDs(ctx context.Context, batchID int64) ([]int64, error)
 	AllRows(ctx context.Context, batchID int64) ([]domain.ImportRow, error)
 	ReplaceSelection(ctx context.Context, batchID int64, ids []int64) error
@@ -137,15 +138,49 @@ func (s *ImportService) Rows(ctx context.Context, batchID int64, filter domain.I
 	if len([]rune(filter.Search)) > 128 {
 		return domain.ImportRowPage{}, domain.NewValidationError("q", "q must be at most 128 characters")
 	}
+	if len(filter.ExcludeGroups) > 200 {
+		return domain.ImportRowPage{}, domain.NewValidationError("excludeGroups", "at most 200 group exclusions are allowed")
+	}
+	for i, group := range filter.ExcludeGroups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			return domain.ImportRowPage{}, domain.NewValidationError("excludeGroups", "excluded group values must not be empty")
+		}
+		if len([]rune(group)) > 64 {
+			return domain.ImportRowPage{}, domain.NewValidationError("excludeGroups", "excluded group values must be at most 64 characters")
+		}
+		filter.ExcludeGroups[i] = group
+	}
 	return s.store.ListRows(ctx, batchID, filter)
 }
 
-// RowIDs returns every staged ID, optionally for one LocationGroup.
-func (s *ImportService) RowIDs(ctx context.Context, batchID int64, locationGroup string) ([]int64, error) {
+// DefaultSelection recomputes the staging-time default selection for a batch.
+// It exists so an administrator can restore the documented defaults on a batch
+// staged under an earlier policy; it never rewrites anything by itself.
+func (s *ImportService) DefaultSelection(ctx context.Context, batchID int64) ([]int64, error) {
 	if err := s.requireReady(); err != nil {
 		return nil, err
 	}
-	return s.store.RowIDs(ctx, batchID, locationGroup)
+	rows, err := s.store.AllRows(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if DefaultImportSelection(row.LocationGroup, IsContainerLocation(row.LocationRaw)) {
+			ids = append(ids, row.ImportID)
+		}
+	}
+	return ids, nil
+}
+
+// RowIDs returns every staged ID, optionally for one LocationGroup and excluding
+// groups outside the review page's scope.
+func (s *ImportService) RowIDs(ctx context.Context, batchID int64, locationGroup string, excludeGroups []string) ([]int64, error) {
+	if err := s.requireReady(); err != nil {
+		return nil, err
+	}
+	return s.store.RowIDs(ctx, batchID, locationGroup, excludeGroups)
 }
 
 // Selection returns the persisted selection set.
@@ -201,9 +236,16 @@ func (s *ImportService) Summary(ctx context.Context, batchID int64) (domain.Impo
 	if err != nil {
 		return domain.ImportSummary{}, err
 	}
+	// IMP-C: stagedRows counts the rows the review can act on. Other/Unspecified
+	// rows stay on the batch (AcceptedRowCount) but are excluded here so the
+	// "Selected rows X of Y" figure matches the rows the reviewer can see.
+	stagedRows := 0
+	for _, location := range locations {
+		stagedRows += location.RowCount
+	}
 	summary := domain.ImportSummary{
 		BatchID: batchID, Status: batch.Status, SelectedRows: totals.SelectedRows,
-		StagedRows: intValue(batch.AcceptedRowCount), ItemRows: totals.ItemRows,
+		StagedRows: stagedRows, ItemRows: totals.ItemRows,
 		ItemUnits: totals.ItemUnits, SpellRows: totals.SpellRows,
 		SpellQuantity: totals.SpellQuantity, DistinctSpells: totals.DistinctSpells,
 		WarningRows: totals.WarningRows, TotalLocations: len(locations),
@@ -220,14 +262,7 @@ func (s *ImportService) Summary(ctx context.Context, batchID int64) (domain.Impo
 			summary.MergedSpells++
 		}
 	}
-	summary.InventoryRecordsToCreate = summary.ItemUnits + uint64(summary.NewSpells)
-	summary.TotalRecordsToImport = summary.ItemUnits + uint64(summary.DistinctSpells)
+	summary.InventoryRecordsToCreate = uint64(summary.ItemRows) + uint64(summary.NewSpells)
+	summary.TotalRecordsToImport = uint64(summary.ItemRows) + uint64(summary.DistinctSpells)
 	return summary, nil
-}
-
-func intValue(value *int) int {
-	if value == nil {
-		return 0
-	}
-	return *value
 }

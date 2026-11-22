@@ -126,13 +126,14 @@ func (s *ImportService) Upload(ctx context.Context, actor domain.Actor, fileName
 			Name: parsedRow.Name, Quantity: parsedRow.Quantity, LocationRaw: parsedRow.Location,
 			LocationGroup: location.Group, LocationSort: TruncateRunes(location.Sort, 80),
 			NameSort:   TruncateRunes(NaturalSortKey(parsedRow.Name), 160),
-			SelectedFg: true, Warnings: warnings,
+			SelectedFg: DefaultImportSelection(location.Group, IsContainerLocation(parsedRow.Location)),
+			Warnings:   warnings,
 		})
 	}
 
 	auditNew, _ := json.Marshal(map[string]any{
 		"fileName": name, "sourceRows": parsed.SourceLines,
-		"acceptedRows": len(rows), "sha256": sha,
+		"acceptedRows": len(rows), "ignoredRows": parsed.IgnoredRows, "sha256": sha,
 	})
 	audit := domain.AuditEntry{
 		EventDate: now, UserID: actor.UserID, UserName: actor.UserName,
@@ -140,7 +141,7 @@ func (s *ImportService) Upload(ctx context.Context, actor domain.Actor, fileName
 		RecordID: fmt.Sprintf("%d", batchID), NewValues: auditNew,
 		CorrelationID: correlationID, SourceIP: sourceIP,
 	}
-	if err := s.store.StageBatch(ctx, batchID, rows, parsed.SourceLines, sha, audit); err != nil {
+	if err := s.store.StageBatch(ctx, batchID, rows, parsed.SourceLines, parsed.IgnoredRows, sha, audit); err != nil {
 		reason := "staging_failed — imported rows could not be staged"
 		sourceRows := parsed.SourceLines
 		_ = s.store.FailBatch(ctx, batchID, &reason, &sourceRows, &sha)
@@ -160,11 +161,11 @@ func (s *ImportService) Upload(ctx context.Context, actor domain.Actor, fileName
 	}
 	s.logger.Info("import batch uploaded", "batch_id", batchID,
 		"user_id", actor.UserID, "bytes", len(data), "source_rows", parsed.SourceLines,
-		"accepted_rows", len(rows), "sha_prefix", sha[:12])
+		"accepted_rows", len(rows), "ignored_rows", parsed.IgnoredRows, "sha_prefix", sha[:12])
 	return domain.UploadResult{
 		Batch: batch, StructuralRows: parsed.StructuralRows,
-		DiscardedRows: parsed.DiscardedRows, BlankRows: parsed.BlankRows,
-		DuplicateOf: duplicate, WarningCounts: warningCounts,
+		DiscardedRows: parsed.DiscardedRows, IgnoredRows: parsed.IgnoredRows,
+		BlankRows: parsed.BlankRows, DuplicateOf: duplicate, WarningCounts: warningCounts,
 	}, nil
 }
 

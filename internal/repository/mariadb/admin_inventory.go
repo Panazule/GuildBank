@@ -16,8 +16,8 @@ import (
 // public projection deliberately omits.
 const adminInventoryColumns = `GuildBankItemID, EQUID, Name, ItemType, Quantity,
 	ClassString, RaceString, MetadataMissingFg, SourceLocation, LocationGroup,
-	LocationSort, GivenTo, DeletedFg, NameSort, DateAdded, DateOpen, DateBazaar,
-	ModAt, ModBy, ModByUserID`
+	LocationSort, GivenTo, DeletedFg, ConsolidatedInto, NameSort, DateAdded,
+	DateOpen, DateBazaar, ModAt, ModBy, ModByUserID`
 
 // ListAdminInventory reads one page and its total from one read-only snapshot.
 func (s *Store) ListAdminInventory(ctx context.Context, filter domain.AdminInventoryFilter) (domain.AdminInventoryPage, error) {
@@ -191,11 +191,12 @@ func scanAdminInventory(scanner interface{ Scan(...any) error }) (domain.AdminIn
 		givenTo       sql.NullString
 		nameSort      sql.NullString
 		modByUserID   sql.NullInt64
+		consolidated  sql.NullInt64
 	)
 	if err := scanner.Scan(&item.ID, &equid, &item.Name, &itemType, &quantity,
 		&item.ClassString, &item.RaceString, &item.MetadataMissingFg,
 		&sourceLoc, &locationGroup, &locationSort, &givenTo, &item.DeletedFg,
-		&nameSort, &item.DateAdded, &item.DateOpen, &item.DateBazaar,
+		&consolidated, &nameSort, &item.DateAdded, &item.DateOpen, &item.DateBazaar,
 		&item.ModAt, &item.ModBy, &modByUserID); err != nil {
 		if errorsIsNoRows(err) {
 			return domain.AdminInventoryItem{}, domain.ErrNotFound
@@ -223,6 +224,10 @@ func scanAdminInventory(scanner interface{ Scan(...any) error }) (domain.AdminIn
 	if modByUserID.Valid {
 		value := modByUserID.Int64
 		item.ModByUserID = &value
+	}
+	if consolidated.Valid {
+		value := consolidated.Int64
+		item.ConsolidatedInto = &value
 	}
 	return item, nil
 }

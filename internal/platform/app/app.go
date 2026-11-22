@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Panazule/guildbank/internal/api"
+	"github.com/Panazule/guildbank/internal/domain"
 	"github.com/Panazule/guildbank/internal/platform/config"
 	"github.com/Panazule/guildbank/internal/repository/mariadb"
 	"github.com/Panazule/guildbank/internal/repository/sqlite"
@@ -89,12 +90,44 @@ func Run(ctx context.Context, opts Options) error {
 				return fmt.Errorf("app: backfill inventory locations: %w", err)
 			}
 			logger.Info("location backfill complete", "rows", backfilled)
+			// DEFECT-01: repair spell rows that resolved metadata before the
+			// commit path persisted the decoded class/race strings.
+			spellsRepaired, err := guildStore.BackfillSpellMetadata(ctx, 500)
+			if err != nil {
+				return fmt.Errorf("app: backfill spell metadata: %w", err)
+			}
+			if spellsRepaired > 0 {
+				logger.Info("spell metadata backfill complete", "rows", spellsRepaired)
+			}
 			defer func() {
 				if cerr := guildStore.Close(); cerr != nil {
 					logger.Warn("mariadb close failed", "error", cerr)
 				}
 			}()
+			// QTY-09 Option C: an owner-run, dry-run-first maintenance pass
+			// consolidates legacy expanded item rows. It never runs implicitly
+			// and leaves the process after reporting its summary.
+			if cfg.ConsolidateItems {
+				logger.Info("item consolidation starting", "dry_run", cfg.ConsolidateDryRun,
+					"actor", cfg.ConsolidateActor)
+				consolidated, err := guildStore.ConsolidateItemStacks(ctx, 100,
+					cfg.ConsolidateDryRun, domain.Actor{UserName: cfg.ConsolidateActor})
+				if err != nil {
+					return fmt.Errorf("app: consolidate item stacks: %w", err)
+				}
+				logger.Info("item consolidation complete",
+					"dry_run", consolidated.DryRun, "groups", consolidated.Groups,
+					"absorbed_rows", consolidated.AbsorbedRows,
+					"units_in_groups", consolidated.UnitsInGroups,
+					"units_absorbed", consolidated.UnitsAbsorbed,
+					"units_remaining", consolidated.UnitsRemaining)
+				return nil
+			}
 		}
+	}
+
+	if cfg.ConsolidateItems && guildStore == nil {
+		return errors.New("app: -consolidate-items requires an available MariaDB guild store")
 	}
 
 	healthDeps := service.HealthDeps{

@@ -34,7 +34,7 @@
         <div class="field-row">
           <label>Item type
             <select name="itemType" required>
-              <option value="Item"{{if eq .Form.ItemType "Item"}} selected{{end}}>Item (one row per unit)</option>
+              <option value="Item"{{if eq .Form.ItemType "Item"}} selected{{end}}>Item (single record with quantity)</option>
               <option value="Spell"{{if eq .Form.ItemType "Spell"}} selected{{end}}>Spell (merged quantity)</option>
             </select>
           </label>
@@ -53,9 +53,8 @@
 
       <div class="field-row">
         <label>Quantity
-          <input name="quantity" type="text" inputmode="numeric" required value="{{.Form.Quantity}}"
-                 {{if .Form.QuantityReadOnly}}readonly aria-readonly="true"{{end}} aria-describedby="quantity-help">
-          <span class="help" id="quantity-help">{{if .Form.QuantityReadOnly}}An item record always stores quantity 1.{{else}}A new item expands to one row per unit; a spell stores one row.{{end}}</span>
+          <input name="quantity" type="text" inputmode="numeric" required value="{{.Form.Quantity}}" aria-describedby="quantity-help">
+          <span class="help" id="quantity-help">One record stores this quantity. Items accept 1-100000; spells merge by EQUID.</span>
           {{with index .ErrorFields "quantity"}}<span class="field-error">{{.}}</span>{{end}}
         </label>
         <label>Source location
@@ -87,7 +86,9 @@
       <div class="wizard-actions">
         <a class="link" href="{{if .Edit}}/admin/inventory/{{.Item.ID}}{{else}}/admin/inventory{{end}}">Cancel</a>
         <button type="submit" class="primary"{{if not .Ready}} disabled{{end}}>{{if .Edit}}Save changes{{else}}Add record{{end}}</button>
+        {{if .Edit}}<button type="submit" class="secondary" name="action" value="save-remove"{{if not .Ready}} disabled{{end}}>Save and remove</button>{{end}}
       </div>
+      {{if .Edit}}<p class="help">Save and remove writes the edited values and the removal in one transaction, producing one update audit row per changed field set and one removal row under the same correlation ID. Restoring the record later does not undo these edits.</p>{{end}}
     </form>
   </main>
   {{template "footer" .}}

@@ -271,6 +271,7 @@ CREATE TABLE GuildBankItems (
     SourceLocation  VARCHAR(128) NULL,                       -- SPEC
     GivenTo         VARCHAR(128) NULL,                       -- SPEC
     DeletedFg       TINYINT(1) NOT NULL DEFAULT 0,           -- SPEC
+    ConsolidatedInto BIGINT UNSIGNED NULL,                   -- QTY-09 (absorbed-row marker)
     ModAt           DATETIME(6) NOT NULL,                    -- SPEC (UTC)
     ModBy           VARCHAR(64) NOT NULL,                    -- SPEC (username snapshot)
     ModByUserID     INT NULL,                                -- APPROVED and implemented (DC-07)
@@ -287,7 +288,7 @@ CREATE TABLE GuildBankItems (
     KEY ix_gbi_public_open  (DeletedFg, DateOpen, GuildBankItemID),
     KEY ix_gbi_public_bazaar (DeletedFg, DateBazaar, GuildBankItemID),
     CONSTRAINT ck_gbi_quantity  CHECK (Quantity >= 1),
-    CONSTRAINT ck_gbi_item_one  CHECK (ItemType = 'Spell' OR Quantity = 1),
+    -- ck_gbi_item_one was dropped by 0005_item_quantity_model (QTY-01/QTY-02).
     CONSTRAINT ck_gbi_deleted   CHECK (DeletedFg IN (0,1)),
     CONSTRAINT ck_gbi_meta_missing CHECK (MetadataMissingFg IN (0,1)),
     CONSTRAINT ck_gbi_bazaar    CHECK (DateBazaar >= DateAdded),
@@ -298,7 +299,8 @@ CREATE TABLE GuildBankItems (
 ```
 
 **Notes**
-- `ck_gbi_item_one` encodes L332–L341: ordinary items are single instances; only spells may exceed quantity 1.
+- `ck_gbi_item_one` encoded L332–L341: ordinary items were single instances. **Dropped 2026-11-22 by `0005_item_quantity_model.sql` (QTY-01/QTY-02).** An ordinary item row now stores the quantity of one imported or manually created line; `ck_gbi_quantity (Quantity >= 1)` is the remaining invariant.
+- `ConsolidatedInto` (**added by `0005`, QTY-09**) marks a row absorbed by the owner-run item-stack consolidation command. It names the surviving row, is set in the same transaction as `DeletedFg=1`, and blocks restore.
 - `ModBy` stores the username at the time of the action because the user row lives in SQLite (DC-07); `ModByUserID` preserves the numeric identity without a cross-store FK.
 - `DateOpen`/`DateBazaar` are computed at insert time from settings (L314–L330). The CHECKs prevent inverted windows but cannot detect later settings changes (DC-06).
 - The physical FK to `Items` is intentionally **not enforced** (AM-01). An unresolved `EQUID` is by definition absent from `Items` at import time, so a foreign key would reject exactly the rows D-08 requires. `EQUID` still denotes the collector's item identifier (D-01), is never rewritten, and is validated in the service whenever the referenced `Items` row becomes available. `MetadataMissingFg = 1` marks the unresolved state and `ix_gbi_equid` keeps lookups cheap. An index is not a constraint, so the identifier remains the single key with no sentinel or shadow column. `Name` is copied at insert (L281–L283), so an `Items` rename never rewrites inventory (intended by L296/L309/L321).
@@ -322,6 +324,7 @@ CREATE TABLE ImportBatch (
     FailureReason  TEXT NULL,                           -- APPROVED and implemented (MR-12)
     SourceRowCount INT UNSIGNED NULL,                   -- APPROVED and implemented (Phase 3)
     AcceptedRowCount INT UNSIGNED NULL,                 -- APPROVED and implemented (Phase 3)
+    IgnoredRowCount INT UNSIGNED NULL,                  -- IMP-01: nested-slot rows ignored at staging
     FileSha256     CHAR(64) NULL,                       -- APPROVED and implemented (duplicate detection)
     PRIMARY KEY (ImportBatchID),
     KEY ix_batch_status (Status, ImportedAt),
@@ -508,6 +511,16 @@ COMMIT;
 - `DELETE /api/items/{id}` sets `DeletedFg = 1`; it never issues SQL `DELETE` (L368, DC-11).
 - `Name`, `ClassString`, `RaceString`, `DateAdded`, `DateOpen`, `DateBazaar` are immutable after creation (L296–L330). A lifecycle-policy change does not rewrite existing rows (DC-06).
 - Restoring a removed row is a `DeletedFg = 0` update and must be audited as `inventory.restore`.
+- AI-02 (implemented): an edit may request removal in the same transaction. The
+  field update and the soft delete commit together; `ITEM_UPDATED` is written
+  only for changed editable fields and `ITEM_REMOVED` is always written, both
+  with the same `EventDate` and `CorrelationID`. Restoring later does not revert
+  the edits.
+- AI-01 (implemented): page-local bulk removal locks the selected rows in
+  ascending `GuildBankItemID` order, re-validates every `ExpectedModAt`, and
+  commits all deletions plus one `ITEM_REMOVED` per record in one transaction.
+  A single stale or already-removed record rolls the selection back. There is no
+  bulk event type and no filter-wide action.
 
 ### 7.4 Import upload and staging (`POST /api/imports`)
 
@@ -520,14 +533,23 @@ BEGIN;                                    -- MariaDB
                           LocationRaw, LocationGroup, SelectedFg, ItemType,
                           WarningText, SourceLine, LocationSort, NameSort)
   VALUES (...), (...);                    -- batched
-  UPDATE ImportBatch SET Status = 'Uploaded', SourceRowCount = ?, AcceptedRowCount = ?, FileSha256 = ?;
+  UPDATE ImportBatch SET Status = 'Uploaded', SourceRowCount = ?, AcceptedRowCount = ?, IgnoredRowCount = ?, FileSha256 = ?;
   INSERT INTO Audit (...) VALUES ('IMPORT_CREATED', ...);
 COMMIT;
 ```
 
 - Format contract (D-04, AM-03): the sample at `Docs/Samples/InventoryExport-Sample.txt` is tab-delimited with header `Location`, `Name`, `ID`, `Count`, `Slots`; `Count` maps to `Quantity` and `Slots` is collector metadata. The file is read as UTF-8; blank lines and section-header rows are skipped; three-field rows default `Count` to 1; a non-numeric fourth field is treated as `Slots`; rows with `ID = 0` or an empty `Name` are discarded.
 - Parsing failures set `Status='Failed'`, `FailureReason`, and commit whatever diagnostics apply; a failed batch keeps zero inventory impact because nothing is written to `GuildBankItems` (MR-12).
-- `SelectedFg` defaults to `1`. Location normalization is applied once here and stored in `LocationGroup` using the D-05/PD3-01 rules: `General`/`Bank`/`SharedBank` `n-Slot m` → `Area n`, every `Hoard<n>` → `Hoard`, and equipment/blank/unparseable reserved patterns → `Unspecified` with a warning. `LocationRaw` is never rewritten. `LocationSort` and `NameSort` are written by the natural-sort key function.
+- `SelectedFg` is computed at staging by the single default rule. A container row
+  (a raw location without a trailing `-Slot<n>`) is **not** selected in General,
+  Bank or SharedBank; every Hoard row **is** selected (IMP-05); every
+  `Unspecified` row is **never** selected (IMP-02). The rule is not retroactive:
+  an existing batch keeps its persisted selection, and `GET
+  /api/imports/{id}/default-selection` plus `PUT .../selection` is the explicit
+  way to adopt it. The `SelectedFg` column default remains `1` because rows
+  always supply the value explicitly; it is not the policy.
+- Location normalization is applied once here and stored in `LocationGroup` using the D-05/PD3-01 rules: `General`/`Bank`/`SharedBank` `n-Slot m` → `Area n`, every `Hoard<n>` → `Hoard`, and equipment/blank/unparseable reserved patterns → `Unspecified` with a warning. `LocationRaw` is never rewritten. `LocationSort` and `NameSort` are written by the natural-sort key function.
+- IMP-01: a well-formed row whose location has two or more trailing slot suffixes (`General 1-Slot2-Slot1`) describes the contents of a container, not a bank slot. It is not staged; `IgnoredRowCount` records the count, `AcceptedRowCount` excludes it, and the `IMPORT_CREATED` audit payload carries `ignoredRows`. The empty nested rows in the canonical sample are `ID = 0` discards and therefore do not increment this counter.
 - Staging records the unresolved-metadata warning in `WarningText`; `MetadataMissingFg` belongs to `GuildBankItems` and is set at commit when the `EQUID` is absent from `Items` (AM-01/AM-02, PD3-02, PD3-07).
 - Staging rows are retained indefinitely for review and troubleshooting (L556, MR-20).
 
@@ -565,6 +587,8 @@ COMMIT;
 - **Row locking.** The `FOR UPDATE` on the batch serializes concurrent commit attempts.
 - **Quantity expansion.** D-07 requires one inventory row per imported item unit; a staged spell row produces one row with summed quantity (L682–L698).
 - **Merge provenance** (which row and location received the added quantity) was settled for imports by PD3-03/PD3-04/PD3-14: only active rows are merged, multiple active targets resolve to the lowest `GuildBankItemID`, the anomaly is reported, and each merge writes an `ITEM_UPDATED` audit row with `OldValues`/`NewValues`.
+- **Spell metadata** follows the item rule (PD3-16/DEFECT-01): a newly inserted spell row uses the resolved `items.name` and the decoded class/race strings, and `MetadataMissingFg=1` with the imported name and blank strings only when the EQUID is unresolved. A merge never rewrites stored name, class/race or dates (D-06).
+- **Other rows** (`LocationGroup='Unspecified'`) are internal staging rows (PD3-15/IMP-C): this transaction selects only `LocationGroup <> 'Unspecified'`, so such a row can never be imported, even on a legacy batch that still carries `SelectedFg=1`.
 - **Selection and location filters** apply to `SelectedFg` only; location deselection is expressed by updating `SelectedFg` for all rows in the group, through the D-11 endpoint (MR-03).
 
 ### 7.6 Settings update (`PUT /api/settings`)
@@ -668,17 +692,17 @@ SELECT GuildBankItemID, ItemType, EQUID, Name, ClassString, RaceString,
 ```sql
 SELECT LocationGroup, COUNT(*) AS RowCount, SUM(SelectedFg) AS SelectedCount
   FROM ImportList
- WHERE ImportBatchID = ?
+ WHERE ImportBatchID = ? AND LocationGroup <> 'Unspecified'
  GROUP BY LocationGroup
  ORDER BY MIN(LocationSort);
 
 SELECT ImportID, EQUID, Name, Quantity, LocationRaw, LocationGroup, SelectedFg, ItemType
   FROM ImportList
- WHERE ImportBatchID = ? AND LocationGroup = ?
+ WHERE ImportBatchID = ? AND LocationGroup <> 'Unspecified' AND LocationGroup = ?
  ORDER BY LocationSort, ImportID;
 ```
 
-`ix_import_batch_location` serves both statements. Summary counts must state their unit (staged rows vs. resulting inventory rows), per DC-18.
+`ix_import_batch_location` serves both statements. Summary counts must state their unit (staged rows vs. resulting inventory rows), per DC-18. The `Unspecified` predicate is PD3-15 (IMP-C): those rows stay staged and counted by `ImportBatch.AcceptedRowCount`, but the import review never lists, selects or commits them, so `stagedRows` and `totalLocations` report the reviewable set.
 
 ### 9.4 Audit reads
 
@@ -802,8 +826,8 @@ Service-level rules that cannot be expressed as DDL: item identity is `Items.ID`
 | D-03 HTMX / REST | No schema impact; enforced by layering | Not applicable |
 | D-04 Import contract | §7.4 staging shape; sample present at `Docs/Samples/InventoryExport-Sample.txt` | **Conformant** — D-04 path and AM-03 contract (tab-delimited header `Location/Name/ID/Count/Slots`, UTF-8, row rejection) are implemented by §7.4 |
 | D-05 Location normalization | §4.4 `LocationRaw`/`LocationGroup`; §9.5 key | **Conformant and implemented** — PD3-01 resolves equipment/blank/unknown patterns to `Unspecified`; all `Hoard<n>` collapse to `Hoard` |
-| D-06 Spell merge | §4.2 `ck_gbi_item_one`; §7.5 merge path | **Conformant and implemented** — PD3-03/PD3-04 settle active-only targets, lowest-id anomaly handling and concurrency |
-| D-07 Item import | §4.2 quantity rule; §7.5 expansion | Conformant |
+| D-06 Spell merge | §4.2 quantity rule and §7.5 merge path | **Conformant and implemented** — PD3-03/PD3-04 settle active-only targets, lowest-id anomaly handling and concurrency; QTY-02 leaves spell quantity unrestricted by the dropped item-only constraint |
+| D-07 Item import | §4.2 quantity rule; §7.5 one row per imported item line | **Conformant and implemented, amended 2026-11-22 by QTY-01/QTY-02** — one row per line with the line quantity; later imports do not merge; manual create follows the same model |
 | D-08 Missing metadata | §4.2 `MetadataMissingFg` (SPEC-V1.6.1); §4.4 `WarningText` (PD3-02); service validation of `EQUID` | **Conformant and implemented** — AM-01/AM-02 preserve the identifier, forbid `-1` and define the flag; import warnings persist in `ImportList.WarningText` |
 | D-09 Session security | §3.3 `TokenHash`; §10.2 | **Conformant and implemented** for storage and the PD-15 lifecycle; broader lifecycle review may refine values |
 | D-10 Audit table | §4.5, §10.1 grants, §10.3 | **Conformant** — import-scoped writes implemented by PD3-14; general taxonomy/retention and audit UI remain later-phase work |

@@ -61,10 +61,13 @@ GuildBank/
 │   │   └── mariadb/
 │   │       ├── store.go          MariaDB pool, bounded ping and connection test
 │   │       ├── migrate.go        Embedded guild-store migration runner (GET_LOCK)
-│   │       ├── migrations/       0001_guild_store.sql and 0002_public_inventory_indexes.sql
+│   │       ├── migrations/       0001_guild_store.sql, 0002_public_inventory_indexes.sql, 0003_admin_inventory.sql, 0004_import_ignored_rows.sql and 0005_item_quantity_model.sql
 │   │       ├── items.go          Read-only physical→logical Items repository
 │   │       ├── imports.go        Batch/row/location/selection reads and staging
 │   │       ├── imports_commit.go Advisory-locked atomic import commit and audit
+│   │       ├── admin_backfill.go Startup LocationGroup/LocationSort repair
+│   │       ├── spell_metadata_backfill.go Startup class/race repair for spell rows
+│   │       ├── item_consolidation.go QTY-09 owner-run duplicate-item-stack consolidation
 │   │       ├── inventory.go      Explicit public inventory projection/count/page/detail
 │   │       ├── errors.go         MariaDB error classification
 │   │       └── *_test.go
@@ -87,7 +90,7 @@ GuildBank/
 │   ├── web/
 │   │   ├── embed.go              Embedded template/static filesystems
 │   │   ├── embed_test.go         Import guard + embed checks
-│   │   ├── templates/            setup, login, settings, imports, import_detail, inventory_list, inventory_detail, error, partials
+│   │   ├── templates/            setup, login, settings, imports, import_detail, inventory_list, inventory_detail, admin_inventory, admin_inventory_form, admin_inventory_detail, admin_remove, admin_bulk_remove, admin_audit, error, partials
 │   │   └── static/               app.css, setup.js and imports.js
 │   └── platform/
 │       ├── config/
@@ -183,7 +186,10 @@ paged review reads and full-replacement selection. `imports_commit.go` owns the
 advisory-locked atomic commit, item-unit expansion, spell merge into the lowest
 active target and transactional import audit. `inventory.go` owns the explicit
 public projection, active count/page snapshot and active-only detail; it has no
-write method. `errors.go` classifies deadlocks and unavailable
+write method. `admin_backfill.go` repairs missing derived locations at startup;
+`spell_metadata_backfill.go` repairs the class/race strings of spell rows written
+before the DEFECT-01 commit fix, under its own advisory lock. `errors.go`
+classifies deadlocks and unavailable
 store errors for the service layer.
 
 ### `internal/api`
@@ -256,8 +262,11 @@ main
      ├─ sqlite.Open  ── pragmas, ping, single writer
      ├─ sqlite.Migrate ── PRAGMA user_version = 1 (Users, Settings, Sessions)
      ├─ mariadb.Open ── OPTIONAL: pool + 5s ping (failure = degraded)
-     ├─ mariadb.Migrate ── 0001_guild_store (fatal on migration error)
+     ├─ mariadb.Migrate ── 0001…0005 guild-store migrations (fatal on migration error)
      ├─ mariadb.RecoverInterrupted ── fail stranded Processing batches
+     ├─ mariadb.BackfillInventoryLocations ── fill missing LocationGroup/LocationSort
+     ├─ mariadb.BackfillSpellMetadata ── repair pre-DEFECT-01 spell class/race strings
+     ├─ [optional -consolidate-items] mariadb.ConsolidateItemStacks ── QTY-09 then exit
      ├─ service.NewHealthService(sqlite, setup, mariadb)
      ├─ setup/auth/settings/import services + hourly session purge
      ├─ api.NewRouter(setup gate -> public CSRF or session -> CSRF -> admin)
@@ -331,16 +340,16 @@ remain in `Phase3ImplementationPlan.md` §2 and §14.1.
 | PD3-02 | Row warnings stored as structured JSON in `ImportList.WarningText` | **Approved and implemented** |
 | PD3-03 | Merge spells only into active (`DeletedFg=0`) rows; insert otherwise | **Approved and implemented** |
 | PD3-04 | Aggregate staged spells by EQUID; lowest active id on anomaly; advisory lock | **Approved and implemented** |
-| PD3-05 | SourceRowCount is physical lines; AcceptedRowCount is staged rows; summary states units | **Approved and implemented** |
-| PD3-06 | 10 MiB body, 50k lines, 64 KiB/line, 100k expanded rows, 10k count/row | **Approved and implemented** |
+| PD3-05 | SourceRowCount is physical lines; AcceptedRowCount is staged rows; summary reports units and records (QTY-04: records count rows) | **Approved and implemented** |
+| PD3-06 | 10 MiB body, 50k lines, 64 KiB/line, 100k inserted rows, 10k count/row (QTY-04) | **Approved and implemented** |
 | PD3-07 | Canonical item names with missing-metadata fallback; spells keep imported names | **Approved and implemented** |
 | PD3-08 | Upload/commit audited; selection changes are not audited | **Approved and implemented** |
 | PD3-09 | Vanilla `imports.js` and JSON endpoints; no HTMX vendor file | **Approved and implemented** |
 | PD3-10 | Guild migration failure is fatal; unreachable store remains degraded | **Approved and implemented** |
 | PD3-11 | Persist `LocationSort` and `NameSort` with the import sort index | **Approved and implemented** |
-| PD3-12 | Golden sample counts 548/197/348/2/1, 30 groups, 723 item units, 3 spells | **Approved and asserted** |
+| PD3-12 | Golden sample counts 548/197/348/2/1, 30 groups, 723 item units, 3 spells; QTY-04: 163 reviewable item rows create 163 records | **Approved and asserted** |
 | PD3-13 | 120-second HTTP and MariaDB DSN read/write timeouts | **Approved and implemented** |
-| PD3-14 | Upload/commit audit summary; one `ITEM_UPDATED` per merged spell, not per unit | **Approved and implemented** |
+| PD3-14 | Upload/commit audit summary carries units and records; one `ITEM_UPDATED` per merged spell, not per unit (QTY-05) | **Approved and implemented** |
 
 ## 5. Scope boundaries
 

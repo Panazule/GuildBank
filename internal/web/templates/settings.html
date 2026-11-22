@@ -17,8 +17,20 @@
         {{.Label}}
         {{if .Secret}}
           <input name="{{.Key}}" type="password" autocomplete="new-password" placeholder="{{if .Configured}}Configured — leave blank to keep{{else}}Not configured{{end}}">
+        {{else if eq .Key "GuildOpenDays"}}
+          <input name="{{.Key}}" value="{{index $.Form .Key}}" type="number" min="0" max="3650">
+        {{else if eq .Key "BazaarDays"}}
+          <input name="{{.Key}}" value="{{index $.Form .Key}}" type="number" min="0" max="3650">
+        {{else if eq .Key "MariaDbPort"}}
+          <input name="{{.Key}}" value="{{index $.Form .Key}}" type="number" min="1" max="65535">
+        {{else if eq .Key "SessionIdleMinutes"}}
+          <input name="{{.Key}}" value="{{index $.Form .Key}}" type="number" min="5" max="1440">
+        {{else if eq .Key "SessionAbsoluteHours"}}
+          <input name="{{.Key}}" value="{{index $.Form .Key}}" type="number" min="1" max="168">
+        {{else if eq .Key "EQResourceBaseUrl"}}
+          <input name="{{.Key}}" value="{{index $.Form .Key}}" type="url">
         {{else}}
-          <input name="{{.Key}}" value="{{index $.Form .Key}}" {{if eq .Key "GuildOpenDays"}}type="number" min="0" max="3650"{{else if eq .Key "BazaarDays"}}type="number" min="0" max="3650"{{else if eq .Key "MariaDbPort"}}type="number" min="1" max="65535"{{else if eq .Key "SessionIdleMinutes"}}type="number" min="5" max="1440"{{else if eq .Key "SessionAbsoluteHours"}}type="number" min="1" max="168"{{else if eq .Key "EQResourceBaseUrl"}}type="url"{{end}}">
+          <input name="{{.Key}}" value="{{index $.Form .Key}}">
         {{end}}
         <span class="help">{{.Help}}</span>
       </label>

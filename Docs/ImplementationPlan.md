@@ -190,7 +190,7 @@ Critical path: Phase 0 → 2 → 3 → 4 → 6 → 8. Phases 5 and 7 have slack.
 **Goal:** administrators can add, update, remove and restore inventory with full lifecycle rules and audit.
 
 **Tasks**
-1. `InventoryService.Create`: resolve `Items` metadata by `Items.ID` (D-01), decode masks, compute `DateAdded`/`DateOpen`/`DateBazaar`; item input expands to one row per unit (D-07); spells merge on `(ItemType='Spell', EQUID)` and never change dates (D-06).
+1. `InventoryService.Create`: resolve `Items` metadata by `Items.ID` (D-01), decode masks, compute `DateAdded`/`DateOpen`/`DateBazaar`; item input stores one row carrying the entered quantity (D-07 as amended by QTY-07); spells merge on `(ItemType='Spell', EQUID)` and never change dates (D-06).
 2. `InventoryService.Update`: mutable fields only (`Quantity`, `GivenTo`, `SourceLocation`, `DeletedFg`); immutable fields rejected with a clear message.
 3. `InventoryService.Remove`/`Restore`: soft delete and restore, both audited.
 4. Admin inventory grid: search, filter, sort, pagination, row actions; add/edit forms with server-side validation and HTMX partial refresh.

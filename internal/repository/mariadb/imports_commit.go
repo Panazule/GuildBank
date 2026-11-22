@@ -49,10 +49,8 @@ func (s *Store) BeginCommit(ctx context.Context, batchID int64) (service.ImportC
 		return nil, mapStoreError("begin commit", err)
 	}
 	commit := &importCommitTx{store: s, ctx: ctx, conn: conn, tx: tx}
-	row := tx.QueryRowContext(ctx, `SELECT ImportBatchID, FileName, FileSha256,
-		SourceRowCount, AcceptedRowCount, Status, FailureReason, ImportedBy,
-		ImportedByUserID, ImportedAt FROM ImportBatch
-		WHERE ImportBatchID=? FOR UPDATE`, batchID)
+	row := tx.QueryRowContext(ctx, `SELECT `+importBatchColumns+`
+		FROM ImportBatch WHERE ImportBatchID=? FOR UPDATE`, batchID)
 	batch, err := scanImportBatch(row)
 	if err != nil {
 		commit.finish(true)
@@ -83,7 +81,8 @@ func (c *importCommitTx) SelectedRows() ([]domain.ImportRow, error) {
 	rows, err := c.tx.QueryContext(c.ctx, `SELECT ImportID, ImportBatchID,
 		SourceLine, ItemType, EQUID, Name, Quantity, LocationRaw, LocationGroup,
 		LocationSort, NameSort, SelectedFg, WarningText FROM ImportList
-		WHERE ImportBatchID=? AND SelectedFg=1 ORDER BY ImportID`, c.batch.ImportBatchID)
+		WHERE ImportBatchID=? AND SelectedFg=1 AND `+unspecifiedExclusion+`
+		ORDER BY ImportID`, c.batch.ImportBatchID)
 	if err != nil {
 		return nil, mapStoreError("read committed rows", err)
 	}

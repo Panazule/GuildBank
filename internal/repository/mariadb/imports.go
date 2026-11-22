@@ -13,6 +13,19 @@ import (
 
 const importChunkSize = 500
 
+// unspecifiedExclusion keeps rows whose LocationGroup is Other/Unspecified out
+// of the import review (IMP-C). The rows stay staged and counted on the batch,
+// but they are never listed, never selectable and never committed: the
+// classification stays internal bookkeeping rather than a bank location the
+// reviewer can see or act on.
+const unspecifiedExclusion = "LocationGroup <> 'Unspecified'"
+
+// importBatchColumns is the explicit ImportBatch projection shared by every
+// batch read, including the commit transaction.
+const importBatchColumns = `ImportBatchID, FileName, FileSha256, SourceRowCount,
+	AcceptedRowCount, IgnoredRowCount, Status, FailureReason, ImportedBy,
+	ImportedByUserID, ImportedAt`
+
 // Ready reports whether the import repository has an open pool.
 func (s *Store) Ready() bool { return s != nil && s.db != nil }
 
@@ -50,7 +63,7 @@ func (s *Store) FailBatch(ctx context.Context, batchID int64, reason *string, so
 
 // StageBatch inserts every parsed row, marks the batch Uploaded and writes the
 // upload audit entry in one transaction.
-func (s *Store) StageBatch(ctx context.Context, batchID int64, rows []domain.ImportRow, sourceRows int, sha string, audit domain.AuditEntry) error {
+func (s *Store) StageBatch(ctx context.Context, batchID int64, rows []domain.ImportRow, sourceRows, ignoredRows int, sha string, audit domain.AuditEntry) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return mapStoreError("begin staging", err)
@@ -64,9 +77,9 @@ func (s *Store) StageBatch(ctx context.Context, batchID int64, rows []domain.Imp
 		}
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE ImportBatch
-		SET Status='Uploaded', SourceRowCount=?, AcceptedRowCount=?, FileSha256=?
+		SET Status='Uploaded', SourceRowCount=?, AcceptedRowCount=?, IgnoredRowCount=?, FileSha256=?
 		WHERE ImportBatchID=? AND Status='Processing'`,
-		sourceRows, len(rows), sha, batchID)
+		sourceRows, len(rows), ignoredRows, sha, batchID)
 	if err != nil {
 		return mapStoreError("mark batch uploaded", err)
 	}
@@ -143,9 +156,8 @@ func insertAudit(ctx context.Context, tx *sql.Tx, entries []domain.AuditEntry) e
 
 // GetBatch reads one batch record.
 func (s *Store) GetBatch(ctx context.Context, batchID int64) (domain.ImportBatch, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT ImportBatchID, FileName, FileSha256,
-		SourceRowCount, AcceptedRowCount, Status, FailureReason, ImportedBy,
-		ImportedByUserID, ImportedAt FROM ImportBatch WHERE ImportBatchID=?`, batchID)
+	row := s.db.QueryRowContext(ctx, `SELECT `+importBatchColumns+`
+		FROM ImportBatch WHERE ImportBatchID=?`, batchID)
 	return scanImportBatch(row)
 }
 
@@ -157,15 +169,11 @@ func (s *Store) ListBatches(ctx context.Context, limit int, beforeID int64) ([]d
 	var rows *sql.Rows
 	var err error
 	if beforeID > 0 {
-		rows, err = s.db.QueryContext(ctx, `SELECT ImportBatchID, FileName, FileSha256,
-			SourceRowCount, AcceptedRowCount, Status, FailureReason, ImportedBy,
-			ImportedByUserID, ImportedAt FROM ImportBatch
-			WHERE ImportBatchID < ? ORDER BY ImportBatchID DESC LIMIT ?`, beforeID, limit)
+		rows, err = s.db.QueryContext(ctx, `SELECT `+importBatchColumns+`
+			FROM ImportBatch WHERE ImportBatchID < ? ORDER BY ImportBatchID DESC LIMIT ?`, beforeID, limit)
 	} else {
-		rows, err = s.db.QueryContext(ctx, `SELECT ImportBatchID, FileName, FileSha256,
-			SourceRowCount, AcceptedRowCount, Status, FailureReason, ImportedBy,
-			ImportedByUserID, ImportedAt FROM ImportBatch
-			ORDER BY ImportBatchID DESC LIMIT ?`, limit)
+		rows, err = s.db.QueryContext(ctx, `SELECT `+importBatchColumns+`
+			FROM ImportBatch ORDER BY ImportBatchID DESC LIMIT ?`, limit)
 	}
 	if err != nil {
 		return nil, mapStoreError("list import batches", err)
@@ -207,13 +215,14 @@ func scanImportBatch(scanner interface{ Scan(...any) error }) (domain.ImportBatc
 		sha          sql.NullString
 		sourceRows   sql.NullInt64
 		acceptedRows sql.NullInt64
+		ignoredRows  sql.NullInt64
 		status       string
 		failure      sql.NullString
 		importedByID sql.NullInt64
 		importedAt   time.Time
 	)
 	if err := scanner.Scan(&batch.ImportBatchID, &batch.FileName, &sha, &sourceRows,
-		&acceptedRows, &status, &failure, &batch.ImportedBy, &importedByID, &importedAt); err != nil {
+		&acceptedRows, &ignoredRows, &status, &failure, &batch.ImportedBy, &importedByID, &importedAt); err != nil {
 		return domain.ImportBatch{}, mapStoreError("scan import batch", err)
 	}
 	if sha.Valid {
@@ -226,6 +235,10 @@ func scanImportBatch(scanner interface{ Scan(...any) error }) (domain.ImportBatc
 	if acceptedRows.Valid {
 		value := int(acceptedRows.Int64)
 		batch.AcceptedRowCount = &value
+	}
+	if ignoredRows.Valid {
+		value := int(ignoredRows.Int64)
+		batch.IgnoredRowCount = &value
 	}
 	batch.Status = domain.ImportStatus(status)
 	if failure.Valid {
@@ -243,7 +256,7 @@ func scanImportBatch(scanner interface{ Scan(...any) error }) (domain.ImportBatc
 func (s *Store) ListLocations(ctx context.Context, batchID int64) ([]domain.ImportLocation, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT LocationGroup, MIN(LocationSort) AS LocationSort,
 		COUNT(*) AS RowCount, SUM(SelectedFg) AS SelectedCount
-		FROM ImportList WHERE ImportBatchID=?
+		FROM ImportList WHERE ImportBatchID=? AND `+unspecifiedExclusion+`
 		GROUP BY LocationGroup ORDER BY LocationSort, LocationGroup`, batchID)
 	if err != nil {
 		return nil, mapStoreError("list import locations", err)
@@ -272,11 +285,22 @@ func (s *Store) ListRows(ctx context.Context, batchID int64, filter domain.Impor
 	if filter.PageSize < 1 || filter.PageSize > 200 {
 		filter.PageSize = 50
 	}
-	where := []string{"ImportBatchID = ?"}
+	where := []string{"ImportBatchID = ?", unspecifiedExclusion}
 	args := []any{batchID}
 	if filter.LocationGroup != "" {
 		where = append(where, "LocationGroup = ?")
 		args = append(args, filter.LocationGroup)
+	}
+	// Group scope (IMP-06): a group the reviewer unchecked is hidden from the
+	// grid and excluded from bulk selection. The "unselected" view sets
+	// IgnoreGroups so rows in a hidden group remain reviewable.
+	if !filter.IgnoreGroups && len(filter.ExcludeGroups) > 0 {
+		placeholders := make([]string, 0, len(filter.ExcludeGroups))
+		for _, group := range filter.ExcludeGroups {
+			placeholders = append(placeholders, "?")
+			args = append(args, group)
+		}
+		where = append(where, "LocationGroup NOT IN ("+strings.Join(placeholders, ",")+")")
 	}
 	switch filter.Selected {
 	case "selected":
@@ -316,13 +340,22 @@ func (s *Store) ListRows(ctx context.Context, batchID int64, filter domain.Impor
 	return page, nil
 }
 
-// RowIDs returns every staged ID, optionally restricted to one LocationGroup.
-func (s *Store) RowIDs(ctx context.Context, batchID int64, locationGroup string) ([]int64, error) {
-	query := `SELECT ImportID FROM ImportList WHERE ImportBatchID=?`
+// RowIDs returns every staged ID, optionally restricted to one LocationGroup
+// and excluding the groups outside the review page's current scope (IMP-06).
+func (s *Store) RowIDs(ctx context.Context, batchID int64, locationGroup string, excludeGroups []string) ([]int64, error) {
+	query := `SELECT ImportID FROM ImportList WHERE ImportBatchID=? AND ` + unspecifiedExclusion
 	args := []any{batchID}
 	if locationGroup != "" {
 		query += ` AND LocationGroup=?`
 		args = append(args, locationGroup)
+	}
+	if len(excludeGroups) > 0 {
+		placeholders := make([]string, 0, len(excludeGroups))
+		for _, group := range excludeGroups {
+			placeholders = append(placeholders, "?")
+			args = append(args, group)
+		}
+		query += ` AND LocationGroup NOT IN (` + strings.Join(placeholders, ",") + `)`
 	}
 	query += ` ORDER BY ImportID`
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -344,10 +377,12 @@ func (s *Store) RowIDs(ctx context.Context, batchID int64, locationGroup string)
 	return ids, nil
 }
 
-// SelectedIDs returns the full selected set for UI bootstrap.
+// SelectedIDs returns the full selected set for UI bootstrap. Rows in the
+// Other/Unspecified group are never part of the import selection (IMP-C), even
+// on a legacy batch that still has SelectedFg set on them.
 func (s *Store) SelectedIDs(ctx context.Context, batchID int64) ([]int64, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT ImportID FROM ImportList
-		WHERE ImportBatchID=? AND SelectedFg=1 ORDER BY ImportID`, batchID)
+		WHERE ImportBatchID=? AND SelectedFg=1 AND `+unspecifiedExclusion+` ORDER BY ImportID`, batchID)
 	if err != nil {
 		return nil, mapStoreError("list selected rows", err)
 	}
@@ -435,12 +470,15 @@ func (s *Store) ReplaceSelection(ctx context.Context, batchID int64, ids []int64
 		return fmt.Errorf("%w: batch is not editable", domain.ErrConflict)
 	}
 	if len(ids) > 0 {
-		matched, err := countMatchingImportIDs(ctx, tx, batchID, ids)
+		matched, selectable, err := countImportIDs(ctx, tx, batchID, ids)
 		if err != nil {
 			return err
 		}
 		if matched != len(ids) {
 			return domain.NewValidationError("selectedImportIds", "one or more IDs do not belong to this batch")
+		}
+		if selectable != len(ids) {
+			return domain.NewValidationError("selectedImportIds", "Other location rows cannot be selected for import")
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE ImportList SET SelectedFg=0 WHERE ImportBatchID=?`, batchID); err != nil {
@@ -474,8 +512,10 @@ func (s *Store) ReplaceSelection(ctx context.Context, batchID int64, ids []int64
 	return nil
 }
 
-func countMatchingImportIDs(ctx context.Context, tx *sql.Tx, batchID int64, ids []int64) (int, error) {
-	total := 0
+// countImportIDs reports how many of the supplied IDs belong to the batch and
+// how many of those are selectable rows. Other/Unspecified rows are staged but
+// are not part of the import review, so they are counted separately (IMP-C).
+func countImportIDs(ctx context.Context, tx *sql.Tx, batchID int64, ids []int64) (matched, selectable int, err error) {
 	for start := 0; start < len(ids); start += 1000 {
 		end := min(start+1000, len(ids))
 		args := []any{batchID}
@@ -484,15 +524,17 @@ func countMatchingImportIDs(ctx context.Context, tx *sql.Tx, batchID int64, ids 
 			args = append(args, id)
 			placeholders = append(placeholders, "?")
 		}
-		var count int
-		query := `SELECT COUNT(*) FROM ImportList WHERE ImportBatchID=? AND ImportID IN (` +
+		var batchMatched, batchSelectable int
+		query := `SELECT COUNT(*), COALESCE(SUM(` + unspecifiedExclusion + `),0)
+			FROM ImportList WHERE ImportBatchID=? AND ImportID IN (` +
 			strings.Join(placeholders, ",") + `)`
-		if err := tx.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
-			return 0, mapStoreError("count batch row membership", err)
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&batchMatched, &batchSelectable); err != nil {
+			return 0, 0, mapStoreError("count batch row membership", err)
 		}
-		total += count
+		matched += batchMatched
+		selectable += batchSelectable
 	}
-	return total, nil
+	return matched, selectable, nil
 }
 
 // SelectedTotals aggregates the persisted selection.
@@ -506,7 +548,7 @@ func (s *Store) SelectedTotals(ctx context.Context, batchID int64) (domain.Impor
 		COUNT(DISTINCT CASE WHEN ItemType='Spell' THEN EQUID END) AS DistinctSpells,
 		COALESCE(SUM(CASE WHEN WarningText IS NOT NULL AND WarningText <> ''
 		                  AND WarningText <> '[]' THEN 1 ELSE 0 END),0) AS WarningRows
-		FROM ImportList WHERE ImportBatchID=? AND SelectedFg=1`, batchID).Scan(
+		FROM ImportList WHERE ImportBatchID=? AND SelectedFg=1 AND `+unspecifiedExclusion, batchID).Scan(
 		&totals.SelectedRows, &totals.ItemRows, &totals.ItemUnits, &totals.SpellRows,
 		&totals.SpellQuantity, &totals.DistinctSpells, &totals.WarningRows)
 	if err != nil {
@@ -519,6 +561,7 @@ func (s *Store) SelectedTotals(ctx context.Context, batchID int64) (domain.Impor
 func (s *Store) SpellPreview(ctx context.Context, batchID int64) ([]domain.SpellPreview, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT EQUID, SUM(Quantity), COUNT(*)
 		FROM ImportList WHERE ImportBatchID=? AND SelectedFg=1 AND ItemType='Spell'
+		  AND `+unspecifiedExclusion+`
 		GROUP BY EQUID ORDER BY EQUID`, batchID)
 	if err != nil {
 		return nil, mapStoreError("read spell preview", err)

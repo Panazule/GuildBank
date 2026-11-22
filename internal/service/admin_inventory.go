@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -21,14 +22,18 @@ const (
 	AdminMaxNameRunes     = ImportMaxName
 	AdminMaxLocationRunes = ImportMaxLocation
 	AdminMaxGivenToRunes  = 128
-	// AdminMaxItemQuantity bounds an ordinary manual create by the number of
-	// rows it may insert, matching the import commit ceiling.
+	// AdminMaxItemQuantity is the per-record quantity cap for an ordinary item.
+	// A single manual create writes one row, so this bounds one value rather
+	// than the number of inserted rows.
 	AdminMaxItemQuantity = ImportMaxRows
 	// AdminMaxSpellQuantity is the uint32 storage ceiling.
 	AdminMaxSpellQuantity = math.MaxUint32
 	AdminMaxPageSize      = 200
 	AdminDefaultPageSize  = 50
 	AdminMaxPage          = 10000
+	// AdminMaxBulkRemove caps one page-local bulk removal. The admin list page
+	// size is at most 200, so a bulk action can never span more than one page.
+	AdminMaxBulkRemove = 200
 	// AdminAuditMaxPageSize caps the audit viewer page size.
 	AdminAuditMaxPageSize = 200
 )
@@ -84,6 +89,9 @@ type AdminWriteResult struct {
 	CreatedCount int
 	Warnings     []ItemWarning
 	Changed      bool
+	// FieldsChanged reports whether editable fields changed. It distinguishes
+	// "saved and removed" from "removed with no edits" for the notice text.
+	FieldsChanged bool
 }
 
 // AdminInventoryService owns administrative filter validation, lifecycle date
@@ -417,15 +425,12 @@ func (s *AdminInventoryService) prepareCreate(ctx context.Context, in domain.Cre
 	row := domain.GuildBankItem{
 		ItemType: in.ItemType, EQUID: in.EQUID, MetadataMissingFg: missing,
 		Name: name, ClassString: classString, RaceString: raceString,
-		DateAdded: added, DateOpen: open, DateBazaar: bazaar, Quantity: 1,
+		DateAdded: added, DateOpen: open, DateBazaar: bazaar, Quantity: in.Quantity,
 		SourceLocation: in.SourceLocation.String(), LocationGroup: location.Group,
 		LocationSort: TruncateRunes(location.Sort, 80),
 		GivenTo:      in.GivenTo.String(), DeletedFg: false,
 		ModAt: now, ModBy: in.Actor.UserName, ModByUserID: &in.Actor.UserID,
 		NameSort: TruncateRunes(NaturalSortKey(name), 160),
-	}
-	if in.ItemType == domain.ItemTypeSpell {
-		row.Quantity = in.Quantity
 	}
 	return in, row, warnings, nil
 }
@@ -497,16 +502,9 @@ func (s *AdminInventoryService) createAttempt(ctx context.Context, in domain.Cre
 		}
 	}
 
-	rows := make([]domain.GuildBankItem, 0, 1)
-	if row.ItemType == domain.ItemTypeSpell {
-		rows = append(rows, row)
-	} else {
-		for unit := uint32(0); unit < in.Quantity; unit++ {
-			copied := row
-			copied.Quantity = 1
-			rows = append(rows, copied)
-		}
-	}
+	// QTY-07: manual create follows the import model. One row stores the
+	// entered quantity; an ordinary item is no longer expanded per unit.
+	rows := []domain.GuildBankItem{row}
 	ids, err := tx.InsertInventory(ctx, rows)
 	if err != nil {
 		return AdminWriteResult{}, err
@@ -669,8 +667,9 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 	if !sameModAt(current.ModAt, in.ExpectedModAt) {
 		return AdminWriteResult{}, fmt.Errorf("%w: the record changed since it was loaded", domain.ErrConflict)
 	}
-	if current.ItemType == domain.ItemTypeItem && in.Quantity != 1 {
-		return AdminWriteResult{}, domain.NewValidationError("quantity", "an item record must keep quantity 1")
+	if current.ItemType == domain.ItemTypeItem && uint64(in.Quantity) > uint64(AdminMaxItemQuantity) {
+		return AdminWriteResult{}, domain.NewValidationError("quantity",
+			fmt.Sprintf("quantity must be between 1 and %d for an item", AdminMaxItemQuantity))
 	}
 
 	open, bazaar := current.DateOpen, current.DateBazaar
@@ -718,7 +717,7 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 	}
 
 	changed := make(map[string]bool, 5)
-	if current.ItemType == domain.ItemTypeSpell && in.Quantity != current.Quantity {
+	if in.Quantity != current.Quantity {
 		changed["quantity"] = true
 	}
 	if in.SourceLocation.String() != current.SourceLocation {
@@ -733,7 +732,7 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 	if !sameDay(bazaar, current.DateBazaar) {
 		changed["dateBazaar"] = true
 	}
-	if len(changed) == 0 {
+	if len(changed) == 0 && !in.Remove {
 		if err := tx.Commit(); err != nil {
 			return AdminWriteResult{}, err
 		}
@@ -759,15 +758,37 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 		value := bazaar
 		row.DateBazaar = &value
 	}
-	if err := tx.UpdateInventory(ctx, row); err != nil {
-		return AdminWriteResult{}, err
+	// AI-02: when the administrator asks to save and remove, the field update
+	// and the soft delete happen in this one transaction. The ITEM_UPDATED row
+	// is written only when editable fields actually changed; ITEM_REMOVED is
+	// always written. Both share the request's correlation ID.
+	if len(changed) > 0 {
+		if err := tx.UpdateInventory(ctx, row); err != nil {
+			return AdminWriteResult{}, err
+		}
 	}
-	entry, err := updateAudit(current, changed, in, open, bazaar, modAt)
-	if err != nil {
-		return AdminWriteResult{}, err
+	if in.Remove {
+		if err := tx.SetDeleted(ctx, current.ID, true, modAt, in.Actor); err != nil {
+			return AdminWriteResult{}, err
+		}
 	}
-	if err := tx.InsertAudit(ctx, entry); err != nil {
-		return AdminWriteResult{}, err
+	if len(changed) > 0 {
+		entry, err := updateAudit(current, changed, in, open, bazaar, modAt)
+		if err != nil {
+			return AdminWriteResult{}, err
+		}
+		if err := tx.InsertAudit(ctx, entry); err != nil {
+			return AdminWriteResult{}, err
+		}
+	}
+	if in.Remove {
+		entry, err := stateAudit(current, true, in.Actor, modAt, in.CorrelationID, in.SourceIP)
+		if err != nil {
+			return AdminWriteResult{}, err
+		}
+		if err := tx.InsertAudit(ctx, entry); err != nil {
+			return AdminWriteResult{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return AdminWriteResult{}, err
@@ -782,11 +803,12 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 	updated.GivenTo = in.GivenTo.String()
 	updated.DateOpen = open
 	updated.DateBazaar = bazaar
+	updated.DeletedFg = in.Remove
 	updated.ModAt = modAt
 	updated.ModBy = in.Actor.UserName
 	actorID := in.Actor.UserID
 	updated.ModByUserID = &actorID
-	return AdminWriteResult{Item: updated, Warnings: warnings, Changed: true}, nil
+	return AdminWriteResult{Item: updated, Warnings: warnings, Changed: true, FieldsChanged: len(changed) > 0}, nil
 }
 
 func sameModAt(stored, expected time.Time) bool {
@@ -891,6 +913,10 @@ func (s *AdminInventoryService) setDeletedAttempt(ctx context.Context, id int64,
 	if err != nil {
 		return AdminWriteResult{}, err
 	}
+	if !deleted && current.ConsolidatedInto != nil {
+		return AdminWriteResult{}, fmt.Errorf("%w: the record was consolidated into row %d and cannot be restored",
+			domain.ErrConflict, *current.ConsolidatedInto)
+	}
 	if current.DeletedFg == deleted {
 		if deleted {
 			return AdminWriteResult{}, fmt.Errorf("%w: the record is already removed", domain.ErrConflict)
@@ -945,6 +971,138 @@ func stateAudit(current domain.AdminInventoryItem, deleted bool,
 		NewValues: newJSON, Notes: notes,
 		CorrelationID: correlationID, SourceIP: sourceIP,
 	}, nil
+}
+
+// PreviewRemoveMany validates one page-local bulk-removal selection and returns
+// the records that would be removed. It is a read: RemoveMany re-validates every
+// record under lock so a preview cannot become a stale authorization.
+func (s *AdminInventoryService) PreviewRemoveMany(ctx context.Context, targets []domain.RemoveItemTarget) ([]domain.AdminInventoryItem, error) {
+	if err := s.requireReady(); err != nil {
+		return nil, err
+	}
+	if err := validateRemoveTargets(targets); err != nil {
+		return nil, err
+	}
+	items := make([]domain.AdminInventoryItem, 0, len(targets))
+	for _, target := range targets {
+		item, err := s.store.GetAdminInventory(ctx, target.ID)
+		if err != nil {
+			return nil, err
+		}
+		if item.DeletedFg {
+			return nil, fmt.Errorf("%w: a selected record is already removed", domain.ErrConflict)
+		}
+		if !sameModAt(item.ModAt, target.ExpectedModAt) {
+			return nil, fmt.Errorf("%w: a selected record changed since the page was loaded", domain.ErrConflict)
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	return items, nil
+}
+
+// RemoveMany soft-deletes every selected record in one transaction, locking the
+// rows in ascending primary-key order to keep concurrent writers deadlock-free.
+// It is all-or-nothing: one stale token, removed row or missing ID rolls back the
+// whole selection. Each record gets its own ITEM_REMOVED audit row; all rows of
+// the request share the caller's correlation ID (AI-01).
+func (s *AdminInventoryService) RemoveMany(ctx context.Context, targets []domain.RemoveItemTarget,
+	actor domain.Actor, correlationID, sourceIP string) (domain.BulkRemoveResult, error) {
+	if err := s.requireReady(); err != nil {
+		return domain.BulkRemoveResult{}, err
+	}
+	if err := validateActor(actor); err != nil {
+		return domain.BulkRemoveResult{}, err
+	}
+	if err := validateRemoveTargets(targets); err != nil {
+		return domain.BulkRemoveResult{}, err
+	}
+	ordered := append([]domain.RemoveItemTarget(nil), targets...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+
+	result, err := s.removeManyAttempt(ctx, ordered, actor, correlationID, sourceIP)
+	var retry *domain.RetryableError
+	if err != nil && errors.As(err, &retry) {
+		s.logger.Warn("bulk remove deadlock; retrying once", "count", len(ordered))
+		result, err = s.removeManyAttempt(ctx, ordered, actor, correlationID, sourceIP)
+	}
+	return result, err
+}
+
+func validateRemoveTargets(targets []domain.RemoveItemTarget) error {
+	fields := make(map[string]string)
+	switch {
+	case len(targets) == 0:
+		fields["remove"] = "select at least one record"
+	case len(targets) > AdminMaxBulkRemove:
+		fields["remove"] = fmt.Sprintf("at most %d records may be removed at once", AdminMaxBulkRemove)
+	}
+	seen := make(map[int64]bool, len(targets))
+	for _, target := range targets {
+		if target.ID <= 0 || target.ExpectedModAt.IsZero() {
+			fields["remove"] = "every selected record needs an ID and its version token"
+			continue
+		}
+		if seen[target.ID] {
+			fields["remove"] = "a record was selected more than once"
+			continue
+		}
+		seen[target.ID] = true
+	}
+	if len(fields) > 0 {
+		return &domain.ValidationError{Fields: fields}
+	}
+	return nil
+}
+
+func (s *AdminInventoryService) removeManyAttempt(ctx context.Context, targets []domain.RemoveItemTarget,
+	actor domain.Actor, correlationID, sourceIP string) (domain.BulkRemoveResult, error) {
+	tx, err := s.store.BeginAdminWrite(ctx)
+	if err != nil {
+		return domain.BulkRemoveResult{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	at := s.now().UTC()
+	items := make([]domain.AdminInventoryItem, 0, len(targets))
+	for _, target := range targets {
+		current, err := tx.LockInventory(ctx, target.ID)
+		if err != nil {
+			return domain.BulkRemoveResult{}, err
+		}
+		if current.DeletedFg {
+			return domain.BulkRemoveResult{}, fmt.Errorf("%w: a selected record is already removed", domain.ErrConflict)
+		}
+		if !sameModAt(current.ModAt, target.ExpectedModAt) {
+			return domain.BulkRemoveResult{}, fmt.Errorf("%w: a selected record changed since the page was loaded", domain.ErrConflict)
+		}
+		if err := tx.SetDeleted(ctx, current.ID, true, at, actor); err != nil {
+			return domain.BulkRemoveResult{}, err
+		}
+		entry, err := stateAudit(current, true, actor, at, correlationID, sourceIP)
+		if err != nil {
+			return domain.BulkRemoveResult{}, err
+		}
+		if err := tx.InsertAudit(ctx, entry); err != nil {
+			return domain.BulkRemoveResult{}, err
+		}
+		current.DeletedFg = true
+		current.ModAt = at
+		current.ModBy = actor.UserName
+		actorID := actor.UserID
+		current.ModByUserID = &actorID
+		items = append(items, current)
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.BulkRemoveResult{}, err
+	}
+	committed = true
+	return domain.BulkRemoveResult{Items: items, Removed: len(items)}, nil
 }
 
 // ListAudit validates the audit filters and reads one page newest-first.

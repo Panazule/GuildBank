@@ -36,6 +36,12 @@ type Config struct {
 	TrustedProxies []string
 	SecureCookies  bool
 	MariaDB        MariaDB
+	// ConsolidateItems runs the QTY-09 item-stack consolidation maintenance
+	// pass and exits instead of serving HTTP. ConsolidateDryRun reports the
+	// groups without writing, and ConsolidateActor is recorded in the audit.
+	ConsolidateItems  bool
+	ConsolidateDryRun bool
+	ConsolidateActor  string
 }
 
 // MariaDB holds the bootstrap connection settings for the guild store.
@@ -68,10 +74,11 @@ func (m MariaDB) Redacted() string {
 // (without the program name). It returns flag.ErrHelp for -h/-help.
 func Load(args []string, getenv func(string) string) (Config, error) {
 	cfg := Config{
-		Port:       DefaultPort,
-		SQLitePath: DefaultSQLitePath,
-		LogLevel:   DefaultLogLevel,
-		LogFormat:  DefaultLogFormat,
+		Port:             DefaultPort,
+		SQLitePath:       DefaultSQLitePath,
+		LogLevel:         DefaultLogLevel,
+		LogFormat:        DefaultLogFormat,
+		ConsolidateActor: "system",
 		MariaDB: MariaDB{
 			Port:     DefaultMariaDBPort,
 			Database: "GuildBank",
@@ -89,6 +96,12 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn, error")
 	fs.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log format: json or text")
 	fs.BoolVar(&cfg.SecureCookies, "secure-cookies", cfg.SecureCookies, "mark session and CSRF cookies Secure (enable behind HTTPS)")
+	fs.BoolVar(&cfg.ConsolidateItems, "consolidate-items", cfg.ConsolidateItems,
+		"consolidate active duplicate item stacks and exit")
+	fs.BoolVar(&cfg.ConsolidateDryRun, "dry-run", cfg.ConsolidateDryRun,
+		"report consolidation groups without writing (requires -consolidate-items)")
+	fs.StringVar(&cfg.ConsolidateActor, "consolidate-actor", cfg.ConsolidateActor,
+		"audit username recorded by -consolidate-items")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return Config{}, flag.ErrHelp
@@ -194,6 +207,15 @@ func (c Config) Validate() error {
 			}
 		}
 	}
+	if c.ConsolidateDryRun && !c.ConsolidateItems {
+		return errors.New("-dry-run requires -consolidate-items")
+	}
+	if c.ConsolidateItems && strings.TrimSpace(c.ConsolidateActor) == "" {
+		return errors.New("consolidate actor must not be empty")
+	}
+	if c.ConsolidateItems && !c.MariaDB.Configured() {
+		return errors.New("-consolidate-items requires a configured MariaDB guild store")
+	}
 	if c.MariaDB.Configured() {
 		if c.MariaDB.Port < 1 || c.MariaDB.Port > 65535 {
 			return fmt.Errorf("MariaDB port %d is outside 1-65535", c.MariaDB.Port)
@@ -218,6 +240,9 @@ Flags:
   -log-level string    debug, info, warn or error (default info)
   -log-format string   json or text (default json)
   -secure-cookies      mark cookies Secure; enable when served over HTTPS
+  -consolidate-items   consolidate active duplicate item stacks to one row and exit
+  -dry-run             report -consolidate-items groups without writing
+  -consolidate-actor   audit username for -consolidate-items (default system)
 
 Environment (flags override environment):
   GUILDBANK_PORT, GUILDBANK_SQLITE_PATH, GUILDBANK_LOG_LEVEL,

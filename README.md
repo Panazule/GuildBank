@@ -167,7 +167,7 @@ settings validation. The four-step flow was also exercised against the Compose
 topology with a live MariaDB 11.4 instance.
 
 Phase 3 adds the parser golden test for the 548-line sample, natural-sort and
-`LocationGroup` normalization tests, commit-plan expansion/merge tests, and
+`LocationGroup` normalization tests, commit-plan quantity/merge tests, and
 handler tests for multipart CSRF, upload, selection and rendered import pages.
 Phase 4 adds filter/availability/EQResource unit tests, repository predicate and
 allowlist tests, public JSON/HTML contract tests, forbidden-field and XSS tests,
@@ -188,6 +188,20 @@ then run `go test ./internal/integration -run Phase4PublicInventoryPerformance -
 Set `GUILDBANK_PHASE4_PERF_ROWS=1000000` for the stress run; the default is
 250,000 active rows plus 10% deleted noise. Results are recorded in
 `Docs/Phase4Validation.md`.
+
+Legacy item rows written before the QTY-01 change can be folded into one stack
+with the owner-run maintenance command. Always rehearse with `-dry-run` first;
+the command migrates and backfills as usual, prints the group/absorbed/unit
+counts in the log, and exits without serving HTTP:
+
+```sh
+guildbank -consolidate-items -dry-run
+guildbank -consolidate-items -consolidate-actor <operator>
+```
+
+The survivor is the lowest ID, quantities are summed, absorbed rows are soft
+deleted with `ConsolidatedInto` and audit rows, and a second run is a no-op.
+See `Docs/ItemQuantityModelImplementation.md`.
 
 Layer boundaries are enforced by tests: `internal/api` and `internal/web`
 fail the build if they import `internal/repository`.

@@ -405,7 +405,7 @@ Item
 
 Behavior:
 
-One Row Per Item Instance
+One Row Per Imported Item Line (amended 2026-11-22, QTY-01/QTY-02)
 
 Example:
 
@@ -413,7 +413,12 @@ Quantity = 5
 
 Creates:
 
-5 GuildBankItems records
+1 GuildBankItems record with Quantity = 5
+
+A later import of the same EQUID creates a separate record with its own
+quantity; ordinary items are never merged. Spells keep their merge-by-EQUID
+rule. The pre-amendment rule ("one row per item instance") is superseded;
+see Docs/ItemQuantityModelReview.md.
 
 Class Bitmask Decoding
 ClassList contains bitmask values.
@@ -1024,18 +1029,22 @@ DateAdded, DateOpen and DateBazaar shall remain unchanged when spell quantities 
 If no matching spell exists:
 
 Create a new GuildBankItems record.
-D-07 Item Import Rules
+D-07 Item Import Rules (amended 2026-11-22, QTY-01/QTY-02)
 Items are never merged.
 
-Each imported item instance creates its own GuildBankItems record.
+Each imported item line creates one GuildBankItems record carrying the line's
+quantity. A later import of the same EQUID creates another record; it never
+updates an existing row.
 
 Example:
 
-Imported Quantity = 5
+Import 1: Batwing Crunchies Quantity = 55
+Import 2: Batwing Crunchies Quantity = 8
 
 Result:
 
-5 independent GuildBankItems records.
+Row A: Quantity = 55
+Row B: Quantity = 8
 
 Each record receives:
 
@@ -1044,7 +1053,12 @@ DateAdded
 DateOpen
 DateBazaar
 SourceLocation
-This supports independent lifecycle tracking.
+Quantity
+
+This supports independent lifecycle tracking per imported stack. Manual create
+follows the same model (QTY-07). The historical "one row per unit" text is
+superseded; see Docs/ItemQuantityModelReview.md and
+Docs/ItemQuantityModelImplementation.md.
 
 D-08 Missing Metadata Behavior
 If an imported EQUID cannot be found in the Items table:

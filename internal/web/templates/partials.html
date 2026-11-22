@@ -13,12 +13,15 @@
   <a class="brand" href="/">Aeternus <span>Guild Bank</span></a>
   <nav aria-label="Main">
     <a href="/">Inventory</a>
+    {{if not .User}}
+      <a href="/login">Login</a>
+    {{end}}
     {{if .User}}
       <a href="/admin/settings">Settings</a>
       {{if .User.IsAdmin}}
         <a href="/admin/inventory">Admin inventory</a>
-        <a href="/admin/audit">Audit</a>
         <a href="/admin/imports">Imports</a>
+        <a href="/admin/audit">Audit</a>
       {{end}}
       <form method="post" action="/api/v1/auth/logout" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">

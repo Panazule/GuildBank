@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -18,6 +19,15 @@ const (
 )
 
 var canonicalHeader = []string{"Location", "Name", "ID", "Count", "Slots"}
+
+// nestedSlotLocation matches a bank location whose last two or more path
+// segments are slot suffixes, for example "General 1-Slot2-Slot1". Such a row
+// describes an item inside a container that itself occupies a bank slot; the
+// container row at "General 1" already represents that slot, so importing the
+// nested row as a separate inventory record would double-count the contents at
+// a location that is not addressable in the guild bank UI (IMP-01). The row is
+// ignored and counted rather than staged as "Unspecified".
+var nestedSlotLocation = regexp.MustCompile(`(?i)\s*-\s*Slot\s*\d+(?:\s*-\s*Slot\s*\d+)+$`)
 
 // ParseError is a fatal, line-numbered import failure. The caller persists the
 // message in ImportBatch.FailureReason.
@@ -51,7 +61,11 @@ type ParseResult struct {
 	SourceLines    int
 	StructuralRows int
 	DiscardedRows  int
-	BlankRows      int
+	// IgnoredRows counts rows dropped by the nested-slot rule. They are
+	// otherwise well-formed rows, so they are reported separately from
+	// DiscardedRows and are not a batch failure.
+	IgnoredRows int
+	BlankRows   int
 }
 
 // ParseImport reads the canonical tab-delimited InventoryExport format.
@@ -127,6 +141,15 @@ func ParseImport(body []byte) (ParseResult, error) {
 		location := strings.TrimSpace(fields[0])
 		if utf8.RuneCountInString(location) > ImportMaxLocation {
 			return ParseResult{}, &ParseError{Code: "field_too_long", Line: lineNo, Field: "Location", Message: "Location exceeds 128 characters"}
+		}
+		// IMP-01: a well-formed row whose location is a bank slot nested inside
+		// another slot is the contents of a container, not a bank location.
+		// Ignore it after the ID/name checks so the sample's empty nested rows
+		// remain ordinary discards and the ignored counter only counts rows that
+		// would otherwise have been staged.
+		if reservedPrefix.MatchString(location) && nestedSlotLocation.MatchString(location) {
+			result.IgnoredRows++
+			continue
 		}
 		quantity := uint32(1)
 		if len(fields) == 5 {

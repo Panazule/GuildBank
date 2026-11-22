@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -8,7 +9,7 @@ import (
 	"github.com/Panazule/guildbank/internal/domain"
 )
 
-func TestBuildCommitPlanExpandsItemsAndAggregatesSpells(t *testing.T) {
+func TestBuildCommitPlanCreatesOneRowPerLineAndAggregatesSpells(t *testing.T) {
 	now := time.Date(2026, 11, 21, 23, 59, 0, 0, time.UTC)
 	rows := []domain.ImportRow{
 		{ImportID: 1, ItemType: domain.ItemTypeItem, EQUID: 10, Name: "Sword", Quantity: 2, LocationRaw: "General 1"},
@@ -27,11 +28,17 @@ func TestBuildCommitPlanExpandsItemsAndAggregatesSpells(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildCommitPlan: %v", err)
 	}
-	if plan.itemCount != 3 || len(plan.items) != 3 {
-		t.Fatalf("items = %d/%d, want 3", plan.itemCount, len(plan.items))
+	if plan.itemCount != 2 || len(plan.items) != 2 {
+		t.Fatalf("items = %d/%d, want 2 rows for 2 item lines", plan.itemCount, len(plan.items))
 	}
-	if plan.items[0].Name != "Canonical Sword" || plan.items[0].Quantity != 1 || plan.items[0].NameSort != "canonical\x01sword" {
+	if plan.itemUnits != 3 {
+		t.Fatalf("item units = %d, want 3", plan.itemUnits)
+	}
+	if plan.items[0].Name != "Canonical Sword" || plan.items[0].Quantity != 2 || plan.items[0].NameSort != "canonical\x01sword" {
 		t.Fatalf("first item = %+v", plan.items[0])
+	}
+	if plan.items[1].Quantity != 1 || plan.items[1].EQUID != 11 {
+		t.Fatalf("second item = %+v", plan.items[1])
 	}
 	if !plan.items[0].DateAdded.Equal(time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)) ||
 		!plan.items[0].DateOpen.Equal(time.Date(2026, 12, 5, 0, 0, 0, 0, time.UTC)) ||
@@ -47,8 +54,63 @@ func TestBuildCommitPlanExpandsItemsAndAggregatesSpells(t *testing.T) {
 	if len(plan.merges) != 1 || plan.merges[0].target.GuildBankItemID != 77 || plan.merges[0].quantity != 3 {
 		t.Fatalf("merges = %+v", plan.merges)
 	}
-	if plan.spellQuantity != 5 || plan.itemCount+plan.newSpellCount+len(plan.merges) != 5 {
+	if plan.spellQuantity != 5 || plan.itemCount+plan.newSpellCount+len(plan.merges) != 4 {
 		t.Fatalf("spell quantity/counts = %d", plan.spellQuantity)
+	}
+}
+
+func TestBuildCommitPlanNeverMergesRepeatedItemEQUID(t *testing.T) {
+	rows := []domain.ImportRow{
+		{ImportID: 1, ItemType: domain.ItemTypeItem, EQUID: 10, Name: "Batwing Crunchies", Quantity: 55, LocationRaw: "Bank 1"},
+	}
+	plan, err := buildCommitPlan(rows, nil, nil, domain.Actor{UserID: 1, UserName: "admin"}, time.Now(), 0, 0)
+	if err != nil {
+		t.Fatalf("buildCommitPlan: %v", err)
+	}
+	if len(plan.items) != 1 || plan.items[0].Quantity != 55 {
+		t.Fatalf("first import = %+v, want one row with quantity 55", plan.items)
+	}
+	// A later import of the same EQUID is a separate staged line, so it builds
+	// a second row; the plan never looks up existing item rows.
+	later := []domain.ImportRow{
+		{ImportID: 2, ItemType: domain.ItemTypeItem, EQUID: 10, Name: "Batwing Crunchies", Quantity: 8, LocationRaw: "Bank 1"},
+	}
+	laterPlan, err := buildCommitPlan(later, nil, nil, domain.Actor{UserID: 1, UserName: "admin"}, time.Now(), 0, 0)
+	if err != nil {
+		t.Fatalf("buildCommitPlan later: %v", err)
+	}
+	if len(laterPlan.items) != 1 || laterPlan.items[0].Quantity != 8 {
+		t.Fatalf("later import = %+v, want a second row with quantity 8", laterPlan.items)
+	}
+	if len(plan.merges) != 0 || len(laterPlan.merges) != 0 {
+		t.Fatalf("item imports must not create spell merges")
+	}
+}
+
+func TestCommitAuditEntriesSeparateUnitsAndRecords(t *testing.T) {
+	plan := commitPlan{
+		items: []domain.GuildBankItem{
+			{EQUID: 10, Quantity: 55}, {EQUID: 11, Quantity: 8},
+		},
+		itemCount: 2, itemUnits: 63,
+		newSpellCount: 1, spellQuantity: 3,
+	}
+	entries, err := commitAuditEntries(7, domain.Actor{UserID: 1, UserName: "admin"},
+		plan, 3, "req", "", time.Now(), time.Second)
+	if err != nil {
+		t.Fatalf("commitAuditEntries: %v", err)
+	}
+	if len(entries) != 2 || entries[0].EventType != "IMPORT_COMMITTED" ||
+		entries[1].EventType != "ITEM_CREATED" {
+		t.Fatalf("entries = %+v", entries)
+	}
+	var summary map[string]any
+	if err := json.Unmarshal(entries[1].NewValues, &summary); err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if summary["itemUnits"] != float64(63) || summary["itemRecords"] != float64(2) {
+		t.Fatalf("summary units/records = %v/%v, want 63/2",
+			summary["itemUnits"], summary["itemRecords"])
 	}
 }
 
@@ -92,6 +154,42 @@ func TestBuildCommitPlanMissingMetadata(t *testing.T) {
 	}
 	if !plan.newSpells[0].MetadataMissingFg || plan.newSpells[0].Name != "Spell: Unresolved" {
 		t.Fatalf("spell fallback = %+v", plan.newSpells[0])
+	}
+}
+
+func TestBuildCommitPlanAppliesSpellMetadata(t *testing.T) {
+	rows := []domain.ImportRow{
+		{ImportID: 1, ItemType: domain.ItemTypeSpell, EQUID: 26622, Name: "Ancient: Lcea's Lament", Quantity: 1},
+		{ImportID: 2, ItemType: domain.ItemTypeSpell, EQUID: 7701, Name: "Song: Magical Monologue", Quantity: 2},
+	}
+	metadata := map[uint64]ItemMetadata{
+		26622: {EQUID: 26622, Name: "Ancient: Lcea's Lament", ClassString: "BRD", RaceString: "ALL"},
+		7701:  {EQUID: 7701, Name: "Song: Canonical Monologue", ClassString: "BRD", RaceString: "ALL"},
+	}
+	plan, err := buildCommitPlan(rows, nil, metadata, domain.Actor{UserID: 1, UserName: "admin"}, time.Now(), 0, 0)
+	if err != nil {
+		t.Fatalf("buildCommitPlan: %v", err)
+	}
+	if len(plan.newSpells) != 2 {
+		t.Fatalf("new spells = %d, want 2", len(plan.newSpells))
+	}
+	for _, spell := range plan.newSpells {
+		if spell.MetadataMissingFg {
+			t.Fatalf("spell %d flagged missing despite resolved metadata", spell.EQUID)
+		}
+		if spell.ClassString != "BRD" || spell.RaceString != "ALL" {
+			t.Fatalf("spell %d metadata = (%q, %q), want (BRD, ALL)",
+				spell.EQUID, spell.ClassString, spell.RaceString)
+		}
+	}
+	if plan.newSpells[0].Name != "Ancient: Lcea's Lament" ||
+		plan.newSpells[0].NameSort != NaturalSortKey("Ancient: Lcea's Lament") {
+		t.Fatalf("first spell name = %q / %q", plan.newSpells[0].Name, plan.newSpells[0].NameSort)
+	}
+	// The resolved Items name is authoritative for spells, exactly as it is
+	// for items (DEFECT-01).
+	if plan.newSpells[1].Name != "Song: Canonical Monologue" {
+		t.Fatalf("second spell name = %q, want the Items name", plan.newSpells[1].Name)
 	}
 }
 

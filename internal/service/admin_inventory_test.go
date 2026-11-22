@@ -13,7 +13,7 @@ func testClock() time.Time { return time.Date(2026, 11, 22, 15, 4, 5, 0, time.UT
 
 func strPtr(value string) *string { return &value }
 
-func TestAdminCreateItemExpandsRowsAndWritesOneAudit(t *testing.T) {
+func TestAdminCreateItemWritesOneRowWithQuantity(t *testing.T) {
 	store := newFakeAdmin()
 	svc := testAdminService(store, nil, testClock())
 	result, err := svc.Create(context.Background(), domain.CreateItemInput{
@@ -25,11 +25,11 @@ func TestAdminCreateItemExpandsRowsAndWritesOneAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if result.CreatedCount != 3 || len(result.CreatedIDs) != 3 {
-		t.Fatalf("created = %d ids %v, want 3/3", result.CreatedCount, result.CreatedIDs)
+	if result.CreatedCount != 1 || len(result.CreatedIDs) != 1 {
+		t.Fatalf("created = %d ids %v, want 1/1", result.CreatedCount, result.CreatedIDs)
 	}
-	if result.Item.Quantity != 1 {
-		t.Fatalf("item quantity = %d, want 1", result.Item.Quantity)
+	if result.Item.Quantity != 3 {
+		t.Fatalf("item quantity = %d, want 3", result.Item.Quantity)
 	}
 	if got := result.Item.DateAdded.Format("2006-01-02"); got != "2026-11-22" {
 		t.Fatalf("dateAdded = %s", got)

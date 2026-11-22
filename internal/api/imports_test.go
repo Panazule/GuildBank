@@ -49,7 +49,7 @@ func (f *fakeImportStore) FailBatch(_ context.Context, id int64, reason *string,
 	f.batches[id] = batch
 	return nil
 }
-func (f *fakeImportStore) StageBatch(_ context.Context, id int64, rows []domain.ImportRow, sourceRows int, sha string, audit domain.AuditEntry) error {
+func (f *fakeImportStore) StageBatch(_ context.Context, id int64, rows []domain.ImportRow, sourceRows, ignoredRows int, sha string, audit domain.AuditEntry) error {
 	for i := range rows {
 		rows[i].ImportID = int64(i + 1)
 		rows[i].ImportBatchID = id
@@ -60,6 +60,7 @@ func (f *fakeImportStore) StageBatch(_ context.Context, id int64, rows []domain.
 	batch.SourceRowCount = &sourceRows
 	accepted := len(rows)
 	batch.AcceptedRowCount = &accepted
+	batch.IgnoredRowCount = &ignoredRows
 	batch.FileSha256 = &sha
 	f.batches[id] = batch
 	f.audits = append(f.audits, audit)
@@ -95,6 +96,9 @@ func (f *fakeImportStore) FindDuplicateBatch(context.Context, string, int64) (*i
 func (f *fakeImportStore) ListLocations(_ context.Context, id int64) ([]domain.ImportLocation, error) {
 	byGroup := map[string]*domain.ImportLocation{}
 	for _, row := range f.rows[id] {
+		if !selectableImportRow(row) {
+			continue
+		}
 		location := byGroup[row.LocationGroup]
 		if location == nil {
 			location = &domain.ImportLocation{LocationGroup: row.LocationGroup, LocationSort: row.LocationSort}
@@ -113,8 +117,18 @@ func (f *fakeImportStore) ListLocations(_ context.Context, id int64) ([]domain.I
 	return out, nil
 }
 func (f *fakeImportStore) ListRows(_ context.Context, id int64, filter domain.ImportRowFilter) (domain.ImportRowPage, error) {
+	excluded := make(map[string]bool, len(filter.ExcludeGroups))
+	for _, group := range filter.ExcludeGroups {
+		excluded[group] = true
+	}
 	all := make([]domain.ImportRow, 0)
 	for _, row := range f.rows[id] {
+		if !selectableImportRow(row) {
+			continue
+		}
+		if !filter.IgnoreGroups && excluded[row.LocationGroup] {
+			continue
+		}
 		if filter.LocationGroup != "" && row.LocationGroup != filter.LocationGroup {
 			continue
 		}
@@ -136,9 +150,19 @@ func (f *fakeImportStore) ListRows(_ context.Context, id int64, filter domain.Im
 	end := min(start+filter.PageSize, len(all))
 	return domain.ImportRowPage{Rows: append([]domain.ImportRow(nil), all[start:end]...), Total: len(all), Page: filter.Page, PageSize: filter.PageSize}, nil
 }
-func (f *fakeImportStore) RowIDs(_ context.Context, id int64, group string) ([]int64, error) {
+func (f *fakeImportStore) RowIDs(_ context.Context, id int64, group string, excludeGroups []string) ([]int64, error) {
+	excluded := make(map[string]bool, len(excludeGroups))
+	for _, group := range excludeGroups {
+		excluded[group] = true
+	}
 	ids := make([]int64, 0)
 	for _, row := range f.rows[id] {
+		if !selectableImportRow(row) {
+			continue
+		}
+		if excluded[row.LocationGroup] {
+			continue
+		}
 		if group == "" || row.LocationGroup == group {
 			ids = append(ids, row.ImportID)
 		}
@@ -148,7 +172,7 @@ func (f *fakeImportStore) RowIDs(_ context.Context, id int64, group string) ([]i
 func (f *fakeImportStore) SelectedIDs(_ context.Context, id int64) ([]int64, error) {
 	ids := make([]int64, 0)
 	for _, row := range f.rows[id] {
-		if row.SelectedFg {
+		if row.SelectedFg && selectableImportRow(row) {
 			ids = append(ids, row.ImportID)
 		}
 	}
@@ -170,6 +194,9 @@ func (f *fakeImportStore) ReplaceSelection(_ context.Context, id int64, ids []in
 		wanted[importID] = true
 	}
 	for i := range f.rows[id] {
+		if wanted[f.rows[id][i].ImportID] && !selectableImportRow(f.rows[id][i]) {
+			return domain.NewValidationError("selectedImportIds", "Other location rows cannot be selected for import")
+		}
 		f.rows[id][i].SelectedFg = wanted[f.rows[id][i].ImportID]
 	}
 	return nil
@@ -177,7 +204,7 @@ func (f *fakeImportStore) ReplaceSelection(_ context.Context, id int64, ids []in
 func (f *fakeImportStore) SelectedTotals(_ context.Context, id int64) (domain.ImportTotals, error) {
 	var totals domain.ImportTotals
 	for _, row := range f.rows[id] {
-		if !row.SelectedFg {
+		if !row.SelectedFg || !selectableImportRow(row) {
 			continue
 		}
 		totals.SelectedRows++
@@ -210,6 +237,88 @@ func (fakeMetadataReader) GetItemsByEQUIDs(_ context.Context, equids []uint64) (
 		}
 	}
 	return out, nil
+}
+
+func TestImportReviewExcludesOtherLocationRows(t *testing.T) {
+	store := newFakeImportStore()
+	accepted := 3
+	store.batches[1] = domain.ImportBatch{ImportBatchID: 1, FileName: "InventoryExport.txt",
+		ImportedBy: "admin", ImportedAt: time.Now().UTC(), Status: domain.ImportStatusUploaded,
+		AcceptedRowCount: &accepted}
+	store.rows[1] = []domain.ImportRow{
+		{ImportID: 1, ImportBatchID: 1, ItemType: domain.ItemTypeItem, EQUID: 1,
+			Name: "Item", Quantity: 1, LocationGroup: "General 1",
+			LocationSort: service.NaturalSortKey("General 1"), SelectedFg: true},
+		{ImportID: 2, ImportBatchID: 1, ItemType: domain.ItemTypeItem, EQUID: 2,
+			Name: "Other Unselected", Quantity: 1, LocationGroup: service.UnspecifiedLocationGroup,
+			LocationSort: service.NaturalSortKey("Unspecified"), SelectedFg: false},
+		{ImportID: 3, ImportBatchID: 1, ItemType: domain.ItemTypeItem, EQUID: 3,
+			Name: "Other Legacy", Quantity: 1, LocationGroup: service.UnspecifiedLocationGroup,
+			LocationSort: service.NaturalSortKey("Unspecified"), SelectedFg: true},
+	}
+	h := newImportHarness(t, store)
+	h.completeSetup()
+	csrf := h.csrf()
+
+	resp, body := h.request(http.MethodGet, "/api/v1/imports/1/locations", "", nil, "application/json")
+	if resp.StatusCode != http.StatusOK || strings.Contains(string(body), service.UnspecifiedLocationGroup) ||
+		!strings.Contains(string(body), `"group":"General 1"`) {
+		t.Fatalf("locations = %d: %s", resp.StatusCode, body)
+	}
+	resp, body = h.request(http.MethodGet, "/api/v1/imports/1/rows", "", nil, "application/json")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"total":1`) ||
+		strings.Contains(string(body), "Other Legacy") {
+		t.Fatalf("rows = %d: %s", resp.StatusCode, body)
+	}
+	resp, body = h.request(http.MethodGet, "/api/v1/imports/1/row-ids", "", nil, "application/json")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"importIds":[1]`) {
+		t.Fatalf("row-ids = %d: %s", resp.StatusCode, body)
+	}
+	resp, body = h.request(http.MethodGet, "/api/v1/imports/1/selection", "", nil, "application/json")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"selectedImportIds":[1]`) {
+		t.Fatalf("selection = %d: %s", resp.StatusCode, body)
+	}
+	resp, body = h.request(http.MethodGet, "/api/v1/imports/1/summary", "", nil, "application/json")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"stagedRows":1`) ||
+		!strings.Contains(string(body), `"selectedRows":1`) ||
+		!strings.Contains(string(body), `"totalLocations":1`) {
+		t.Fatalf("summary = %d: %s", resp.StatusCode, body)
+	}
+
+	resp, body = h.request(http.MethodPut, "/api/v1/imports/1/selection", csrf,
+		[]byte(`{"selectedImportIds":[3]}`), "application/json")
+	if resp.StatusCode != http.StatusUnprocessableEntity ||
+		!strings.Contains(string(body), "Other location rows cannot be selected for import") {
+		t.Fatalf("selection of Other row = %d: %s", resp.StatusCode, body)
+	}
+	resp, body = h.request(http.MethodPut, "/api/v1/imports/1/selection", csrf,
+		[]byte(`{"selectedImportIds":[1]}`), "application/json")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("selection PUT = %d: %s", resp.StatusCode, body)
+	}
+
+	resp, body = h.request(http.MethodGet, "/admin/imports/1", "", nil, "text/html")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("detail page = %d: %s", resp.StatusCode, body)
+	}
+	for _, forbidden := range []string{"other-location-banner", "Other (not a bank location)"} {
+		if strings.Contains(string(body), forbidden) {
+			t.Fatalf("detail page still contains %q", forbidden)
+		}
+	}
+	for _, required := range []string{`id="check-all-locations"`, `id="uncheck-all-locations"`,
+		`id="select-all"`, `id="clear-all"`, `id="reset-defaults"`} {
+		if !strings.Contains(string(body), required) {
+			t.Fatalf("detail page is missing %s", required)
+		}
+	}
+}
+
+// selectableImportRow mirrors the repository rule: Other/Unspecified rows stay
+// staged but are excluded from the review and from the import selection
+// (IMP-C).
+func selectableImportRow(row domain.ImportRow) bool {
+	return row.LocationGroup != service.UnspecifiedLocationGroup
 }
 
 func newImportHarness(t *testing.T, store *fakeImportStore) *harness {
