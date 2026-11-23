@@ -22,6 +22,8 @@ const (
 	AdminMaxNameRunes     = ImportMaxName
 	AdminMaxLocationRunes = ImportMaxLocation
 	AdminMaxGivenToRunes  = 128
+	// AdminMaxNoteRunes bounds the free-text note on a movement.
+	AdminMaxNoteRunes = 255
 	// AdminMaxItemQuantity is the per-record quantity cap for an ordinary item.
 	// A single manual create writes one row, so this bounds one value rather
 	// than the number of inserted rows.
@@ -46,8 +48,12 @@ const (
 )
 
 // AdminAuditEventTypes is the closed event-type allowlist for the audit viewer.
+// The movement event types are additive; the legacy ITEM_* names remain valid
+// for historical rows and for the administrative create/update/remove paths.
 var AdminAuditEventTypes = []string{
 	"ITEM_CREATED", "ITEM_UPDATED", "ITEM_REMOVED", "IMPORT_CREATED", "IMPORT_COMMITTED",
+	"ITEM_ISSUED", "ITEM_RETURNED", "ITEM_RECEIVED", "ITEM_WRITTEN_OFF",
+	"ITEM_MOVED", "ITEM_MERGED",
 }
 
 // AdminStore is the narrow repository surface used by the administrative
@@ -97,6 +103,9 @@ type AdminWriteResult struct {
 	// FieldsChanged reports whether editable fields changed. It distinguishes
 	// "saved and removed" from "removed with no edits" for the notice text.
 	FieldsChanged bool
+	// Movement is the ledger row written by this operation. It is nil when the
+	// operation does not write a movement (for example a plain field update).
+	Movement *domain.InventoryMovement
 }
 
 // AdminInventoryService owns administrative filter validation, lifecycle date
@@ -352,6 +361,11 @@ func (s *AdminInventoryService) prepareCreate(ctx context.Context, in domain.Cre
 	in.Name = adminText("name", in.Name, AdminMaxNameRunes, false, fields)
 	in.SourceLocation = adminOptionalText("sourceLocation", in.SourceLocation, AdminMaxLocationRunes, fields)
 	in.GivenTo = adminOptionalText("givenTo", in.GivenTo, AdminMaxGivenToRunes, fields)
+	// Active rows must not carry a recipient. A whole-record disposition is
+	// completed through the issue or save-and-remove paths, not a plain create.
+	if in.GivenTo.String() != "" {
+		fields["givenTo"] = "givenTo cannot be set on an active row; use an issue operation to complete a whole-record disposition"
+	}
 	validateAdminDate("dateOpen", in.DateOpen, fields)
 	validateAdminDate("dateBazaar", in.DateBazaar, fields)
 	if len(fields) > 0 {
@@ -484,7 +498,14 @@ func (s *AdminInventoryService) createAttempt(ctx context.Context, in domain.Cre
 			if err := tx.AddSpellQuantity(ctx, target.ID, in.Quantity, row.ModAt, in.Actor); err != nil {
 				return AdminWriteResult{}, err
 			}
-			entry, err := spellMergeAudit(target, uint32(sum), in, row.ModAt)
+			movement := newMovement(target, domain.MovementReceive, in.Quantity, uint32(sum),
+				"", "", target.SourceLocation, "", in.Actor, row.ModAt, in.CorrelationID, "")
+			movementID, err := tx.InsertMovement(ctx, movement)
+			if err != nil {
+				return AdminWriteResult{}, err
+			}
+			movement.MovementID = movementID
+			entry, err := spellMergeAudit(target, uint32(sum), in, movement, row.ModAt)
 			if err != nil {
 				return AdminWriteResult{}, err
 			}
@@ -502,7 +523,7 @@ func (s *AdminInventoryService) createAttempt(ctx context.Context, in domain.Cre
 			target.ModByUserID = &actorID
 			return AdminWriteResult{
 				Item: target, CreatedIDs: []int64{}, CreatedCount: 0,
-				Warnings: warnings, Changed: true,
+				Warnings: warnings, Changed: true, Movement: &movement,
 			}, nil
 		}
 	}
@@ -517,7 +538,15 @@ func (s *AdminInventoryService) createAttempt(ctx context.Context, in domain.Cre
 	if len(ids) != len(rows) {
 		return AdminWriteResult{}, fmt.Errorf("%w: inserted inventory id count mismatch", domain.ErrConflict)
 	}
-	entry, err := createAudit(rows[0], in, ids)
+	item := adminItemFromRow(rows[0], ids[0])
+	movement := newMovement(item, domain.MovementReceive, row.Quantity, row.Quantity,
+		"", "", row.SourceLocation, "", in.Actor, row.ModAt, in.CorrelationID, "")
+	movementID, err := tx.InsertMovement(ctx, movement)
+	if err != nil {
+		return AdminWriteResult{}, err
+	}
+	movement.MovementID = movementID
+	entry, err := createAudit(rows[0], in, ids, &movement)
 	if err != nil {
 		return AdminWriteResult{}, err
 	}
@@ -533,10 +562,9 @@ func (s *AdminInventoryService) createAttempt(ctx context.Context, in domain.Cre
 	if len(created) > 10000 {
 		created = created[:10000]
 	}
-	item := adminItemFromRow(rows[0], ids[0])
 	return AdminWriteResult{
 		Item: item, CreatedIDs: created, CreatedCount: len(ids),
-		Warnings: warnings, Changed: true,
+		Warnings: warnings, Changed: true, Movement: &movement,
 	}, nil
 }
 
@@ -557,7 +585,8 @@ func adminDateText(value time.Time) string { return value.UTC().Format("2006-01-
 
 // createAudit builds the redacted ITEM_CREATED payload. createdIds is bounded
 // to the first 100 IDs; createdIdCount carries the total when larger.
-func createAudit(row domain.GuildBankItem, in domain.CreateItemInput, ids []int64) (domain.AuditEntry, error) {
+func createAudit(row domain.GuildBankItem, in domain.CreateItemInput, ids []int64,
+	movement *domain.InventoryMovement) (domain.AuditEntry, error) {
 	createdIDs := ids
 	if len(createdIDs) > 100 {
 		createdIDs = createdIDs[:100]
@@ -568,6 +597,9 @@ func createAudit(row domain.GuildBankItem, in domain.CreateItemInput, ids []int6
 		"givenTo": row.GivenTo, "metadataMissing": row.MetadataMissingFg,
 		"dateOpen": adminDateText(row.DateOpen), "dateBazaar": adminDateText(row.DateBazaar),
 		"createdIds": createdIDs,
+	}
+	for key, value := range movementFields(movement) {
+		payload[key] = value
 	}
 	if len(ids) > len(createdIDs) {
 		payload["createdIdCount"] = len(ids)
@@ -585,12 +617,17 @@ func createAudit(row domain.GuildBankItem, in domain.CreateItemInput, ids []int6
 }
 
 // spellMergeAudit builds the ITEM_UPDATED payload for a quantity merge.
-func spellMergeAudit(target domain.AdminInventoryItem, sum uint32, in domain.CreateItemInput, at time.Time) (domain.AuditEntry, error) {
+func spellMergeAudit(target domain.AdminInventoryItem, sum uint32, in domain.CreateItemInput,
+	movement domain.InventoryMovement, at time.Time) (domain.AuditEntry, error) {
 	oldValues, err := json.Marshal(map[string]any{"quantity": target.Quantity})
 	if err != nil {
 		return domain.AuditEntry{}, err
 	}
-	newValues, err := json.Marshal(map[string]any{"quantity": sum, "added": in.Quantity})
+	payload := map[string]any{"quantity": sum, "added": in.Quantity}
+	for key, value := range movementFields(&movement) {
+		payload[key] = value
+	}
+	newValues, err := json.Marshal(payload)
 	if err != nil {
 		return domain.AuditEntry{}, err
 	}
@@ -631,6 +668,11 @@ func (s *AdminInventoryService) Update(ctx context.Context, in domain.UpdateItem
 		fields["givenTo"] = "givenTo is required (use null to clear)"
 	} else {
 		in.GivenTo = adminOptionalText("givenTo", in.GivenTo, AdminMaxGivenToRunes, fields)
+	}
+	// A plain edit may not leave a recipient on an active row. Save-and-remove
+	// is the approved whole-record disposition and is exempt.
+	if !in.Remove && in.GivenTo.String() != "" {
+		fields["givenTo"] = "givenTo cannot be set on an active row; save and remove to complete a whole-record disposition"
 	}
 	if !in.DateOpen.Set {
 		fields["dateOpen"] = "dateOpen is required (use null to reset)"
@@ -772,10 +814,20 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 			return AdminWriteResult{}, err
 		}
 	}
+	var movement *domain.InventoryMovement
 	if in.Remove {
 		if err := tx.SetDeleted(ctx, current.ID, true, modAt, in.Actor); err != nil {
 			return AdminWriteResult{}, err
 		}
+		writtenOff := newMovement(current, domain.MovementWriteOff, in.Quantity, 0,
+			in.GivenTo.String(), current.SourceLocation, "", "", in.Actor, modAt,
+			in.CorrelationID, "")
+		movementID, err := tx.InsertMovement(ctx, writtenOff)
+		if err != nil {
+			return AdminWriteResult{}, err
+		}
+		writtenOff.MovementID = movementID
+		movement = &writtenOff
 	}
 	if len(changed) > 0 {
 		entry, err := updateAudit(current, changed, in, open, bazaar, modAt)
@@ -787,7 +839,7 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 		}
 	}
 	if in.Remove {
-		entry, err := stateAudit(current, true, in.Actor, modAt, in.CorrelationID, in.SourceIP)
+		entry, err := stateAudit(current, true, movement, in.Actor, modAt, in.CorrelationID, in.SourceIP)
 		if err != nil {
 			return AdminWriteResult{}, err
 		}
@@ -813,7 +865,10 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 	updated.ModBy = in.Actor.UserName
 	actorID := in.Actor.UserID
 	updated.ModByUserID = &actorID
-	return AdminWriteResult{Item: updated, Warnings: warnings, Changed: true, FieldsChanged: len(changed) > 0}, nil
+	return AdminWriteResult{
+		Item: updated, Warnings: warnings, Changed: true,
+		FieldsChanged: len(changed) > 0, Movement: movement,
+	}, nil
 }
 
 func sameModAt(stored, expected time.Time) bool {
@@ -935,7 +990,40 @@ func (s *AdminInventoryService) setDeletedAttempt(ctx context.Context, id int64,
 	if err := tx.SetDeleted(ctx, id, deleted, at, actor); err != nil {
 		return AdminWriteResult{}, err
 	}
-	entry, err := stateAudit(current, deleted, actor, at, correlationID, sourceIP)
+	movementType := domain.MovementReceive
+	recipient := ""
+	if !deleted && current.GivenTo != "" {
+		movementType = domain.MovementReturn
+		recipient = current.GivenTo
+		// A whole-issued row restored to active must clear GivenTo (OD-02).
+		clearRow := domain.AdminUpdateRow{
+			ID:             current.ID,
+			SourceLocation: current.SourceLocation,
+			LocationGroup:  current.LocationGroup,
+			LocationSort:   current.LocationSort,
+			GivenTo:        "",
+			ModAt:          at,
+			Actor:          actor,
+		}
+		if err := tx.UpdateInventory(ctx, clearRow); err != nil {
+			return AdminWriteResult{}, err
+		}
+	} else if deleted {
+		movementType = domain.MovementWriteOff
+	}
+	movement := newMovement(current, movementType, current.Quantity, current.Quantity,
+		recipient, "", current.SourceLocation, "", actor, at, correlationID, "")
+	if movementType == domain.MovementWriteOff {
+		movement.RemainingQuantity = 0
+		movement.FromLocation = current.SourceLocation
+		movement.ToLocation = ""
+	}
+	movementID, err := tx.InsertMovement(ctx, movement)
+	if err != nil {
+		return AdminWriteResult{}, err
+	}
+	movement.MovementID = movementID
+	entry, err := stateAudit(current, deleted, &movement, actor, at, correlationID, sourceIP)
 	if err != nil {
 		return AdminWriteResult{}, err
 	}
@@ -951,16 +1039,24 @@ func (s *AdminInventoryService) setDeletedAttempt(ctx context.Context, id int64,
 	current.ModBy = actor.UserName
 	actorID := actor.UserID
 	current.ModByUserID = &actorID
-	return AdminWriteResult{Item: current, Changed: true}, nil
+	if !deleted {
+		current.GivenTo = ""
+	}
+	return AdminWriteResult{Item: current, Changed: true, Movement: &movement}, nil
 }
 
 func stateAudit(current domain.AdminInventoryItem, deleted bool,
-	actor domain.Actor, at time.Time, correlationID, sourceIP string) (domain.AuditEntry, error) {
+	movement *domain.InventoryMovement, actor domain.Actor, at time.Time,
+	correlationID, sourceIP string) (domain.AuditEntry, error) {
 	oldJSON, err := json.Marshal(map[string]any{"deletedFg": current.DeletedFg})
 	if err != nil {
 		return domain.AuditEntry{}, err
 	}
-	newJSON, err := json.Marshal(map[string]any{"deletedFg": deleted})
+	payload := map[string]any{"deletedFg": deleted}
+	for key, value := range movementFields(movement) {
+		payload[key] = value
+	}
+	newJSON, err := json.Marshal(payload)
 	if err != nil {
 		return domain.AuditEntry{}, err
 	}
@@ -968,6 +1064,16 @@ func stateAudit(current domain.AdminInventoryItem, deleted bool,
 	notes := "restored"
 	if deleted {
 		entryType, notes = "ITEM_REMOVED", ""
+	}
+	if movement != nil {
+		switch movement.MovementType {
+		case domain.MovementWriteOff:
+			entryType, notes = "ITEM_WRITTEN_OFF", ""
+		case domain.MovementReturn:
+			entryType, notes = "ITEM_RETURNED", "restored"
+		case domain.MovementReceive:
+			entryType, notes = "ITEM_RECEIVED", "restored"
+		}
 	}
 	return domain.AuditEntry{
 		EventDate: at, UserID: actor.UserID, UserName: actor.UserName,
@@ -1075,6 +1181,8 @@ func (s *AdminInventoryService) removeManyAttempt(ctx context.Context, targets [
 
 	at := s.now().UTC()
 	items := make([]domain.AdminInventoryItem, 0, len(targets))
+	var units uint64
+
 	for _, target := range targets {
 		current, err := tx.LockInventory(ctx, target.ID)
 		if err != nil {
@@ -1089,7 +1197,14 @@ func (s *AdminInventoryService) removeManyAttempt(ctx context.Context, targets [
 		if err := tx.SetDeleted(ctx, current.ID, true, at, actor); err != nil {
 			return domain.BulkRemoveResult{}, err
 		}
-		entry, err := stateAudit(current, true, actor, at, correlationID, sourceIP)
+		movement := newMovement(current, domain.MovementWriteOff, current.Quantity, 0,
+			"", current.SourceLocation, "", "", actor, at, correlationID, "")
+		movementID, err := tx.InsertMovement(ctx, movement)
+		if err != nil {
+			return domain.BulkRemoveResult{}, err
+		}
+		movement.MovementID = movementID
+		entry, err := stateAudit(current, true, &movement, actor, at, correlationID, sourceIP)
 		if err != nil {
 			return domain.BulkRemoveResult{}, err
 		}
@@ -1101,13 +1216,14 @@ func (s *AdminInventoryService) removeManyAttempt(ctx context.Context, targets [
 		current.ModBy = actor.UserName
 		actorID := actor.UserID
 		current.ModByUserID = &actorID
+		units += uint64(current.Quantity)
 		items = append(items, current)
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.BulkRemoveResult{}, err
 	}
 	committed = true
-	return domain.BulkRemoveResult{Items: items, Removed: len(items)}, nil
+	return domain.BulkRemoveResult{Items: items, Removed: len(items), Units: uint32(units)}, nil
 }
 
 // ListAudit validates the audit filters and reads one page newest-first.

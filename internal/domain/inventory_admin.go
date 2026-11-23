@@ -200,10 +200,12 @@ type RemoveItemTarget struct {
 	ExpectedModAt time.Time
 }
 
-// BulkRemoveResult is the outcome of one all-or-nothing bulk removal.
+// BulkRemoveResult is the outcome of one all-or-nothing bulk removal. Units is
+// the sum of the quantities of the removed lots; Removed is the record count.
 type BulkRemoveResult struct {
 	Items   []AdminInventoryItem
 	Removed int
+	Units   uint32
 }
 
 // AdminUpdateRow is the repository update projection. Quantity updates either

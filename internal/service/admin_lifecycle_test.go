@@ -14,7 +14,7 @@ func seededItem() domain.AdminInventoryItem {
 	return domain.AdminInventoryItem{
 		ID: 1, EQUID: 100, Name: "Sword", ItemType: domain.ItemTypeItem, Quantity: 1,
 		ClassString: "WAR", RaceString: "ALL", SourceLocation: "Bank2-Slot4",
-		LocationGroup: "Bank 2", LocationSort: "bank\x010000000002", GivenTo: "Guild Bank",
+		LocationGroup: "Bank 2", LocationSort: "bank\x010000000002", GivenTo: "",
 		DateAdded:  time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
 		DateOpen:   time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC),
 		DateBazaar: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC),
@@ -64,7 +64,7 @@ func TestAdminUpdateNoOpWritesNothing(t *testing.T) {
 	svc := testAdminService(store, nil, testClock())
 	result, err := svc.Update(context.Background(), domain.UpdateItemInput{
 		ID: 1, ExpectedModAt: seededItem().ModAt, Quantity: 1,
-		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional("Guild Bank"),
+		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional(""),
 		DateOpen:   domain.OptionalDate{Value: datePtr(2026, 11, 15), Set: true},
 		DateBazaar: domain.OptionalDate{Value: datePtr(2026, 12, 1), Set: true},
 		Actor:      testActor(),
@@ -89,7 +89,7 @@ func TestAdminUpdateItemQuantityIsEditableAndAudited(t *testing.T) {
 	svc := testAdminService(store, nil, testClock())
 	result, err := svc.Update(context.Background(), domain.UpdateItemInput{
 		ID: 1, ExpectedModAt: seededItem().ModAt, Quantity: 55,
-		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional("Guild Bank"),
+		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional(""),
 		DateOpen:   domain.OptionalDate{Value: datePtr(2026, 11, 15), Set: true},
 		DateBazaar: domain.OptionalDate{Value: datePtr(2026, 12, 1), Set: true},
 		Actor:      testActor(),
@@ -127,7 +127,7 @@ func TestAdminUpdateRejectsItemQuantityAboveCap(t *testing.T) {
 	svc := testAdminService(store, nil, testClock())
 	_, err := svc.Update(context.Background(), domain.UpdateItemInput{
 		ID: 1, ExpectedModAt: seededItem().ModAt, Quantity: AdminMaxItemQuantity + 1,
-		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional("Guild Bank"),
+		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional(""),
 		DateOpen:   domain.OptionalDate{Value: datePtr(2026, 11, 15), Set: true},
 		DateBazaar: domain.OptionalDate{Value: datePtr(2026, 12, 1), Set: true},
 		Actor:      testActor(),
@@ -164,7 +164,7 @@ func TestAdminUpdateStaleTokenConflicts(t *testing.T) {
 	svc := testAdminService(store, nil, testClock())
 	_, err := svc.Update(context.Background(), domain.UpdateItemInput{
 		ID: 1, ExpectedModAt: seededItem().ModAt.Add(time.Second), Quantity: 1,
-		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional("Guild Bank"),
+		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional(""),
 		DateOpen:   domain.OptionalDate{Value: datePtr(2026, 11, 15), Set: true},
 		DateBazaar: domain.OptionalDate{Value: datePtr(2026, 12, 1), Set: true},
 		Actor:      testActor(),
@@ -180,7 +180,7 @@ func TestAdminUpdateDateChangeIsAuditedAndDateAddedIsFixed(t *testing.T) {
 	svc := testAdminService(store, nil, testClock())
 	result, err := svc.Update(context.Background(), domain.UpdateItemInput{
 		ID: 1, ExpectedModAt: seededItem().ModAt, Quantity: 1,
-		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional("Guild Bank"),
+		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional(""),
 		DateOpen:   domain.OptionalDate{Value: datePtr(2026, 11, 20), Set: true},
 		DateBazaar: domain.OptionalDate{Value: datePtr(2026, 12, 1), Set: true},
 		Actor:      testActor(),
@@ -218,7 +218,7 @@ func TestAdminUpdateResetUsesCurrentSettingsOffset(t *testing.T) {
 	svc := testAdminService(store, nil, testClock())
 	result, err := svc.Update(context.Background(), domain.UpdateItemInput{
 		ID: 1, ExpectedModAt: seededItem().ModAt, Quantity: 1,
-		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional("Guild Bank"),
+		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional(""),
 		DateOpen:   domain.OptionalDate{Set: true},
 		DateBazaar: domain.OptionalDate{Value: datePtr(2026, 12, 1), Set: true},
 		Actor:      testActor(),
@@ -242,7 +242,7 @@ func TestAdminRemoveAndRestore(t *testing.T) {
 	if !removed.Item.DeletedFg {
 		t.Fatal("row was not marked removed")
 	}
-	if len(store.audits) != 1 || store.audits[0].EventType != "ITEM_REMOVED" {
+	if len(store.audits) != 1 || store.audits[0].EventType != "ITEM_WRITTEN_OFF" {
 		t.Fatalf("audits = %+v", store.audits)
 	}
 	if _, err := svc.Remove(context.Background(), 1, removed.Item.ModAt, testActor(), "", ""); !errors.Is(err, domain.ErrConflict) {
@@ -255,7 +255,7 @@ func TestAdminRemoveAndRestore(t *testing.T) {
 	if restored.Item.DeletedFg {
 		t.Fatal("row was not restored")
 	}
-	if len(store.audits) != 2 || store.audits[1].EventType != "ITEM_UPDATED" || store.audits[1].Notes != "restored" {
+	if len(store.audits) != 2 || store.audits[1].EventType != "ITEM_RECEIVED" || store.audits[1].Notes != "restored" {
 		t.Fatalf("restore audit = %+v", store.audits)
 	}
 }

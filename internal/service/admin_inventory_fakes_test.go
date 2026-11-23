@@ -166,6 +166,12 @@ func (f *fakeAdmin) FindActiveSpells(ctx context.Context, equid uint64) ([]domai
 func (f *fakeAdmin) InsertInventory(ctx context.Context, rows []domain.GuildBankItem) ([]int64, error) {
 	ids := make([]int64, 0, len(rows))
 	for _, row := range rows {
+		for {
+			if _, taken := f.items[f.nextID]; !taken {
+				break
+			}
+			f.nextID++
+		}
 		id := f.nextID
 		f.nextID++
 		f.items[id] = adminItemFromRow(row, id)
@@ -216,6 +222,13 @@ func (f *fakeAdmin) SetDeleted(ctx context.Context, id int64, deleted bool, at t
 func (f *fakeAdmin) InsertMovement(ctx context.Context, movement domain.InventoryMovement) (int64, error) {
 	if err := movement.Validate(); err != nil {
 		return 0, err
+	}
+	if movement.IdempotencyKey != "" {
+		for _, existing := range f.movements {
+			if existing.IdempotencyKey == movement.IdempotencyKey {
+				return 0, domain.ErrConflict
+			}
+		}
 	}
 	movement.MovementID = int64(len(f.movements) + 1)
 	f.movements = append(f.movements, movement)

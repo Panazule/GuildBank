@@ -12,7 +12,7 @@ import (
 func fullUpdateInput(id int64, modAt time.Time) domain.UpdateItemInput {
 	return domain.UpdateItemInput{
 		ID: id, ExpectedModAt: modAt, Quantity: 1,
-		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional("Guild Bank"),
+		SourceLocation: optional("Bank2-Slot4"), GivenTo: optional(""),
 		DateOpen:   domain.OptionalDate{Value: datePtr(2026, 11, 15), Set: true},
 		DateBazaar: domain.OptionalDate{Value: datePtr(2026, 12, 1), Set: true},
 		Actor:      testActor(), CorrelationID: "req-1",
@@ -40,7 +40,7 @@ func TestAdminUpdateAndRemoveShareOneTransaction(t *testing.T) {
 	if len(store.audits) != 2 {
 		t.Fatalf("audit rows = %d, want 2", len(store.audits))
 	}
-	if store.audits[0].EventType != "ITEM_UPDATED" || store.audits[1].EventType != "ITEM_REMOVED" {
+	if store.audits[0].EventType != "ITEM_UPDATED" || store.audits[1].EventType != "ITEM_WRITTEN_OFF" {
 		t.Fatalf("audit types = %s/%s", store.audits[0].EventType, store.audits[1].EventType)
 	}
 	if store.audits[0].CorrelationID != store.audits[1].CorrelationID ||
@@ -69,8 +69,8 @@ func TestAdminUpdateAndRemoveWithoutEditsWritesOnlyRemoval(t *testing.T) {
 	if !result.Changed || result.FieldsChanged || !result.Item.DeletedFg {
 		t.Fatalf("result = %+v, want changed without field changes, deleted", result)
 	}
-	if len(store.audits) != 1 || store.audits[0].EventType != "ITEM_REMOVED" {
-		t.Fatalf("audits = %+v, want one ITEM_REMOVED", store.audits)
+	if len(store.audits) != 1 || store.audits[0].EventType != "ITEM_WRITTEN_OFF" {
+		t.Fatalf("audits = %+v, want one ITEM_WRITTEN_OFF", store.audits)
 	}
 }
 func TestAdminRemoveManyIsAllOrNothing(t *testing.T) {
@@ -99,7 +99,7 @@ func TestAdminRemoveManyIsAllOrNothing(t *testing.T) {
 		t.Fatalf("audit rows = %d, want 2", len(store.audits))
 	}
 	for _, entry := range store.audits {
-		if entry.EventType != "ITEM_REMOVED" || entry.CorrelationID != "req-bulk" {
+		if entry.EventType != "ITEM_WRITTEN_OFF" || entry.CorrelationID != "req-bulk" {
 			t.Fatalf("audit = %+v", entry)
 		}
 	}

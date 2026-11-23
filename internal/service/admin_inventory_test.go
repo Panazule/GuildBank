@@ -19,7 +19,7 @@ func TestAdminCreateItemWritesOneRowWithQuantity(t *testing.T) {
 	result, err := svc.Create(context.Background(), domain.CreateItemInput{
 		ItemType: domain.ItemTypeItem, EQUID: 100, Quantity: 3,
 		SourceLocation: domain.OptionalString{Value: strPtr("General5-Slot1"), Set: true},
-		GivenTo:        domain.OptionalString{Value: strPtr("Guild Bank"), Set: true},
+		GivenTo:        domain.OptionalString{Set: true},
 		Actor:          testActor(), CorrelationID: "req-1", SourceIP: "127.0.0.1",
 	})
 	if err != nil {
