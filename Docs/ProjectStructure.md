@@ -61,7 +61,7 @@ GuildBank/
 │   │   └── mariadb/
 │   │       ├── store.go          MariaDB pool, bounded ping and connection test
 │   │       ├── migrate.go        Embedded guild-store migration runner (GET_LOCK)
-│   │       ├── migrations/       0001_guild_store.sql, 0002_public_inventory_indexes.sql, 0003_admin_inventory.sql, 0004_import_ignored_rows.sql and 0005_item_quantity_model.sql
+│   │       ├── migrations/       0001_guild_store.sql, 0002_public_inventory_indexes.sql, 0003_admin_inventory.sql, 0004_import_ignored_rows.sql, 0005_item_quantity_model.sql and 0006_inventory_movement.sql
 │   │       ├── items.go          Read-only physical→logical Items repository
 │   │       ├── imports.go        Batch/row/location/selection reads and staging
 │   │       ├── imports_commit.go Advisory-locked atomic import commit and audit
@@ -262,7 +262,7 @@ main
      ├─ sqlite.Open  ── pragmas, ping, single writer
      ├─ sqlite.Migrate ── PRAGMA user_version = 1 (Users, Settings, Sessions)
      ├─ mariadb.Open ── OPTIONAL: pool + 5s ping (failure = degraded)
-     ├─ mariadb.Migrate ── 0001…0005 guild-store migrations (fatal on migration error)
+     ├─ mariadb.Migrate ── 0001…0006 guild-store migrations (fatal on migration error)
      ├─ mariadb.RecoverInterrupted ── fail stranded Processing batches
      ├─ mariadb.BackfillInventoryLocations ── fill missing LocationGroup/LocationSort
      ├─ mariadb.BackfillSpellMetadata ── repair pre-DEFECT-01 spell class/race strings

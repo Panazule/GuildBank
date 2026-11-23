@@ -20,6 +20,7 @@ var expectedMigrationHashes = map[string]string{
 	"migrations/0003_admin_inventory.sql":          "71c3674b83eb81c97353fc00ceae0fdabb3feb4707a25565f855e74c727cbcb0",
 	"migrations/0004_import_ignored_rows.sql":      "fcbe65869bbf9074bfad89c02112e5f3d497bfcf8ad4dac09db2f9b68a53d580",
 	"migrations/0005_item_quantity_model.sql":      "c7de158df2f218a9222cc3be6eae1d7ec23e2e9cad44ef38a197e1384dbdce99",
+	"migrations/0006_inventory_movement.sql":       "f8e54995c21ad24b5cc04e0f63ddaea95c2a04eb4624445c89b9f530bc30807e",
 }
 
 func TestMigrationManifest(t *testing.T) {
@@ -109,6 +110,37 @@ func TestMigrationManifest(t *testing.T) {
 	for _, forbidden := range []string{"DELIMITER", "TRIGGER", "PROCEDURE", "CREATE FUNCTION"} {
 		if strings.Contains(strings.ToUpper(text), forbidden) {
 			t.Fatalf("0005 must not contain %s", forbidden)
+		}
+	}
+
+	body, err = migrationFiles.ReadFile("migrations/0006_inventory_movement.sql")
+	if err != nil {
+		t.Fatalf("read 0006: %v", err)
+	}
+	text = string(body)
+	if got := strings.Count(text, "CREATE TABLE"); got != 1 {
+		t.Fatalf("0006 CREATE TABLE count = %d, want 1", got)
+	}
+	for _, required := range []string{
+		"InventoryMovement",
+		"uq_movement_idempotency",
+		"ix_movement_lot_time",
+		"ix_movement_equid_time",
+		"ix_movement_type_time",
+		"ix_movement_recipient_time",
+		"ix_movement_correlation",
+		"ck_movement_quantity",
+		"ck_movement_remaining",
+		"ck_movement_issue_recipient",
+		"fk_movement_item",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("0006 is missing %s", required)
+		}
+	}
+	for _, forbidden := range []string{"DELIMITER", "TRIGGER", "PROCEDURE", "CREATE FUNCTION"} {
+		if strings.Contains(strings.ToUpper(text), forbidden) {
+			t.Fatalf("0006 must not contain %s", forbidden)
 		}
 	}
 }

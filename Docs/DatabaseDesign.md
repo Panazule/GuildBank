@@ -414,6 +414,51 @@ CREATE TABLE Audit (
 - The runtime user holds `INSERT` and `SELECT` only; there is no update or delete route (SR-14, D-10). No retention period is specified (MR-20).
 - Authentication events originate in SQLite while `Audit` is in MariaDB: they are delivered through `AuditOutbox`. If MariaDB is unavailable, login still succeeds but its audit row is queued; this is the only way to honour D-10 without blocking authentication.
 
+### 4.6 `InventoryMovement` **PARTIAL ISSUANCE PHASE 1**
+
+The approved partial-issuance plan adds an append-only movement ledger. `GuildBankItems` remains the current-state lot table; movement rows explain quantity and location changes and are never summed into on-hand stock. The migration is additive and does not change existing lots or `GivenTo` values.
+
+```sql
+CREATE TABLE InventoryMovement (
+    MovementID        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    GuildBankItemID   BIGINT UNSIGNED NOT NULL,              -- affected lot
+    EQUID             INT UNSIGNED NOT NULL,                 -- denormalized reporting key
+    MovementType      ENUM('ISSUE','RETURN','RECEIVE','MOVE','ADJUST','WRITE_OFF','MERGE') NOT NULL,
+    Quantity          INT UNSIGNED NOT NULL,
+    Recipient         VARCHAR(128) NULL,                     -- required for ISSUE
+    ActorUserID       INT NULL,                              -- SQLite Users.UserID snapshot
+    ActorName         VARCHAR(64) NOT NULL,                  -- username snapshot
+    OccurredAt        DATETIME(6) NOT NULL,                  -- UTC
+    FromLocation      VARCHAR(128) NULL,
+    ToLocation        VARCHAR(128) NULL,
+    RemainingQuantity INT UNSIGNED NOT NULL,                 -- on hand after the movement
+    RelatedItemID     BIGINT UNSIGNED NULL,                  -- destination/source lot for split moves or returns
+    Note              VARCHAR(255) NULL,
+    CorrelationID     CHAR(36) NULL,
+    IdempotencyKey    VARCHAR(64) NULL,
+    PRIMARY KEY (MovementID),
+    UNIQUE KEY uq_movement_idempotency (IdempotencyKey),
+    KEY ix_movement_lot_time (GuildBankItemID, OccurredAt),
+    KEY ix_movement_equid_time (EQUID, OccurredAt),
+    KEY ix_movement_type_time (MovementType, OccurredAt),
+    KEY ix_movement_recipient_time (Recipient, OccurredAt),
+    KEY ix_movement_correlation (CorrelationID),
+    CONSTRAINT fk_movement_item FOREIGN KEY (GuildBankItemID)
+        REFERENCES GuildBankItems (GuildBankItemID) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT ck_movement_quantity CHECK (Quantity > 0),
+    CONSTRAINT ck_movement_remaining CHECK (RemainingQuantity >= 0),
+    CONSTRAINT ck_movement_issue_recipient CHECK (MovementType <> 'ISSUE' OR Recipient IS NOT NULL)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+**Notes**
+- The ledger is append-only. The application exposes insert and read only; corrections are new movement rows.
+- `IdempotencyKey` is nullable and uniquely indexed. The unique index permits multiple `NULL` values while rejecting duplicate non-null keys, which protects double-click issue and return submissions.
+- `MovementType` is the approved closed set even though the first release exposes only `ISSUE` and `RETURN` (OD-04). `MOVE`, `ADJUST`, `WRITE_OFF` and `MERGE` are schema-ready for later phases.
+- `fk_movement_item` references the lot row with `RESTRICT`; there is no physical delete path. The FK is safe because movement rows are only created for existing lots.
+- `ActorUserID` is a cross-store snapshot with no physical FK, following the same rule as `GuildBankItems.ModBy` and `Audit.UserID`.
+- Existing lots become opening balances. No movement history is backfilled and imports create no `RECEIVE` rows in the first release (OD-05).
+
 ---
 
 ## 5. Relationships
@@ -428,6 +473,7 @@ MariaDB (GuildBank)
   ImportBatch 1 ──── n ImportList    (ImportBatchID, RESTRICT)
   ImportBatch 1 ──── n Audit         (logical: EntityType='ImportBatch', EntityID)
   GuildBankItems 1 ──── n Audit      (logical: EntityType='GuildBankItem', EntityID)
+  GuildBankItems 1 ──── n InventoryMovement (GuildBankItemID, RESTRICT)
 ```
 
 | Relationship | Enforced by | Cross-store? | Notes |
@@ -438,6 +484,8 @@ MariaDB (GuildBank)
 | `GuildBankItems.ModBy(UserID)` → `Users.UserID` | Application only | **Yes** | Store username snapshot + numeric ID; validate on write (DC-07) |
 | `ImportBatch.ImportedBy(UserID)` → `Users.UserID` | Application only | **Yes** | Same pattern as `ModBy` |
 | `Audit.UserID` → `Users.UserID` | Application only | **Yes** | Snapshot plus optional numeric reference; D-10 field names are normative |
+| `InventoryMovement.GuildBankItemID → GuildBankItems.GuildBankItemID` | MariaDB FK | No | `RESTRICT`; movement rows are append-only and lots are never physically deleted |
+| `InventoryMovement.ActorUserID` → `Users.UserID` | Application only | **Yes** | Snapshot plus optional numeric reference; same pattern as `ModBy` |
 | `AuditOutbox` → `Audit` | Application | **Yes** | Outbox row is inserted into MariaDB; `SentAt` tracks delivery |
 
 ---
