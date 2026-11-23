@@ -1,9 +1,9 @@
 # Partial issuance - implementation plan
 
-**Status:** plan only. No application code, route, template, migration or runtime behavior is changed by this document.
+**Status:** plan only. No application code, route, template, migration or runtime behavior is changed by this document. Owner decisions OD-01 to OD-07 are recorded in section 12.
 **Date:** 2026-11-22
 **Baseline:** `Docs/PartialIssuanceApprovalPackage.md` and the owner decisions recorded for D-ISS-01 through D-ISS-15 and R-ISS-01 through R-ISS-16.
-**Implementation gate:** do not start code until this plan is approved.
+**Implementation gate:** do not start code until this plan and the readiness conditions in section 13 are accepted.
 
 ## 1. Approved design baseline
 
@@ -23,7 +23,8 @@
 **In scope**
 
 - Additive movement ledger schema and indexes.
-- Atomic issue, return, receive, move, adjust, write-off and merge operations.
+- Atomic issue, return, receive/restore and write-off operations.
+- Move and adjust are documented for schema completeness but **deferred by OD-04**.
 - Service-layer enforcement of the active-row `GivenTo` invariant.
 - Admin issue/return forms and movement history.
 - Audit events for every movement, in the same transaction.
@@ -46,15 +47,15 @@
 | D-ISS-02 | Add `InventoryMovement` as an immutable ledger. Every write path writes a movement row. |
 | D-ISS-03 | Enforce `GivenTo = NULL` on active lots in create, update and restore paths. Allow `GivenTo` only on completed whole-record issue/disposition. |
 | D-ISS-04 | Partial issue reduces the same lot. Full issue sets `GivenTo`, writes `ISSUE`, and soft-removes the lot without zeroing quantity. |
-| D-ISS-05 | Partial move reduces the source lot and creates a destination lot. Whole move updates the lot location. Destination inherits source dates. |
-| D-ISS-06 | Receives increase an explicitly chosen lot or create a new lot. No automatic merge during daily work. Spell auto-merge must be exempted or made movement-aware. |
+| D-ISS-05 | Partial move reduces the source lot and creates a destination lot. Whole move updates the lot location. Destination inherits source dates. **Deferred by OD-04.** |
+| D-ISS-06 | Receives increase an explicitly chosen lot or create a new lot. No automatic merge during daily work. Movement-managed lots are exempt from spell-style auto-merge (OD-07). |
 | D-ISS-07 | Removal is a whole-lot action. Partial removal is a write-off or adjustment. Bulk actions show record count and unit count. |
-| D-ISS-08 | Restore of a whole-issued lot clears `GivenTo` and writes `RETURN`. Partial return after a full issue creates a new lot. |
-| D-ISS-09 | Restore preserves lot dates by default. A fresh availability window requires receiving as a new lot. |
-| D-ISS-10 | Quantity editing is a correction path only. It requires a reason, writes `ADJUST`, and never sets `GivenTo`. |
+| D-ISS-08 | Restore of a whole-issued lot clears `GivenTo` and writes `RETURN`; administrative restore of a non-issued removed row writes `RECEIVE` (OD-02). Partial return after a full issue creates a new lot. |
+| D-ISS-09 | Return copies the original lot's dates by default (OD-03). A fresh-date override is deferred. |
+| D-ISS-10 | Quantity editing is a correction path only. It requires a reason, writes `ADJUST`, and never sets `GivenTo`. **Deferred by OD-04.** |
 | D-ISS-11 | Public inventory shows active on-hand quantity only. It never exposes `GivenTo`, exact location or removed lots. |
 | D-ISS-12 | H-02 and H-05 use one definition: on hand = sum of active lot quantities. |
-| D-ISS-13 | Stackability is `EQUID`-level metadata. The source of truth must be approved before partial issue is enabled for ambiguous items. |
+| D-ISS-13 | Stackability is `EQUID`-level metadata (OD-01). Until metadata coverage is sufficient, an explicit allow-list governs partial issue; ambiguous items are blocked. |
 | D-ISS-14 | Audit gains distinct movement event names or a structured movement type. A generic `GivenTo`-only entry is insufficient. |
 | D-ISS-15 | Legacy active rows with `GivenTo` are an owner-reviewed data-quality list. No automatic conversion. |
 | R-ISS-01 | On-hand queries use `SUM(Quantity)` for active lots only. |
@@ -64,12 +65,12 @@
 | R-ISS-05 | Full-stack issue sets `GivenTo`, writes `ISSUE`, soft-removes the row and leaves `Quantity` unchanged. |
 | R-ISS-06 | Partial issue may not reduce a lot to zero. Equal quantity routes to the full-stack path. |
 | R-ISS-07 | Non-stackable lot has quantity 1 and can only be issued whole. A non-stackable lot with quantity greater than 1 is a data-quality error. |
-| R-ISS-08 | Stackability is read from `EQUID` metadata, never inferred from name, type or quantity. Ambiguous items cannot use partial issue. |
-| R-ISS-09 | Receives increase a chosen lot or create a new lot. Any merge writes `MERGE` or `ADJUST` and preserves absorbed lot IDs. |
-| R-ISS-10 | Partial move creates a destination lot. Whole move updates location. Destination inherits source lifecycle dates. |
+| R-ISS-08 | Stackability is read from `EQUID` metadata or the approved temporary allow-list, never inferred from name, type or quantity. Ambiguous items cannot use partial issue. |
+| R-ISS-09 | Receives increase a chosen lot or create a new lot. Movement-managed lots are exempt from spell-style auto-merge (OD-07); no merge is attempted in the first release. |
+| R-ISS-10 | Partial move creates a destination lot. Whole move updates location. Destination inherits source lifecycle dates. **Deferred by OD-04.** |
 | R-ISS-11 | Removal is whole-lot. Bulk actions show affected record count and unit count. |
-| R-ISS-12 | Returns are receipts. Partial return to an active lot increases that lot. Full reversal of a whole issue restores the row. Partial return after a full issue creates a new lot. |
-| R-ISS-13 | Quantity edits are corrections only. They require a reason, write `ADJUST`, and never set `GivenTo`. |
+| R-ISS-12 | Returns are receipts. Partial return to an active lot increases that lot. Full reversal of a whole issue restores the row. Partial return after a full issue creates a new lot. Administrative restore of a non-issued row writes `RECEIVE` (OD-02). |
+| R-ISS-13 | Quantity edits are corrections only. They require a reason, write `ADJUST`, and never set `GivenTo`. **Deferred by OD-04.** |
 | R-ISS-14 | Public output shows active on-hand quantity only. It never shows recipient, exact location, actor, movement history or removed rows. |
 | R-ISS-15 | H-02 and H-05 use the same on-hand definition and never aggregate movement rows into stock. |
 | R-ISS-16 | Issue, return and adjustment are atomic: lock the lot, validate expected state, update the lot, write movement and audit in one transaction. Stale state returns `409`. |
@@ -101,7 +102,7 @@ Proposed table name: `InventoryMovement`.
 | `RelatedItemID` | `BIGINT UNSIGNED NULL` | Destination or source lot for split move/return. |
 | `Note` | `VARCHAR(255) NULL` | Free-text reason or reference. |
 | `CorrelationID` | `CHAR(36) NULL` | Matches the audit event. |
-| `IdempotencyKey` | `VARCHAR(64) NULL` | Unique when present; protects double-click returns and issues. |
+| `IdempotencyKey` | `VARCHAR(64) NULL` | Unique when present; protects double-click returns and issues. Sourced from the `Idempotency-Key` header for API calls or the hidden form field for HTML (OD-06). |
 
 **Indexes**
 
@@ -121,9 +122,9 @@ Proposed table name: `InventoryMovement`.
 
 The application exposes insert and read only. No update or delete method is added. Corrections are new movements.
 
-### 4.3 Optional stackability table
+### 4.3 Stackability metadata
 
-Only if the owner approves `EQUID`-level metadata:
+OD-01 approved `EQUID`-level metadata. The table below is the target design; until metadata coverage is sufficient, an explicit allow-list is used.
 
 ```sql
 CREATE TABLE ItemStackRule (
@@ -136,7 +137,7 @@ CREATE TABLE ItemStackRule (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-If the owner prefers no new table, use an explicit settings allow-list and mark it temporary. Until the source is approved, partial issue is disabled for ambiguous items.
+Until metadata coverage is sufficient, the explicit allow-list governs partial issue. An item absent from the allow-list is treated as unknown and cannot be partially issued. The allow-list is temporary and documented as such. The `ItemStackRule` table is not part of the first-release migration; it is the target design for when metadata coverage justifies it.
 
 ### 4.4 No changes to existing columns
 
@@ -155,9 +156,8 @@ Add to `internal/domain/inventory_admin.go` or a new `internal/domain/movement.g
 - `MovementType` with the approved closed set.
 - `InventoryMovement` with the ledger fields.
 - `IssueItemInput`: lot ID, expected `ModAt`, quantity, recipient, optional note, idempotency key, actor, correlation ID, source IP.
-- `ReturnItemInput`: lot ID, expected `ModAt`, quantity, optional recipient, optional note, idempotency key, actor, correlation ID, source IP.
-- `AdjustItemInput`: lot ID, expected `ModAt`, new quantity, reason, actor, correlation ID, source IP.
-- `MoveItemInput`: lot ID, expected `ModAt`, quantity, destination location, optional note, actor, correlation ID, source IP.
+- `ReturnItemInput`: lot ID, expected `ModAt`, quantity, optional recipient, optional note, idempotency key, actor, correlation ID, source IP. Dates are copied from the source lot (OD-03).
+- `AdjustItemInput` and `MoveItemInput`: defined for schema completeness but **deferred by OD-04**.
 - `MovementFilter` and `MovementPage` for the admin history.
 - `Stackability` enum: `stackable`, `non_stackable`, `unknown`.
 
@@ -207,18 +207,18 @@ A stale `expectedModAt` returns `domain.ErrConflict` and the API maps it to `409
 
 New `AdminInventoryService.Return(ctx, input)`:
 
-- Active lot: increase quantity, write `RETURN`, audit.
-- Whole-issued lot (`DeletedFg = 1`, `GivenTo` set), full quantity: clear `GivenTo`, set `DeletedFg = 0`, write `RETURN`, audit.
-- Whole-issued lot, partial quantity: create a new active lot for the returned quantity, copy item metadata and lifecycle dates, write `RETURN` on the new lot and a `RETURN`/reference movement on the original as needed. Do not partially resurrect the original row.
-- Reject a return that would exceed the issued quantity or a return against a non-issued removed row unless the owner approves that case.
+- Active lot: increase quantity, write `RETURN`, audit. Copy the lot's existing dates (OD-03).
+- Whole-issued lot (`DeletedFg = 1`, `GivenTo` set), full quantity: clear `GivenTo`, set `DeletedFg = 0`, write `RETURN`, audit. Original dates are preserved.
+- Whole-issued lot, partial quantity: create a new active lot for the returned quantity, copy item metadata and lifecycle dates, write `RETURN` on the new lot and a `RETURN`/reference movement on the original as needed. Do not partially resurrect the original row. Original dates are copied (OD-03).
+- Reject a return that would exceed the issued quantity or a return against a non-issued removed row. Restore of a non-issued removed row is handled as `RECEIVE` (OD-02), not as a return.
 
 ### 5.5 Receive, move, adjust and write-off
 
-- **Receive:** manual create and import commit write a `RECEIVE` movement. If a chosen active lot is increased, write `RECEIVE` on that lot. No automatic merge.
-- **Move:** whole move updates the lot's location and writes `MOVE`. Partial move reduces the source lot, creates a destination lot, copies source dates, and writes one `MOVE` row with `RelatedItemID` set to the destination.
-- **Adjust:** quantity correction only. Require a reason, write `ADJUST`, and never set `GivenTo`.
+- **Receive:** manual create and administrative restore write a `RECEIVE` movement. If a chosen active lot is increased, write `RECEIVE` on that lot. No automatic merge. Import commits do not write movements in the first release (OD-05).
+- **Move (deferred):** whole move updates the lot's location and writes `MOVE`. Partial move reduces the source lot, creates a destination lot, copies source dates, and writes one `MOVE` row with `RelatedItemID` set to the destination. Deferred by OD-04.
+- **Adjust (deferred):** quantity correction only. Require a reason, write `ADJUST`, and never set `GivenTo`. Deferred by OD-04.
 - **Write-off/remove:** whole-lot soft delete writes `WRITE_OFF`. Bulk removal writes one movement per row and returns both record and unit counts.
-- **Merge:** spell auto-merge must either be exempted for movement-managed lots or write `MERGE`/`ADJUST` and preserve absorbed lot IDs. The plan recommends exempting movement-managed lots first.
+- **Merge:** movement-managed lots are exempt from spell-style auto-merge (OD-07). Auto-merge must not absorb or alter a movement-managed lot. Movement-aware merge rules are a later decision.
 
 ### 5.6 On-hand calculator
 
@@ -233,7 +233,7 @@ Add one shared service function, for example `OnHandQuantity(ctx, filter)`:
 - Active lot: `GivenTo` must be empty.
 - Create: `GivenTo` is rejected for active rows.
 - Update: `GivenTo` is rejected unless the same request completes a whole-record disposition.
-- Restore: clears `GivenTo` and writes `RETURN`.
+- Restore: a whole-issued row clears `GivenTo` and writes `RETURN`; an administratively removed row writes `RECEIVE` (OD-02).
 - Partial issue: quantity must be less than on hand; equal quantity routes to full-stack.
 - Full issue: quantity remains unchanged and `DeletedFg = 1`.
 - No movement without an audit event and no audit event without a movement.
@@ -248,8 +248,8 @@ All routes stay inside the existing admin group in `internal/api/router.go`, whi
 |---|---|---|
 | `POST` | `/api/v1/items/:id/issue` | Partial or full-stack issue. |
 | `POST` | `/api/v1/items/:id/return` | Return to an active lot or create a new lot after a whole-stack issue. |
-| `POST` | `/api/v1/items/:id/adjust` | Quantity correction with a required reason. |
-| `POST` | `/api/v1/items/:id/move` | Whole or partial location move. |
+| `POST` | `/api/v1/items/:id/adjust` | Quantity correction with a required reason. **Deferred by OD-04.** |
+| `POST` | `/api/v1/items/:id/move` | Whole or partial location move. **Deferred by OD-04.** |
 | `GET` | `/api/v1/admin/items/:id/movements` | Paginated movement history for one lot. |
 | `GET` | `/api/v1/admin/movements/:movementID` | One movement detail. |
 | `GET` | `/admin/inventory/:id/history` | HTML movement history page. |
@@ -267,8 +267,7 @@ All routes stay inside the existing admin group in `internal/api/router.go`, whi
   "quantity": 10,
   "recipient": "Marc",
   "note": "Raid award",
-  "expectedModAt": "2026-11-22T12:34:56.123456Z",
-  "idempotencyKey": "optional-client-key"
+  "expectedModAt": "2026-11-22T12:34:56.123456Z"
 }
 ```
 
@@ -278,6 +277,7 @@ All routes stay inside the existing admin group in `internal/api/router.go`, whi
 - If `quantity` equals on hand, the service uses the full-stack path.
 - If `quantity` is greater than on hand, return `422`.
 - A stale `expectedModAt` returns `409`.
+- The idempotency key is sent in the `Idempotency-Key` header, not in the JSON body (OD-06). A duplicate key returns `409`.
 
 **Return**
 
@@ -286,12 +286,14 @@ All routes stay inside the existing admin group in `internal/api/router.go`, whi
   "quantity": 10,
   "recipient": "Marc",
   "note": "Partial return",
-  "expectedModAt": "2026-11-22T12:34:56.123456Z",
-  "idempotencyKey": "optional-client-key"
+  "expectedModAt": "2026-11-22T12:34:56.123456Z"
 }
 ```
 
-**Adjust**
+- Return copies the original lot's dates (OD-03). No date fields are accepted in the first release.
+- The idempotency key is sent in the `Idempotency-Key` header (OD-06).
+
+**Adjust (deferred by OD-04)**
 
 ```json
 {
@@ -312,12 +314,14 @@ All routes stay inside the existing admin group in `internal/api/router.go`, whi
 }
 ```
 
+The Adjust and Move contracts are documented for schema completeness but are **deferred by OD-04**. They are not exposed in the first release.
+
 ### 6.3 Existing contract changes
 
 - `POST /api/v1/items` (create): reject `givenTo` for active rows. The field may remain in the DTO only for historical/imported completed issues; active creation must not accept it.
 - `PUT /api/v1/items/:id` (update): reject `givenTo` unless the same request is a whole-record disposition. Remove `givenTo` from the generic active-row edit contract.
 - `DELETE /api/v1/items/:id` (remove): write a `WRITE_OFF` movement in the same transaction as the soft delete and audit.
-- `POST /api/v1/items/:id/restore`: clear `GivenTo` and write `RETURN` when the row was a whole-issued lot. For a non-issued removed row, write a `RECEIVE` or `RETURN` movement according to the approved restore policy.
+- `POST /api/v1/items/:id/restore`: clear `GivenTo` and write `RETURN` when the row was a whole-issued lot. For a non-issued removed row, write `RECEIVE` (OD-02 approved).
 - Quantity changes on `PUT /api/v1/items/:id`: require a reason and write `ADJUST`, or remove quantity from the generic update and require the adjust endpoint. Recommended: remove quantity from the generic update contract and use `POST /api/v1/items/:id/adjust`.
 
 ### 6.4 Error semantics
@@ -328,7 +332,7 @@ All routes stay inside the existing admin group in `internal/api/router.go`, whi
 | Lot not found | `404` | `not_found` |
 | Lot changed since load | `409` | `conflict` |
 | Lot already removed | `409` | `conflict` |
-| Partial issue equals full quantity | `422` | `validation_error` (route to full-stack action) |
+| Partial issue equals full quantity | `200` | Routes to the full-stack path automatically; no error |
 | Non-stackable partial issue | `422` | `validation_error` |
 | Return exceeds issued quantity | `422` | `validation_error` |
 | Duplicate idempotency key | `409` | `conflict` |
@@ -361,8 +365,8 @@ No movement history or recipient is added to public JSON.
 
 - Add an **Issue** action for active lots.
 - Add a **Return** action for removed/issued lots with a recipient.
-- Add an **Adjust quantity** action separate from the generic edit.
-- Add a **Move** action for active lots.
+- Add an **Adjust quantity** action separate from the generic edit. **Deferred by OD-04.**
+- Add a **Move** action for active lots. **Deferred by OD-04.**
 - Show current on hand and the resulting quantity in the issue dialog.
 - Keep the existing audit history section and add a movement history section below it.
 
@@ -372,7 +376,7 @@ No movement history or recipient is added to public JSON.
 - `internal/web/templates/admin_inventory_return.html`
 - `internal/web/templates/admin_inventory_history.html`
 
-Each form must include the CSRF token and `expectedModAt`. The issue and return forms must show the lot name, lot ID, current on hand, requested quantity and resulting on hand. The recipient field is required for issue. The return form must state whether the action restores the original row or creates a new lot.
+Each form must include the CSRF token and `expectedModAt`. The issue and return forms must also include a hidden `idempotencyKey` field generated per form render (OD-06); the same duplicate-key semantics apply as for the API header. The issue and return forms must show the lot name, lot ID, current on hand, requested quantity and resulting on hand. The recipient field is required for issue. The return form must state whether the action restores the original row or creates a new lot, and must show that the original lot's dates are copied.
 
 ### 7.3 Admin inventory list
 
@@ -426,7 +430,7 @@ Behavior:
 - Remove `GivenTo` from the generic create form.
 - Remove `GivenTo` from the generic active-row edit form.
 - Add recipient to the issue form and to the whole-record disposition/remove form.
-- Add a required reason to the adjust form.
+- Add a required reason to the adjust form. **Deferred by OD-04.**
 - Keep the "Save and remove" path only for whole-record disposition, not partial issue.
 
 ## 8. Audit impacts
@@ -503,6 +507,12 @@ Do not put the movement type only in free text.
 - Lot quantities already changed by partial issues remain changed.
 - The rollback note must state this explicitly and provide a report of affected lots and movements.
 
+### 9.5 Import movements deferred
+
+- OD-05 defers import-generated `RECEIVE` movements. Imports continue to create inventory state only.
+- Imported lots appear as opening balances with no receipt history. No import transaction changes are required in the first release.
+- Revisit when import receipt history is required; the ledger schema already supports `RECEIVE`.
+
 ## 10. Validation plan
 
 ### 10.1 Unit tests
@@ -517,11 +527,12 @@ Do not put the movement type only in free text.
   - Return to active lot increases quantity and writes `RETURN`.
   - Full return of a whole-issued row restores the row and clears `GivenTo`.
   - Partial return after a whole-stack issue creates a new lot and leaves the original as history.
-  - Adjust requires a reason and writes `ADJUST`.
-  - Move whole and partial paths write `MOVE` and preserve destination dates.
+  - Return copies the original lot's dates (OD-03).
+  - Restore of a whole-issued row writes `RETURN` and clears `GivenTo`; administrative restore writes `RECEIVE` (OD-02).
   - Remove writes `WRITE_OFF`; bulk remove returns record and unit counts.
   - Stale `expectedModAt` returns `ErrConflict`.
   - Duplicate idempotency key returns `ErrConflict`.
+  - Adjust and move tests are **deferred by OD-04**.
 
 ### 10.2 Repository tests
 
@@ -537,7 +548,7 @@ Do not put the movement type only in free text.
 
 - `internal/integration/items_test.go` and new partial-issuance tests:
   - Two concurrent issues from 55: one succeeds, one returns `409`.
-  - Import commit writes `RECEIVE` movements without double counting.
+  - Import commit creates no movements and does not double count (OD-05).
   - Public totals show units, not record counts.
   - Admin totals show units and records with explicit labels.
   - Public pages never expose `GivenTo`, location or movement history.
@@ -546,8 +557,9 @@ Do not put the movement type only in free text.
 
 - `internal/api/inventory_test.go` and new admin movement tests:
   - New routes require authentication and CSRF.
-  - Issue/return/adjust/move request validation.
+  - Issue/return request validation; adjust/move validation is deferred by OD-04.
   - `409` on stale state; `422` on invalid quantities.
+  - `Idempotency-Key` header and hidden form field share duplicate-key semantics.
   - Movement history pagination and filters.
   - Public JSON does not include movement data.
 
@@ -558,16 +570,18 @@ Do not put the movement type only in free text.
 3. Return 10 against the whole-issued row -> new active lot of 10; original remains history.
 4. Return all 45 against the whole-issued row -> original row restored and `GivenTo` cleared.
 5. Remove an active lot -> `WRITE_OFF` movement and audit.
-6. Adjust quantity with a reason -> `ADJUST` movement and audit.
-7. Move 10 units to another location -> destination lot created and `MOVE` recorded.
-8. Confirm public totals show units and no internal fields.
+6. Restore a whole-issued row -> `RETURN`, `GivenTo` cleared; restore an administratively removed row -> `RECEIVE` (OD-02).
+7. Attempt a partial issue on a non-stackable or unclassified `EQUID` -> blocked with `422`.
+8. Submit the same issue twice with one idempotency key -> second request returns `409` and no duplicate movement.
+9. Confirm public totals show units and no internal fields.
+10. Adjust and move manual checks are **deferred by OD-04**.
 
 ## 11. Implementation sequence
 
-1. **Approval gate** - approve this plan and the remaining open decisions in section 12.
+1. **Approval gate** - approve this plan. Owner decisions in section 12 are recorded; no further decision is outstanding for the first release.
 2. **Schema** - add `0006_inventory_movement.sql`, update migration manifest and docs. No lot data mutation.
-3. **Domain and repository** - movement types, ledger reads/writes, on-hand calculator, transaction helpers.
-4. **Service** - issue, return, receive, move, adjust, write-off and merge paths with invariants.
+3. **Domain and repository** - movement types, ledger reads/writes, on-hand calculator, stackability lookup and transaction helpers.
+4. **Service** - issue, full-stack issue, return, receive/restore and write-off paths with invariants. Move and adjust are deferred by OD-04.
 5. **API** - new routes and contract changes; error semantics.
 6. **Admin UI** - issue/return forms, movement history, unit totals, `GivenTo` removal from generic forms.
 7. **Audit** - event taxonomy and structured fields; legacy compatibility.
@@ -577,22 +591,81 @@ Do not put the movement type only in free text.
 
 Dependencies: schema -> repository -> service -> API/UI. Audit and totals can proceed once the service contract is fixed. Legacy cleanup must not block the invariant enforcement for new writes.
 
-## 12. Open decisions and approval
+## 12. Owner decisions (recorded)
 
-The following items still need an explicit owner answer before implementation:
+The owner reviewed the decision matrix on 2026-11-22. The following decisions are **recorded** and govern the implementation; OD-05 is deferred rather than approved.
 
-| # | Decision | Recommendation |
+| ID | Decision | Owner disposition | Implementation consequence |
+|---|---|---|---|
+| **OD-01** | Stackability source of truth | **Approved** - `EQUID`-level metadata; explicit allow-list until metadata coverage is sufficient. | Partial issue is permitted only for `EQUID`s classified as stackable. Unknown or unclassified items are blocked with `422 validation_error`. The allow-list is temporary and documented. |
+| **OD-02** | Restore semantics | **Approved** - administrative restore writes `RECEIVE`; return from a recipient writes `RETURN`. | Restore branches on prior issue state: a row issued to a recipient restores as `RETURN` and clears `GivenTo`; a row removed administratively restores as `RECEIVE`. |
+| **OD-03** | Return date policy | **Approved** - copy the original lot's dates by default; fresh-date override deferred. | Return copies the source lot's open/bazaar dates. No fresh-date override in the first release. |
+| **OD-04** | First-release scope | **Approved** - `ISSUE` and `RETURN` only; `MOVE` and `ADJUST` deferred. | The ledger schema supports all movement types, but only issue and return are exposed in the first release. Move and adjust routes, forms and tests are deferred. |
+| **OD-05** | Import receive movements | **Deferred** - no import-generated `RECEIVE` movements in the first release. | Imports continue to create inventory state only. Imported lots appear as opening balances with no receipt history. |
+| **OD-06** | Idempotency transport | **Approved** - `Idempotency-Key` header for API, hidden form field for HTML, shared semantics. | One idempotency key per request; duplicate keys return `409 conflict`. HTML forms carry the key in a hidden field; API clients use the header. |
+| **OD-07** | Spell auto-merge | **Approved** - movement-managed lots are exempt from spell-style auto-merge. | Auto-merge must not absorb or alter a movement-managed lot. Ledger integrity is preserved; movement-aware merge rules are a later decision. |
+
+**Approval:** Owner decisions recorded 2026-11-22. Implementation may begin subject to the readiness conditions in section 13.
+
+## 13. Implementation readiness summary
+
+### 13.1 Remaining required work
+
+1. **Schema** - add `0006_inventory_movement.sql`, indexes, constraints and migration manifest/hash updates. No lot data mutation.
+2. **Domain and repository** - movement types, append-only ledger reads/writes, on-hand calculator, stackability lookup and transaction helpers.
+3. **Service** - atomic issue, full-stack issue, return, receive/restore and write-off paths with row locking, expected-state checks and the active-row `GivenTo` invariant.
+4. **API** - `POST /api/v1/items/:id/issue`, `POST /api/v1/items/:id/return`, movement history reads, and the create/update/delete/restore contract changes. `Idempotency-Key` header parsing.
+5. **Admin UI** - issue and return forms, movement history page, unit totals and `GivenTo` removal from generic active-row forms. Hidden idempotency field in HTML forms.
+6. **Audit** - distinct movement event types and structured fields, written in the same transaction as the lot update and movement.
+7. **Public read path** - unit totals only; no recipient, location or movement exposure.
+8. **Legacy `GivenTo` cleanup** - read-only report and owner dry-run; no automatic conversion.
+9. **Validation** - the test and acceptance coverage in section 10.
+
+### 13.2 Deferred work
+
+| Item | Reason | Revisit trigger |
 |---|---|---|
-| 1 | Stackability source of truth (D-ISS-13) | `EQUID`-level metadata; until approved, partial issue only for explicitly allow-listed items. |
-| 2 | Restore of a non-issued removed row | Write `RECEIVE` or `RETURN`; recommend `RETURN` only for whole-issued rows and `RECEIVE` for administrative restore. |
-| 3 | Return date policy after partial return | Copy the original lot's dates; allow an explicit fresh date on the return form. |
-| 4 | First-release scope | Ship issue and return first with the full ledger schema; add move/adjust UI next. |
-| 5 | Import receive movements | Write one `RECEIVE` movement per created row in the import transaction. |
-| 6 | Idempotency key transport | `Idempotency-Key` request header or JSON field; recommend header. |
-| 7 | Spell auto-merge | Exempt movement-managed lots first, or write `MERGE` and preserve absorbed lot IDs. |
+| `MOVE` and `ADJUST` API/UI | OD-04 limits first release to issue and return. | After issue/return is stable; schema already supports both types. |
+| Import-generated `RECEIVE` movements | OD-05 deferred; imports remain inventory state only. | When receipt history for imports is required. |
+| Fresh-date return override | OD-03 deferred. | When returned stock genuinely has new dates. |
+| Movement-aware spell merge (`MERGE`) | OD-07 exempts movement-managed lots. | When merge rules can preserve ledger integrity. |
+| Stackability metadata coverage | OD-01 uses an allow-list until metadata is sufficient. | When `EQUID` metadata is populated for the catalogue. |
 
-**Approval:** __________________________  **Date:** ______________
+### 13.3 Estimated implementation phases
 
-## 13. No-code statement
+| Phase | Content | Exit criteria |
+|---|---|---|
+| 0 - Approval and baseline | Owner decisions recorded; plan approved. | This document approved. |
+| 1 - Schema | Movement ledger migration, indexes, constraints, migration tests and docs. | Migration applies and rolls back cleanly; no lot data changed. |
+| 2 - Domain and repository | Movement types, ledger reads/writes, on-hand calculator, stackability lookup. | Repository tests pass; ledger is append-only. |
+| 3 - Service | Issue, full-stack issue, return, restore and write-off with invariants and idempotency. | Service tests pass; stale state returns `409`; no partial writes. |
+| 4 - API | Issue/return routes, history reads, contract changes, error semantics. | API tests pass; authentication and CSRF enforced. |
+| 5 - Admin UI | Issue/return forms, history page, unit totals, `GivenTo` removal. | Manual acceptance for issue and return passes. |
+| 6 - Audit and public totals | Movement events, structured fields, public unit totals. | Audit atomicity tests pass; public output exposes no internal data. |
+| 7 - Legacy cleanup and release | `GivenTo` report, dry-run, documentation and release validation. | Owner resolves or accepts each legacy row; release checklist complete. |
 
-This document is a plan only. No application code, route, template, stylesheet, migration or runtime behavior was changed. No implementation should begin until this plan and the open decisions in section 12 are approved.
+Phases 1-3 are sequential. Phase 4 depends on 3. Phase 5 depends on 4. Phase 6 can start once the service contract is fixed. Phase 7 closes the release.
+
+### 13.4 Migration impact
+
+- **Additive only.** One new table (`InventoryMovement`) with indexes and constraints. No column removal, no quantity rewrite, no `GivenTo` rewrite.
+- **Indexes** on `(EQUID, occurred_at)`, `(lot_id)`, `(recipient)` and `(type)`.
+- **Constraints** - quantity greater than zero; recipient required for `ISSUE`; movement type restricted to the approved set; no application update/delete path.
+- **No backfill.** Existing lots become opening balances; pre-deployment history is not invented. The UI labels the baseline.
+- **No automatic `GivenTo` cleanup.** A read-only report lists active rows with recipients; the owner resolves each row. New writes cannot set `GivenTo` on active rows.
+- **Rollback.** Dropping the ledger returns the application to Phase 5 behavior. Partial issues already applied remain applied; the rollback note must say so and provide a report of affected lots and movements.
+- **Import behaviour unchanged.** No `RECEIVE` movements are written by imports in the first release (OD-05).
+
+### 13.5 Validation approach
+
+- **Unit** - service invariants: partial vs full-stack issue, return to active lot, return after whole-stack issue, restore branching (`RECEIVE` vs `RETURN`), return date copying, stackability allow-list blocking, idempotency conflicts, stale `expectedModAt`.
+- **Repository** - movement round trip, atomic movement plus audit, append-only enforcement, on-hand `SUM(Quantity)` excludes removed lots and movement rows, migration apply/rollback.
+- **Integration** - concurrent issues from one lot (one succeeds, one `409`), import creates no movements, public totals show units, public pages expose no internal fields.
+- **API** - authentication and CSRF on new routes, request validation, `409`/`422` semantics, `Idempotency-Key` header and hidden form field share duplicate-key behavior, history pagination and filters, no movement data in public JSON.
+- **Migration** - applies and rolls back cleanly; no lot data mutation; opening-balance labeling.
+- **Manual acceptance** - issue 10 from 55 leaves 45 in one active row; issuing the remainder uses the full-stack path; return restores correctly; restore writes the approved movement type; public totals show units only.
+- **Deferred coverage** - move and adjust tests are out of scope for the first release (OD-04); import movement tests are out of scope (OD-05).
+
+## 14. No-code statement
+
+This document is a plan only. No application code, route, template, stylesheet, migration or runtime behavior was changed. Owner decisions OD-01 to OD-07 are recorded in section 12. Implementation may begin only after this updated plan and the readiness conditions in section 13 are accepted.

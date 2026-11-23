@@ -1,6 +1,6 @@
 # Partial issuance — owner approval package
 
-**Status:** review-only; **no decision approved by this package**, no application code, template, route, migration or runtime behavior changed.
+**Status:** owner decisions recorded 2026-11-22; no application code, template, route, migration or runtime behavior changed. Implementation may begin only after the updated plan and readiness conditions are accepted.
 **Date:** 2026-11-22
 **Reviewed document:** `Docs/InventoryMovementBusinessRulesReview.md`
 **Owner direction recorded:** partial issuance is required. Issuing 10 units from a 55-unit stack must leave 45 on hand, keep one active row, and record an `ISSUE` movement with recipient, timestamp and actor while preserving audit history.
@@ -57,14 +57,14 @@ The supporting decisions for the complete workflow are **D-ISS-05, D-ISS-06, D-I
 | D-ISS-03 | **Required; owner direction recorded** | `GivenTo` means the recipient of a completed whole-record issue or disposition. It is not a reservation, note, partial-issue field or location. An active row must not carry a recipient. |
 | D-ISS-04 | **Required; owner direction recorded** | A partial issue reduces the same lot and writes one `ISSUE` movement. No new active row. A full issue sets `GivenTo`, writes `ISSUE`, and soft-removes the lot without reducing quantity to zero. |
 | D-ISS-05 | **Required supporting** | A partial move reduces the source lot and creates a destination lot; a whole move updates the lot's location. Destination inherits source dates. |
-| D-ISS-06 | **Required supporting; needs owner decision** | Receives increase an explicitly chosen lot or create a new lot. No automatic merge for movement-managed lots. The existing spell auto-merge must be reconciled or explicitly exempted. |
+| D-ISS-06 | **Required supporting; approved (OD-07)** | Receives increase an explicitly chosen lot or create a new lot. Movement-managed lots are exempt from spell-style auto-merge; auto-merge must not absorb or alter a movement-managed lot. |
 | D-ISS-07 | **Required supporting** | Removal is a whole-lot action. A partial removal is a write-off or adjustment. Bulk removal must show record count and unit count. |
-| D-ISS-08 | **Required supporting; scope clarified** | Restoring a fully returned whole-issued lot clears `GivenTo` and writes a `RETURN` movement. A partial return after a full issue creates a new lot instead of restoring the old row. |
-| D-ISS-09 | **Required supporting** | Restore preserves the lot's dates by default. A fresh availability window requires receiving the returned item as a new lot. |
+| D-ISS-08 | **Required supporting; approved (OD-02)** | Restoring a fully returned whole-issued lot clears `GivenTo` and writes a `RETURN` movement. Administrative restore of a non-issued removed row writes `RECEIVE`. A partial return after a full issue creates a new lot instead of restoring the old row. |
+| D-ISS-09 | **Required supporting; approved (OD-03)** | Return copies the original lot's dates by default. A fresh-date override is deferred to a later enhancement. |
 | D-ISS-10 | **Required** | Quantity editing is a correction path only. It requires a reason, writes an `ADJUST` movement and audit, and must not set `GivenTo`. |
 | D-ISS-11 | **Required** | Public inventory shows active on-hand quantity only. It never exposes `GivenTo`, exact source location or removed lots. Availability remains date-based. |
 | D-ISS-12 | **Required** | H-02 totals and H-05 actions use one definition: on hand = sum of active lot quantities. Issued/removed lots are history, not stock. |
-| D-ISS-13 | **Required; needs owner decision** | Stackability is item metadata at `EQUID` level. A non-stackable lot has quantity 1 and can only be issued whole. The source of truth must be named. |
+| D-ISS-13 | **Required; approved (OD-01)** | Stackability is item metadata at `EQUID` level. A non-stackable lot has quantity 1 and can only be issued whole. Until metadata coverage is sufficient, an explicit allow-list governs partial issue. |
 | D-ISS-14 | **Required** | Audit must gain distinct movement event names or an explicit movement type in structured fields. A generic `GivenTo`-only entry is insufficient. |
 | D-ISS-15 | **Required; automatic conversion withdrawn** | Legacy active rows with `GivenTo` are an owner-reviewed data-quality list. They are not automatically converted to issued or cleared. |
 
@@ -216,19 +216,19 @@ Phase 5 shipped administrative CRUD and audit; H-02/H-05 are still design items.
 
 ## 10. Implementation sequencing
 
-No code is authorized by this package. Recommended order after owner approval:
+No code is authorized by this package. Owner decisions OD-01 to OD-07 are recorded in the plan (§12) and this package (§13). Recommended order:
 
-1. **Owner decisions** — approve R-ISS-01–16, the stackability source, the return policy and the `GivenTo` cleanup policy (§13).
-2. **Schema** — add the movement ledger table and indexes; no lot data mutation. Add stackability metadata only if the owner approves a source.
-3. **Domain/service** — movement writer, on-hand calculator, atomic issue/return/adjust operations with row locking and expected-state checks.
-4. **API** — issue and return endpoints; update edit/restore contracts; define `409`/`422` semantics.
-5. **Admin UI** — issue dialog, full-stack path, movement history, unit totals.
+1. **Approval gate** — accept the updated plan and readiness conditions. No further first-release decision is outstanding.
+2. **Schema** — add the movement ledger table and indexes; no lot data mutation. Stackability metadata uses `EQUID`-level metadata with a temporary allow-list.
+3. **Domain/service** — movement writer, on-hand calculator, stackability lookup and atomic issue/return/restore/write-off operations with row locking and expected-state checks. Move and adjust are deferred (OD-04).
+4. **API** — issue and return endpoints; `Idempotency-Key` header; update edit/restore contracts; define `409`/`422` semantics.
+5. **Admin UI** — issue and return forms with hidden idempotency fields, movement history, unit totals, `GivenTo` removal.
 6. **Audit** — movement event names or structured type; correlation IDs; reporting compatibility for legacy events.
 7. **Public read path** — unit total definition only; no recipient or history exposure.
 8. **Legacy cleanup** — owner-reviewed `GivenTo` report and dry-run; enforce the active-row invariant for new writes from the start, with a clear path to clear legacy rows.
 9. **Validation** — unit and integration tests, concurrency tests, migration/rollback proof, manual acceptance.
 
-Dependencies: 2 → 3 → 4 → 5; 6 can proceed with 3; 7 depends on the total definition; 8 must not block 3–5 but must complete before the invariant is enforced on legacy rows.
+Dependencies: 2 → 3 → 4 → 5; 6 can proceed with 3; 7 depends on the total definition; 8 must not block 3–5 but must complete before the invariant is enforced on legacy rows. Import-generated `RECEIVE` movements are deferred (OD-05); imports remain inventory state only.
 
 ## 11. Migration impacts
 
@@ -237,7 +237,7 @@ Dependencies: 2 → 3 → 4 → 5; 6 can proceed with 3; 7 depends on the total 
 - Constraints: quantity greater than zero; recipient required for `ISSUE`; type restricted to the approved set; no update/delete path in the application.
 - **No backfill.** Existing lots become opening balances. Their pre-deployment history is not invented. The UI labels the baseline.
 - **No automatic `GivenTo` cleanup.** Produce a read-only report of active rows with recipients; owner resolves each row. New writes are blocked from setting `GivenTo` on active rows.
-- **Stackability:** if metadata is added, default to "unknown" and block partial issue for unknown items until classified. If no metadata is approved, use an explicit allow-list and document it as temporary.
+- **Stackability:** `EQUID`-level metadata is approved (OD-01). Default to "unknown" and block partial issue for unknown items until classified. Until metadata coverage is sufficient, use an explicit allow-list and document it as temporary.
 - **Rollback:** dropping the ledger returns the application to Phase 5 behavior; lot quantities changed by partial issues are not automatically reversed. A rollback plan must state that partial issues already applied remain applied, or provide a compensating report.
 
 ## 12. Audit impacts
@@ -249,24 +249,84 @@ Dependencies: 2 → 3 → 4 → 5; 6 can proceed with 3; 7 depends on the total 
 - Legacy `ITEM_UPDATED`/`ITEM_REMOVED` rows remain valid; reports must handle both old and new vocabularies.
 - Recipient names are internal data. They appear in admin movement history and audit only, never in public output. Existing access controls and retention rules apply.
 
-## 13. Owner approval requested
+## 13. Owner decisions (recorded)
 
-Please approve or amend each item. Recommended answers are shown.
+The owner reviewed the decision matrix on 2026-11-22. These decisions govern implementation.
 
-| # | Decision | Recommendation |
+| ID | Decision | Owner disposition |
 |---|---|---|
-| A | Adopt R-ISS-01–16 as the business rules | Approve |
-| B | Stackability source of truth | `EQUID`-level metadata; until available, partial issue only for explicitly allow-listed items |
-| C | Partial return after a whole-stack issue | Create a new lot; keep the original row as issued history |
-| D | `GivenTo` on create/edit | Block for active rows; allow only for historical/imported completed issues |
-| E | Movement ledger scope in the first release | Full ledger for issue, return, receive, move, adjust and write-off; if scope is tight, ship issue and return first with the same schema |
-| F | Public totals | Units, active lots only, stated explicitly |
-| G | Audit naming | Distinct movement events preferred; a structured `movement_type` is acceptable |
-| H | Spell merge | Exempt movement-managed lots or write a `MERGE` movement |
-| I | Legacy `GivenTo` cleanup | Owner-run report and dry-run; no automatic conversion |
+| **OD-01** | Stackability source of truth | **Approved** — `EQUID`-level metadata; explicit allow-list until metadata coverage is sufficient. |
+| **OD-02** | Restore semantics | **Approved** — administrative restore writes `RECEIVE`; return from a recipient writes `RETURN`. |
+| **OD-03** | Return date policy | **Approved** — copy the original lot's dates by default; fresh-date override deferred. |
+| **OD-04** | First-release scope | **Approved** — `ISSUE` and `RETURN` only; `MOVE` and `ADJUST` deferred. |
+| **OD-05** | Import receive movements | **Deferred** — no import-generated `RECEIVE` movements in the first release; imports remain inventory state. |
+| **OD-06** | Idempotency transport | **Approved** — `Idempotency-Key` header for API, hidden form field for HTML, shared semantics. |
+| **OD-07** | Spell auto-merge | **Approved** — movement-managed lots are exempt from spell-style auto-merge. |
 
-**Approval:** __________________________  **Date:** ______________
+The previously recommended business rules R-ISS-01 to R-ISS-16, the `GivenTo` rules, the public totals definition and the movement taxonomy remain as described in sections 2 to 9 and are not reopened by these decisions.
 
-## 14. No-code statement
+**Approval:** Owner decisions recorded 2026-11-22. Implementation may begin subject to the readiness conditions in section 14.
 
-This package is review-only. No application code, template, stylesheet, route, migration or runtime behavior was changed. `Docs/InventoryMovementBusinessRulesReview.md` is unchanged; this package records the owner direction and the resulting recommendations.
+## 14. Implementation readiness summary
+
+### 14.1 Remaining required work
+
+1. **Schema** — movement ledger migration, indexes, constraints and migration manifest/hash updates. Stackability allow-list configuration. No lot data mutation.
+2. **Domain and repository** — movement types, append-only ledger reads/writes, on-hand calculator, stackability lookup and transaction helpers.
+3. **Service** — atomic issue, full-stack issue, return, receive/restore and write-off paths with row locking, expected-state checks and the active-row `GivenTo` invariant.
+4. **API** — issue/return routes, movement history reads, contract changes, error semantics and `Idempotency-Key` header parsing.
+5. **Admin UI** — issue/return forms, hidden idempotency fields, movement history page, unit totals and `GivenTo` removal from generic active-row forms.
+6. **Audit** — distinct movement event types and structured fields, written in the same transaction as the lot update and movement.
+7. **Public read path** — unit totals only; no recipient, location or movement exposure.
+8. **Legacy `GivenTo` cleanup** — read-only report and owner dry-run; no automatic conversion.
+9. **Validation** — unit, integration, concurrency, migration/rollback and manual acceptance coverage.
+
+### 14.2 Deferred work
+
+| Item | Reason | Revisit trigger |
+|---|---|---|
+| `MOVE` and `ADJUST` API/UI | OD-04 limits first release to issue and return. | After issue/return is stable; schema already supports both types. |
+| Import-generated `RECEIVE` movements | OD-05 deferred; imports remain inventory state only. | When receipt history for imports is required. |
+| Fresh-date return override | OD-03 deferred. | When returned stock genuinely has new dates. |
+| Movement-aware spell merge (`MERGE`) | OD-07 exempts movement-managed lots. | When merge rules can preserve ledger integrity. |
+| Stackability metadata coverage | OD-01 uses an allow-list until metadata is sufficient. | When `EQUID` metadata is populated for the catalogue. |
+
+### 14.3 Estimated implementation phases
+
+| Phase | Content | Exit criteria |
+|---|---|---|
+| 0 — Approval and baseline | Owner decisions recorded; plan approved. | Updated plan accepted. |
+| 1 — Schema | Movement ledger migration, indexes, constraints, migration tests and docs. | Migration applies and rolls back cleanly; no lot data changed. |
+| 2 — Domain and repository | Movement types, ledger reads/writes, on-hand calculator, stackability lookup. | Repository tests pass; ledger is append-only. |
+| 3 — Service | Issue, full-stack issue, return, restore and write-off with invariants and idempotency. | Service tests pass; stale state returns `409`; no partial writes. |
+| 4 — API | Issue/return routes, history reads, contract changes, error semantics. | API tests pass; authentication and CSRF enforced. |
+| 5 — Admin UI | Issue/return forms, history page, unit totals, `GivenTo` removal. | Manual acceptance for issue and return passes. |
+| 6 — Audit and public totals | Movement events, structured fields, public unit totals. | Audit atomicity tests pass; public output exposes no internal data. |
+| 7 — Legacy cleanup and release | `GivenTo` report, dry-run, documentation and release validation. | Owner resolves or accepts each legacy row; release checklist complete. |
+
+Phases 1–3 are sequential. Phase 4 depends on 3. Phase 5 depends on 4. Phase 6 can start once the service contract is fixed. Phase 7 closes the release.
+
+### 14.4 Migration impact
+
+- **Additive only.** One new table (`InventoryMovement`) with indexes and constraints. No column removal, no quantity rewrite, no `GivenTo` rewrite.
+- **No backfill.** Existing lots become opening balances. Pre-deployment history is not invented; the UI labels the baseline.
+- **Indexes** on `(EQUID, occurred_at)`, `(lot_id)`, `(recipient)` and `(type)`.
+- **Constraints** — quantity greater than zero; recipient required for `ISSUE`; movement type restricted to the approved set; no application update/delete path.
+- **Rollback** — dropping the ledger returns the application to Phase 5 behavior. Lot quantities already changed by partial issues remain changed; the rollback note must report affected lots and movements.
+- **Legacy `GivenTo`** — no automatic cleanup. A read-only report is produced; the owner resolves each row. New writes cannot set `GivenTo` on active rows.
+- **Import history** — no movement rows are created for imports in the first release (OD-05).
+
+### 14.5 Validation approach
+
+- **Unit tests** — movement type validation, on-hand calculation, stackability lookup and allow-list enforcement, return date copying, restore branching (`RECEIVE` vs `RETURN`).
+- **Repository tests** — append-only ledger, indexes and constraints, no update/delete path.
+- **Service tests** — atomic issue, full-stack issue, partial return, whole return, restore and write-off; row locking; stale `expectedModAt` returns `409`; duplicate idempotency key returns `409`; no partial writes on failure.
+- **Concurrency tests** — two concurrent issues from 55 units: one succeeds and one returns `409`.
+- **API tests** — authentication and CSRF; request validation; `409`/`422` semantics; `Idempotency-Key` header and hidden form field share duplicate-key behavior; movement history pagination and filters; public JSON exposes no movement data.
+- **Migration tests** — apply and rollback cleanly; no lot data mutation; opening-balance labeling.
+- **Manual acceptance** — issue 10 from 55 leaves 45 in one active row; issuing the remainder uses the full-stack path; return restores correctly; restore writes the approved movement type; public totals show units only.
+- **Deferred coverage** — move and adjust tests are out of scope for the first release (OD-04); import movement tests are out of scope (OD-05).
+
+## 15. No-code statement
+
+This package records owner decisions only. No application code, template, stylesheet, route, migration or runtime behavior was changed. `Docs/InventoryMovementBusinessRulesReview.md` is unchanged; this package records the owner direction and the resulting recommendations.
