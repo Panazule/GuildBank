@@ -58,6 +58,10 @@ type AdminStore interface {
 	ListAdminInventory(ctx context.Context, filter domain.AdminInventoryFilter) (domain.AdminInventoryPage, error)
 	GetAdminInventory(ctx context.Context, id int64) (domain.AdminInventoryItem, error)
 	ListLocationGroups(ctx context.Context) ([]string, error)
+	SumActiveQuantity(ctx context.Context, filter domain.AdminInventoryFilter) (uint64, error)
+	ListMovements(ctx context.Context, filter domain.MovementFilter) (domain.MovementPage, error)
+	GetMovement(ctx context.Context, movementID int64) (domain.InventoryMovement, error)
+	LookupStackability(ctx context.Context, equids []uint64) (map[uint64]domain.Stackability, error)
 	BeginAdminWrite(ctx context.Context) (AdminWriteTx, error)
 	ListAudit(ctx context.Context, filter domain.AuditFilter) (domain.AuditPage, error)
 	GetAudit(ctx context.Context, id int64) (domain.AuditEntry, error)
@@ -72,6 +76,7 @@ type AdminWriteTx interface {
 	AddSpellQuantity(ctx context.Context, id int64, qty uint32, at time.Time, actor domain.Actor) error
 	UpdateInventory(ctx context.Context, in domain.AdminUpdateRow) error
 	SetDeleted(ctx context.Context, id int64, deleted bool, at time.Time, actor domain.Actor) error
+	InsertMovement(ctx context.Context, movement domain.InventoryMovement) (int64, error)
 	InsertAudit(ctx context.Context, entry domain.AuditEntry) error
 	Commit() error
 	Rollback() error

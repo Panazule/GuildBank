@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
+	"github.com/Panazule/guildbank/internal/domain"
 	"github.com/go-sql-driver/mysql"
 )
 
@@ -31,6 +33,11 @@ type Config struct {
 // Store is the MariaDB guild store.
 type Store struct {
 	db *sql.DB
+
+	// stackability is the temporary OD-01 EQUID allow-list. It is in-process
+	// configuration, not a schema table; an absent EQUID is unknown.
+	stackabilityMu sync.RWMutex
+	stackability   map[uint64]domain.Stackability
 }
 
 // Open builds a bounded pool, pings the server and returns an error when it

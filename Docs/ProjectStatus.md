@@ -5,9 +5,9 @@
 | Document ID | PS-001 |
 | As-of date | 2026-11-22 |
 | Source specification | `Design.md` v1.6.1 (1,274 lines: body L1–L854, decisions D-01–D-13 at L855–L1161, amendments AM-01–AM-05 at L1163–L1263, informational implementation status at L1265–L1274) |
-| Repository state | Phase 1 identity/settings layer, Phase 2 item-metadata integration, Phase 3 import pipeline, Phase 4 public inventory read path and Phase 5 administrative inventory management are implemented. Administrative add/edit/remove/restore, the audit viewer, the location backfill, the owner-reviewed UI amendments, the post-Phase-5 import/admin usability improvements, the follow-up import-review adjustments (IMP-A/IMP-B/IMP-C), the DEFECT-01 spell metadata correction and the item quantity model (QTY-01–QTY-12) are implemented and live-validated on the Compose development topology (`Phase5Validation.md`, `ImportAdminImprovements.md`, `ItemQuantityModelImplementation.md`). Partial-issuance Phase 1 schema (migration `0006_inventory_movement.sql`) is implemented and awaiting owner review before Phase 2 |
+| Repository state | Phase 1 identity/settings layer, Phase 2 item-metadata integration, Phase 3 import pipeline, Phase 4 public inventory read path and Phase 5 administrative inventory management are implemented. Administrative add/edit/remove/restore, the audit viewer, the location backfill, the owner-reviewed UI amendments, the post-Phase-5 import/admin usability improvements, the follow-up import-review adjustments (IMP-A/IMP-B/IMP-C), the DEFECT-01 spell metadata correction and the item quantity model (QTY-01–QTY-12) are implemented and live-validated on the Compose development topology (`Phase5Validation.md`, `ImportAdminImprovements.md`, `ItemQuantityModelImplementation.md`). Partial-issuance Phase 1 schema (migration `0006_inventory_movement.sql`) and Phase 2 domain/repository support are implemented; Phase 2 awaits owner review before Phase 3 |
 | Documents issued | `ArchitectureReview.md` (AR-001), `DatabaseDesign.md` (DD-001), `ImplementationPlan.md` (IP-001), `ProjectStructure.md` (PS-002), `ItemsDataProfile.md` (DP-001), `Phase3ImplementationPlan.md`, `Phase4ImplementationPlan.md`, `Phase4Validation.md`, `Phase5ImplementationPlan.md`, `Phase5ApprovalReview.md`, `Phase5Validation.md`, `PublicInventoryAPI.md`, `ItemQuantityModelReview.md`, `ItemQuantityModelImplementation.md`, `PartialIssuanceImplementationPlan.md`, `PartialIssuanceApprovalPackage.md`, this status report |
-| Overall status | **v1.6.1 published; Phases 0–2 approved and complete; Phase 3 approved, implemented and live-validated; Phase 4 approved, implemented and live-validated; Phase 5 approved, implemented and live-validated, awaiting owner review of the implementation and the one open availability-boundary wording question; partial-issuance Phase 1 schema implemented and awaiting owner review before Phase 2** |
+| Overall status | **v1.6.1 published; Phases 0–2 approved and complete; Phase 3 approved, implemented and live-validated; Phase 4 approved, implemented and live-validated; Phase 5 approved, implemented and live-validated, awaiting owner review of the implementation and the one open availability-boundary wording question; partial-issuance Phase 1 schema and Phase 2 domain/repository layer implemented and awaiting owner review before Phase 3** |
 
 ---
 
@@ -455,6 +455,37 @@ Sample batch 12 returned 29 groups (no `Unspecified`), 166 rows, `stagedRows`
 166 and 138 default-selected, and the review page contained both IMP-B buttons
 with no Other banner. Evidence is in `ImportAdminImprovements.md` §7–§8.
 
+### 1.11 Partial-issuance Phase 2 domain and repository (implemented 2026-11-22)
+
+The owner approved Phase 1 and directed Phase 2 to proceed without service,
+API, UI, audit-workflow or business-operation changes. The implemented layer is:
+
+- `internal/domain/movement.go` defines the approved `MovementType` closed set,
+  `InventoryMovement`, bounded `MovementFilter`/`MovementPage`, `Stackability`
+  and the approved issue/return/adjust/move input shapes. No service operation
+  consumes those inputs yet.
+- `internal/repository/mariadb/movement.go` provides the append-only ledger
+  read and write surface: explicit projection, bounded newest-first list, get by
+  ID, and insert through the existing `BeginAdminWrite` transaction. The
+  repository exposes no update or delete statement for `InventoryMovement`.
+- `SumActiveQuantity` implements the approved on-hand definition as
+  `SUM(Quantity)` over active `GuildBankItems` rows; it never reads or adds the
+  movement ledger.
+- `internal/repository/mariadb/stackability.go` implements the temporary OD-01
+  EQUID allow-list contract. An absent EQUID is `unknown`; no partial issue is
+  permitted until metadata coverage or the allow-list supplies `stackable`.
+- `AdminStore`/`AdminWriteTx` gained the movement, on-hand and stackability
+  contracts. Existing inventory workflows and their interfaces are otherwise
+  unchanged.
+
+Validation (2026-11-22): `gofmt` is applied to all touched Go files, `go vet
+./...` is clean and `go test ./...` passes. New tests cover the movement type
+allowlist, row validation, stackability classification, bounded filter
+normalization, parameterized ledger predicates, append-only repository source
+assertions and the temporary allow-list. No live database write was performed
+because the development container remains at migration `0005`; repository SQL
+will be exercised when the approved `0006` migration is deployed.
+
 ---
 
 ## 2. Documents produced in this review
@@ -747,6 +778,7 @@ has been authorized; the owner review of the Phase 5 implementation is the gate.
 | 2.6 | 2026-11-22 | Item quantity model approved and implemented (QTY-01–QTY-12): migration `0005` drops `ck_gbi_item_one` and adds `ConsolidatedInto`; import commit and manual create write one row with the line/entered quantity; later imports of the same EQUID do not merge; item quantity is editable/audited; spells keep merge-by-EQUID; owner-run `-consolidate-items` (dry-run first) folds legacy expanded rows into the lowest ID with summed quantity, soft deletes and per-row audit, and restore of absorbed rows is rejected; review, implementation summary, D-07/PD3/PD5/DatabaseDesign/ProjectStructure amendments recorded; `gofmt`/`go vet`/`go test ./...` clean. Recorded in `ItemQuantityModelReview.md` and `ItemQuantityModelImplementation.md` |
 | 2.7 | 2026-11-22 | Live deployment of the item quantity model: rebuilt `guildbank:dev` applied `0005_item_quantity_model` to the development guild store and restarted healthy (`/healthz` 200); the owner-run dry run reported 39 groups / 795 absorbable rows / 834 units in groups with 0 rows changed, leaving 874 active item rows and 874 units pending the authorized real run; 0 consolidation audit rows confirm the dry run wrote nothing; `ConsolidatedInto` present, `ck_gbi_item_one` absent and `ck_gbi_quantity` retained |
 | 2.8 | 2026-11-22 | Partial-issuance Phase 1 schema implemented: additive `0006_inventory_movement.sql` creates the append-only `InventoryMovement` ledger with the approved indexes and constraints; migration manifest hash and migration assertions updated; no service, API, UI, audit or movement workflow code changed; no existing lot data, quantity or `GivenTo` value mutated. Phase 2 remains gated on owner review |
+| 2.9 | 2026-11-22 | Partial-issuance Phase 2 domain and repository implemented: movement types, append-only ledger read/write contracts, bounded newest-first history reads, on-hand `SUM(Quantity)` support, temporary EQUID stackability allow-list and the existing admin transaction helpers were extended; no service, API, UI, audit-workflow or business operation was added. `gofmt` applied, `go vet ./...` clean and `go test ./...` passing; no live database write because the development container remains at `0005`. Phase 3 remains gated on owner review |
 
 ---
 

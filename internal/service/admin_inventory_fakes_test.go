@@ -10,19 +10,23 @@ import (
 )
 
 type fakeAdmin struct {
-	ready     bool
-	nextID    int64
-	items     map[int64]domain.AdminInventoryItem
-	audits    []domain.AuditEntry
-	groups    []string
-	failAudit bool
-	committed int
-	rolled    int
-	// backupItems/backupAudits make the fake honour AdminWriteTx rollback so an
-	// all-or-nothing service path can be asserted without a live database.
-	backupItems  map[int64]domain.AdminInventoryItem
-	backupAudits []domain.AuditEntry
-	inTx         bool
+	ready        bool
+	nextID       int64
+	items        map[int64]domain.AdminInventoryItem
+	audits       []domain.AuditEntry
+	movements    []domain.InventoryMovement
+	stackability map[uint64]domain.Stackability
+	groups       []string
+	failAudit    bool
+	committed    int
+	rolled       int
+	// backupItems/backupAudits/backupMovements make the fake honour
+	// AdminWriteTx rollback so an all-or-nothing service path can be asserted
+	// without a live database.
+	backupItems     map[int64]domain.AdminInventoryItem
+	backupAudits    []domain.AuditEntry
+	backupMovements []domain.InventoryMovement
+	inTx            bool
 }
 
 func newFakeAdmin() *fakeAdmin {
@@ -59,8 +63,66 @@ func (f *fakeAdmin) BeginAdminWrite(ctx context.Context) (AdminWriteTx, error) {
 		f.backupItems[id] = item
 	}
 	f.backupAudits = append([]domain.AuditEntry(nil), f.audits...)
+	f.backupMovements = append([]domain.InventoryMovement(nil), f.movements...)
 	f.inTx = true
 	return f, nil
+}
+
+func (f *fakeAdmin) SumActiveQuantity(ctx context.Context, filter domain.AdminInventoryFilter) (uint64, error) {
+	var total uint64
+	for _, item := range f.items {
+		if item.DeletedFg {
+			continue
+		}
+		total += uint64(item.Quantity)
+	}
+	return total, nil
+}
+
+func (f *fakeAdmin) ListMovements(ctx context.Context, filter domain.MovementFilter) (domain.MovementPage, error) {
+	movements := make([]domain.InventoryMovement, 0, len(f.movements))
+	for _, movement := range f.movements {
+		if filter.GuildBankItemID > 0 && movement.GuildBankItemID != filter.GuildBankItemID {
+			continue
+		}
+		if filter.EQUID > 0 && movement.EQUID != filter.EQUID {
+			continue
+		}
+		if filter.MovementType != "" && movement.MovementType != filter.MovementType {
+			continue
+		}
+		if filter.Recipient != "" && movement.Recipient != filter.Recipient {
+			continue
+		}
+		if filter.CorrelationID != "" && movement.CorrelationID != filter.CorrelationID {
+			continue
+		}
+		movements = append(movements, movement)
+	}
+	return domain.MovementPage{
+		Movements: movements, Total: len(movements), Page: filter.Page, PageSize: filter.PageSize,
+	}, nil
+}
+
+func (f *fakeAdmin) GetMovement(ctx context.Context, movementID int64) (domain.InventoryMovement, error) {
+	for _, movement := range f.movements {
+		if movement.MovementID == movementID {
+			return movement, nil
+		}
+	}
+	return domain.InventoryMovement{}, domain.ErrNotFound
+}
+
+func (f *fakeAdmin) LookupStackability(ctx context.Context, equids []uint64) (map[uint64]domain.Stackability, error) {
+	result := make(map[uint64]domain.Stackability, len(equids))
+	for _, equid := range equids {
+		value, ok := f.stackability[equid]
+		if !ok {
+			value = domain.StackabilityUnknown
+		}
+		result[equid] = value
+	}
+	return result, nil
 }
 
 func (f *fakeAdmin) ListAudit(ctx context.Context, filter domain.AuditFilter) (domain.AuditPage, error) {
@@ -151,6 +213,15 @@ func (f *fakeAdmin) SetDeleted(ctx context.Context, id int64, deleted bool, at t
 	return nil
 }
 
+func (f *fakeAdmin) InsertMovement(ctx context.Context, movement domain.InventoryMovement) (int64, error) {
+	if err := movement.Validate(); err != nil {
+		return 0, err
+	}
+	movement.MovementID = int64(len(f.movements) + 1)
+	f.movements = append(f.movements, movement)
+	return movement.MovementID, nil
+}
+
 func (f *fakeAdmin) InsertAudit(ctx context.Context, entry domain.AuditEntry) error {
 	if f.failAudit {
 		return errors.New("audit insert failed")
@@ -165,6 +236,7 @@ func (f *fakeAdmin) Commit() error {
 	f.inTx = false
 	f.backupItems = nil
 	f.backupAudits = nil
+	f.backupMovements = nil
 	return nil
 }
 
@@ -175,10 +247,14 @@ func (f *fakeAdmin) Rollback() error {
 			f.items = f.backupItems
 		}
 		f.audits = f.backupAudits
+		if f.backupMovements != nil {
+			f.movements = f.backupMovements
+		}
 	}
 	f.inTx = false
 	f.backupItems = nil
 	f.backupAudits = nil
+	f.backupMovements = nil
 	return nil
 }
 
