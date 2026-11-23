@@ -1,6 +1,6 @@
 # Partial issuance - implementation plan
 
-**Status:** plan only. No application code, route, template, migration or runtime behavior is changed by this document. Owner decisions OD-01 to OD-07 are recorded in section 12.
+**Status:** approved plan. Phase 1 schema is implemented (`0006_inventory_movement.sql`, 2026-11-22); Phases 2–7 are not started. This document remains the design baseline. Owner decisions OD-01 to OD-07 are recorded in section 12.
 **Date:** 2026-11-22
 **Baseline:** `Docs/PartialIssuanceApprovalPackage.md` and the owner decisions recorded for D-ISS-01 through D-ISS-15 and R-ISS-01 through R-ISS-16.
 **Implementation gate:** do not start code until this plan and the readiness conditions in section 13 are accepted.
@@ -83,7 +83,7 @@ Add `internal/repository/mariadb/migrations/0006_inventory_movement.sql`. It is 
 
 ### 4.2 Movement ledger table
 
-Proposed table name: `InventoryMovement`.
+Table name: `InventoryMovement` (implemented in `0006_inventory_movement.sql`).
 
 | Column | Type | Notes |
 |---|---|---|
@@ -649,8 +649,8 @@ Phases 1-3 are sequential. Phase 4 depends on 3. Phase 5 depends on 4. Phase 6 c
 ### 13.4 Migration impact
 
 - **Additive only.** One new table (`InventoryMovement`) with indexes and constraints. No column removal, no quantity rewrite, no `GivenTo` rewrite.
-- **Indexes** on `(EQUID, occurred_at)`, `(lot_id)`, `(recipient)` and `(type)`.
-- **Constraints** - quantity greater than zero; recipient required for `ISSUE`; movement type restricted to the approved set; no application update/delete path.
+- **Indexes** on `(GuildBankItemID, OccurredAt)`, `(EQUID, OccurredAt)`, `(MovementType, OccurredAt)`, `(Recipient, OccurredAt)` and `(CorrelationID)`; unique `IdempotencyKey`.
+- **Constraints** - quantity greater than zero; remaining quantity zero or greater; recipient required for `ISSUE`; movement type restricted to the approved set; no application update/delete path.
 - **No backfill.** Existing lots become opening balances; pre-deployment history is not invented. The UI labels the baseline.
 - **No automatic `GivenTo` cleanup.** A read-only report lists active rows with recipients; the owner resolves each row. New writes cannot set `GivenTo` on active rows.
 - **Rollback.** Dropping the ledger returns the application to Phase 5 behavior. Partial issues already applied remain applied; the rollback note must say so and provide a report of affected lots and movements.
@@ -666,6 +666,6 @@ Phases 1-3 are sequential. Phase 4 depends on 3. Phase 5 depends on 4. Phase 6 c
 - **Manual acceptance** - issue 10 from 55 leaves 45 in one active row; issuing the remainder uses the full-stack path; return restores correctly; restore writes the approved movement type; public totals show units only.
 - **Deferred coverage** - move and adjust tests are out of scope for the first release (OD-04); import movement tests are out of scope (OD-05).
 
-## 14. No-code statement
+## 14. Implementation status
 
-This document is a plan only. No application code, route, template, stylesheet, migration or runtime behavior was changed. Owner decisions OD-01 to OD-07 are recorded in section 12. Implementation may begin only after this updated plan and the readiness conditions in section 13 are accepted.
+This document was a plan when approved. Phase 1 schema is now implemented: `internal/repository/mariadb/migrations/0006_inventory_movement.sql` adds the append-only `InventoryMovement` ledger with the approved indexes and constraints. The migration manifest and migration assertions were updated. No service, API, UI, audit or movement workflow code was changed; no existing lot data, quantity or `GivenTo` value was mutated. Owner decisions OD-01 to OD-07 are recorded in section 12. Phases 2–7 remain gated on owner review.

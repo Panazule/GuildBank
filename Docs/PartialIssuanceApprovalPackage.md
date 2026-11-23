@@ -1,11 +1,11 @@
 # Partial issuance — owner approval package
 
-**Status:** owner decisions recorded 2026-11-22; no application code, template, route, migration or runtime behavior changed. Implementation may begin only after the updated plan and readiness conditions are accepted.
+**Status:** owner decisions recorded 2026-11-22; Phase 1 schema implemented 2026-11-22. No service, API, template, route, audit or movement workflow code changed. Phases 2–7 remain gated on owner review.
 **Date:** 2026-11-22
 **Reviewed document:** `Docs/InventoryMovementBusinessRulesReview.md`
 **Owner direction recorded:** partial issuance is required. Issuing 10 units from a 55-unit stack must leave 45 on hand, keep one active row, and record an `ISSUE` movement with recipient, timestamp and actor while preserving audit history.
 
-This package answers the eight review questions, updates the `D-ISS` decision recommendations, and lists the implementation sequence, migration impacts and audit impacts. It does not implement anything.
+This package answers the eight review questions, updates the `D-ISS` decision recommendations, and lists the implementation sequence, migration impacts and audit impacts. It records decisions only; Phase 1 schema implementation is tracked separately in `ProjectStatus.md`.
 
 ## 1. Decision summary
 
@@ -232,7 +232,7 @@ Dependencies: 2 → 3 → 4 → 5; 6 can proceed with 3; 7 depends on the total 
 
 ## 11. Migration impacts
 
-- **New table only.** No column removal, no quantity rewrite, no recipient rewrite. The migration is additive and reversible by dropping the new table.
+- **New table only.** No column removal, no quantity rewrite, no recipient rewrite. The migration is additive and reversible by dropping the new table. Implemented in `0006_inventory_movement.sql`; no existing lot data was mutated.
 - Suggested ledger columns: movement ID, lot ID, `EQUID`, movement type, quantity, recipient, actor, occurred-at, from/to location, remaining quantity, note, correlation ID, created-at. Add indexes on `(EQUID, occurred_at)`, `(lot_id)`, `(recipient)` and `(type)`.
 - Constraints: quantity greater than zero; recipient required for `ISSUE`; type restricted to the approved set; no update/delete path in the application.
 - **No backfill.** Existing lots become opening balances. Their pre-deployment history is not invented. The UI labels the baseline.
@@ -310,8 +310,8 @@ Phases 1–3 are sequential. Phase 4 depends on 3. Phase 5 depends on 4. Phase 6
 
 - **Additive only.** One new table (`InventoryMovement`) with indexes and constraints. No column removal, no quantity rewrite, no `GivenTo` rewrite.
 - **No backfill.** Existing lots become opening balances. Pre-deployment history is not invented; the UI labels the baseline.
-- **Indexes** on `(EQUID, occurred_at)`, `(lot_id)`, `(recipient)` and `(type)`.
-- **Constraints** — quantity greater than zero; recipient required for `ISSUE`; movement type restricted to the approved set; no application update/delete path.
+- **Indexes** on `(GuildBankItemID, OccurredAt)`, `(EQUID, OccurredAt)`, `(MovementType, OccurredAt)`, `(Recipient, OccurredAt)` and `(CorrelationID)`; unique `IdempotencyKey`.
+- **Constraints** — quantity greater than zero; remaining quantity zero or greater; recipient required for `ISSUE`; movement type restricted to the approved set; no application update/delete path.
 - **Rollback** — dropping the ledger returns the application to Phase 5 behavior. Lot quantities already changed by partial issues remain changed; the rollback note must report affected lots and movements.
 - **Legacy `GivenTo`** — no automatic cleanup. A read-only report is produced; the owner resolves each row. New writes cannot set `GivenTo` on active rows.
 - **Import history** — no movement rows are created for imports in the first release (OD-05).
@@ -327,6 +327,6 @@ Phases 1–3 are sequential. Phase 4 depends on 3. Phase 5 depends on 4. Phase 6
 - **Manual acceptance** — issue 10 from 55 leaves 45 in one active row; issuing the remainder uses the full-stack path; return restores correctly; restore writes the approved movement type; public totals show units only.
 - **Deferred coverage** — move and adjust tests are out of scope for the first release (OD-04); import movement tests are out of scope (OD-05).
 
-## 15. No-code statement
+## 15. Implementation status
 
-This package records owner decisions only. No application code, template, stylesheet, route, migration or runtime behavior was changed. `Docs/InventoryMovementBusinessRulesReview.md` is unchanged; this package records the owner direction and the resulting recommendations.
+This package records owner decisions only. Phase 1 schema is now implemented through `0006_inventory_movement.sql`; no service, API, template, stylesheet, route, audit or movement workflow code was changed. `Docs/InventoryMovementBusinessRulesReview.md` is unchanged; this package records the owner direction and the resulting recommendations. Phases 2–7 remain gated on owner review.
