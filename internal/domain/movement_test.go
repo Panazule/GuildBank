@@ -27,13 +27,10 @@ func TestMovementTypeAllowlist(t *testing.T) {
 	}
 }
 
-func TestStackabilityAllowsPartialIssue(t *testing.T) {
-	if !StackabilityStackable.AllowsPartialIssue() {
-		t.Fatal("stackable must allow partial issue")
-	}
-	if StackabilityNonStackable.AllowsPartialIssue() || StackabilityUnknown.AllowsPartialIssue() {
-		t.Fatal("non-stackable and unknown must not allow partial issue")
-	}
+// TestStackabilityValid pins the descriptive classification allowlist. Partial
+// issuance is deliberately not a method on this type: the rule is the on-hand
+// lot quantity, and stackability is advisory display only.
+func TestStackabilityValid(t *testing.T) {
 	for _, value := range Stackabilities {
 		if !value.Valid() {
 			t.Fatalf("%q should be valid", value)

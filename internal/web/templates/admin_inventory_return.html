@@ -1,0 +1,62 @@
+{{define "admin_inventory_return.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-card">
+    <p class="eyebrow">Administration · Return</p>
+    <h1>Return {{.Item.Name}}</h1>
+    <p class="item-identity">Inventory ID {{.Item.ID}} · EQUID {{.Item.EQUID}}</p>
+
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    {{if not .Ready}}
+      <div class="alert alert-error" role="status">The guild inventory store is unavailable, so nothing can be returned.</div>
+    {{end}}
+
+    <dl class="detail-list">
+      <div><dt>{{if .Item.Deleted}}Issued quantity{{else}}On hand{{end}}</dt><dd>{{.Item.Quantity}}</dd></div>
+      <div><dt>Status</dt><dd><span class="status-badge {{if .Item.Deleted}}status-Failed{{else}}status-Completed{{end}}">{{if .Item.Deleted}}Removed{{else}}Active{{end}}</span></dd></div>
+      <div><dt>Recipient</dt><dd>{{if .Item.GivenTo}}{{.Item.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</dd></div>
+      <div><dt>Location group</dt><dd><span class="group-badge">{{.Item.LocationGroupLabel}}</span></dd></div>
+    </dl>
+
+    <p class="help">{{.Mode}}</p>
+
+    <form method="post" action="/admin/inventory/{{.Item.ID}}/return" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="expectedModAt" value="{{.Form.ExpectedModAt}}">
+      <input type="hidden" name="idempotencyKey" value="{{.Form.IdempotencyKey}}">
+
+      <div class="field-row">
+        <label>Quantity
+          <input name="quantity" type="text" inputmode="numeric" required value="{{.Form.Quantity}}" aria-describedby="return-qty-help">
+          <span class="help" id="return-qty-help">The original record's lifecycle dates are copied to any new record.</span>
+          {{with index .ErrorFields "quantity"}}<span class="field-error">{{.}}</span>{{end}}
+        </label>
+        <label>Recipient
+          <input name="recipient" type="text" maxlength="128" value="{{.Form.Recipient}}">
+          <span class="help">Recorded on the RETURN movement. Optional.</span>
+          {{with index .ErrorFields "recipient"}}<span class="field-error">{{.}}</span>{{end}}
+        </label>
+      </div>
+
+      <label>Note
+        <input name="note" type="text" maxlength="255" value="{{.Form.Note}}">
+        {{with index .ErrorFields "note"}}<span class="field-error">{{.}}</span>{{end}}
+      </label>
+
+      {{with index .ErrorFields "expectedModAt"}}<div class="alert alert-error" role="alert">{{.}}</div>{{end}}
+
+      <div class="wizard-actions">
+        <a class="link" href="/admin/inventory/{{.Item.ID}}">Cancel</a>
+        <button type="submit" class="primary"{{if not .Ready}} disabled{{end}}>Return</button>
+      </div>
+      <p class="help">A return against an active record adds to that record. A full return of a whole-issued record restores it and clears the recipient; a partial return creates a new active record and leaves the issued record in history.</p>
+    </form>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

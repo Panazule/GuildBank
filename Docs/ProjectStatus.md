@@ -5,9 +5,9 @@
 | Document ID | PS-001 |
 | As-of date | 2026-11-22 |
 | Source specification | `Design.md` v1.6.1 (1,274 lines: body L1–L854, decisions D-01–D-13 at L855–L1161, amendments AM-01–AM-05 at L1163–L1263, informational implementation status at L1265–L1274) |
-| Repository state | Phase 1 identity/settings layer, Phase 2 item-metadata integration, Phase 3 import pipeline, Phase 4 public inventory read path and Phase 5 administrative inventory management are implemented. Administrative add/edit/remove/restore, the audit viewer, the location backfill, the owner-reviewed UI amendments, the post-Phase-5 import/admin usability improvements, the follow-up import-review adjustments (IMP-A/IMP-B/IMP-C), the DEFECT-01 spell metadata correction and the item quantity model (QTY-01–QTY-12) are implemented and live-validated on the Compose development topology (`Phase5Validation.md`, `ImportAdminImprovements.md`, `ItemQuantityModelImplementation.md`). Partial-issuance Phase 1 schema (migration `0006_inventory_movement.sql`) and Phase 2 domain/repository support are implemented; Phase 2 awaits owner review before Phase 3 |
+| Repository state | Phase 1 identity/settings layer, Phase 2 item-metadata integration, Phase 3 import pipeline, Phase 4 public inventory read path and Phase 5 administrative inventory management are implemented. Administrative add/edit/remove/restore, the audit viewer, the location backfill, the owner-reviewed UI amendments, the post-Phase-5 import/admin usability improvements, the follow-up import-review adjustments (IMP-A/IMP-B/IMP-C), the DEFECT-01 spell metadata correction and the item quantity model (QTY-01–QTY-12) are implemented and live-validated on the Compose development topology (`Phase5Validation.md`, `ImportAdminImprovements.md`, `ItemQuantityModelImplementation.md`). Partial-issuance Phase 1 schema (migration `0006_inventory_movement.sql`), Phase 2 domain/repository support, Phase 3 service layer, Phase 4 JSON API layer and Phase 5 officer UI (Issue, Return and movement-history HTML pages) are implemented; the Phase 5 UI reuses the Phase 3/4 service and API layer, adds no new business rules and does not touch the public read path |
 | Documents issued | `ArchitectureReview.md` (AR-001), `DatabaseDesign.md` (DD-001), `ImplementationPlan.md` (IP-001), `ProjectStructure.md` (PS-002), `ItemsDataProfile.md` (DP-001), `Phase3ImplementationPlan.md`, `Phase4ImplementationPlan.md`, `Phase4Validation.md`, `Phase5ImplementationPlan.md`, `Phase5ApprovalReview.md`, `Phase5Validation.md`, `PublicInventoryAPI.md`, `ItemQuantityModelReview.md`, `ItemQuantityModelImplementation.md`, `PartialIssuanceImplementationPlan.md`, `PartialIssuanceApprovalPackage.md`, this status report |
-| Overall status | **v1.6.1 published; Phases 0–2 approved and complete; Phase 3 approved, implemented and live-validated; Phase 4 approved, implemented and live-validated; Phase 5 approved, implemented and live-validated, awaiting owner review of the implementation and the one open availability-boundary wording question; partial-issuance Phase 1 schema and Phase 2 domain/repository layer implemented and awaiting owner review before Phase 3** |
+| Overall status | **v1.6.1 published; Phases 0–2 approved and complete; Phase 3 approved, implemented and live-validated; Phase 4 approved, implemented and live-validated; Phase 5 approved, implemented and live-validated, awaiting owner review of the implementation and the one open availability-boundary wording question; partial-issuance Phase 1 schema, Phase 2 domain/repository layer, Phase 3 service layer, Phase 4 JSON API layer and Phase 5 officer UI (issue/return/movement-history pages) implemented** |
 
 ---
 
@@ -34,7 +34,7 @@
 | Authentication/sessions | Defined — lifecycle approved as PD-15 | **Implemented** (login/logout, hashed sessions, expiry, CSRF, lockout) | — |
 | Public inventory browsing | Defined; PD4-01–PD4-17 approved | **Implemented** — public list/detail/API, search, class/race/type filters, eight sorts, pagination, UTC availability, EQResource links and public DTO | Proxy-level anonymous rate limiting remains operational; no in-app limiter |
 | Class/race decoding | Defined with permanent fixtures; PD-19/PD-20 approved | **Implemented** repository-independent decoders plus service metadata generation; import commit stores the decoded strings for item and spell rows and import warnings persist to `ImportList.WarningText`; `BackfillSpellMetadata` repairs pre-DEFECT-01 spell rows at startup | — |
-| Inventory administration | Partial — dev metadata loaded; loader procedure/freshness open | **Implemented** — manual create (one row with the entered quantity under QTY-07, spell merge, duplicate warning, metadata fallback), edit including item quantity (QTY-08), remove, restore, filters/sorts, admin HTML/JSON routes and audit viewer; rows absorbed by QTY-09 consolidation cannot be restored | E-01 (loader/freshness) remains operational |
+| Inventory administration | Partial — dev metadata loaded; loader procedure/freshness open | **Implemented** — manual create (one row with the entered quantity under QTY-07, spell merge, duplicate warning, metadata fallback), edit including item quantity through the HTML form (QTY-08; the JSON generic update contract no longer accepts quantity under partial-issuance Phase 4), remove, restore, filters/sorts, admin HTML/JSON routes and audit viewer; rows absorbed by QTY-09 consolidation cannot be restored; officer issue/return forms and a per-record movement-history page implement the partial-issuance Phase 5 UI | E-01 (loader/freshness) remains operational |
 | Import pipeline | Approved by `Phase3ImplementationPlan.md`; D-04/AM-03 contract, D-08/AM-01/AM-02 metadata rule | **Implemented** — upload, durable failures, normalized staging, `LocationGroup` selector, persisted selection, unit-aware summary, atomic commit, `409` terminal state and admin UI/API. One item row per staged line carries the line quantity; later imports of the same EQUID create separate rows (QTY-01/QTY-03). Rows classified `Unspecified` stay staged but are excluded from review, selection and commit (IMP-C) | Production grants and real collector exports remain operational follow-ups |
 | Spell merge/lifecycle dates | Defined by D-06; import provenance resolved by PD3-03/PD3-04/PD3-14 | **Implemented for imports and admin writes** — merge by active EQUID into the lowest active row, staged/merged quantity sum, `ITEM_UPDATED` audit provenance; admin create/update applies the PD5-27/PD5-32 date rule (defaults from Settings, per-row override, non-retroactive) | Live `Bazaar` label branch cannot be produced by a new row and the availability boundary wording is open (see §1.7) |
 | Settings | Partial — typed/secrets implemented; policy review open | **Implemented** (read/update/redaction) | E-11 |
@@ -471,9 +471,10 @@ API, UI, audit-workflow or business-operation changes. The implemented layer is:
 - `SumActiveQuantity` implements the approved on-hand definition as
   `SUM(Quantity)` over active `GuildBankItems` rows; it never reads or adds the
   movement ledger.
-- `internal/repository/mariadb/stackability.go` implements the temporary OD-01
-  EQUID allow-list contract. An absent EQUID is `unknown`; no partial issue is
-  permitted until metadata coverage or the allow-list supplies `stackable`.
+- `internal/repository/mariadb/stackability.go` implements the OD-01 EQUID
+  stackability read contract. From 2026-11-23 this classification is advisory
+  display only and never gates a write (see §1.15); the read is retained for
+  display and may be removed when no longer useful.
 - `AdminStore`/`AdminWriteTx` gained the movement, on-hand and stackability
   contracts. Existing inventory workflows and their interfaces are otherwise
   unchanged.
@@ -485,6 +486,130 @@ normalization, parameterized ledger predicates, append-only repository source
 assertions and the temporary allow-list. No live database write was performed
 because the development container remains at migration `0005`; repository SQL
 will be exercised when the approved `0006` migration is deployed.
+
+### 1.12 Partial-issuance Phase 3 service layer (implemented 2026-11-22)
+
+The service layer implements the approved movement operations without adding
+API, UI or public-inventory changes:
+
+- `Issue` supports partial and full-stack issue. A partial issue reduces the
+  active lot's quantity in place and keeps the same row; a full-stack issue
+  records the recipient in `GivenTo` and soft-deletes the row. Both write one
+  `ISSUE` movement and one audit row in the same transaction.
+- `Return` increases an active lot, restores a whole-issued row, or creates a
+  new active lot for a partial return. It writes one `RETURN` movement and one
+  audit row.
+- The active-row `GivenTo` invariant, optimistic concurrency, idempotency-key
+  persistence and duplicate rejection are enforced in the service. Partial-issue
+  eligibility is decided by the active lot quantity currently on hand, not by
+  stackability metadata (OD-01 revised 2026-11-23, §1.15).
+- `OnHand`, `ListMovements` and `GetMovement` expose the approved on-hand total
+  and bounded newest-first ledger reads. Bulk removal writes `WRITE_OFF`
+  movements and unit counts.
+
+Validation: service/fake tests cover partial and full-stack issue, return
+branches, restore branching, quantity-based partial-issue eligibility,
+idempotency duplicates, rollback and on-hand totals. `gofmt`, `go build ./...`,
+`go vet ./...` and `go test ./...` are clean.
+
+### 1.13 Partial-issuance Phase 4 JSON API (implemented 2026-11-22)
+
+Phase 4 is JSON-only. The approved owner decisions are applied as follows:
+
+- `POST /api/v1/items/:id/issue` and `POST /api/v1/items/:id/return` accept a
+  JSON body with `quantity`, `recipient`, `note` and `expectedModAt`, plus the
+  optional `Idempotency-Key` header. Responses return the lot, the movement and
+  `currentOnHand`.
+- `GET /api/v1/admin/items/:id/movements` returns bounded, newest-first history
+  with the documented filters `movementType`, `recipient`, `correlationId`,
+  `from`, `to`, `page` and `pageSize`. An unknown lot returns `404`.
+- `GET /api/v1/admin/movements/:movementID` returns one movement; an unknown ID
+  returns `404`.
+- The generic `PUT /api/v1/items/:id` contract no longer accepts `quantity` and
+  returns `422 validation_failed` naming the field. `givenTo` may be omitted on
+  ordinary edits while the active-row invariant is preserved.
+- A partial issue of an active lot with `Quantity > 1` succeeds regardless of
+  stackability metadata; a lot with quantity `1` routes to the full-stack path.
+  Stale versions and duplicate idempotency keys return `409`.
+
+No HTML issue/return pages or forms were added; those remain Phase 5. API tests
+cover partial/full issue, the Ant's Potion example (quantity 10, issue 5 to
+Joe, same active lot, `GivenTo` NULL, one `ISSUE` movement), unknown lots,
+quantity-based partial-issue eligibility, idempotency duplicates, return,
+bounded history, movement detail and the updated generic update contract.
+`gofmt`, `go build ./...`, `go vet ./...` and `go test ./...` are clean.
+
+### 1.14 Partial-issuance Phase 5 officer UI (implemented 2026-11-23)
+
+Phase 5 adds the officer-facing workflows over the existing Phase 3/4 service
+and API layer. No business rule changes; no public-inventory (Phase 6) or
+legacy-cleanup (Phase 7) work:
+
+- `GET/POST /admin/inventory/:id/issue` — Issue form and submit. A partial
+  issue reduces the active lot in place and keeps the same row with `GivenTo`
+  NULL; issuing the full quantity records the recipient and soft-removes the
+  row. The form shows on hand, the resulting quantity and whether partial issue
+  is supported, and states which path will run.
+- `GET/POST /admin/inventory/:id/return` — Return form and submit. A return to
+  an active lot adds to it; the full return of a whole-issued row restores it
+  and clears `GivenTo`; a partial return creates a new active lot and leaves the
+  issued row in history. The form states which branch will run.
+- `GET /admin/inventory/:id/movements` — per-record Movement history,
+  newest-first, filterable by `movementType`, `recipient`, `correlationId` and
+  `pageSize`, with pagination and an opening-balance note when no movements
+  exist. Correlation IDs link to the matching audit view.
+- The admin detail page and list add Issue, Return and Movement history actions;
+  the detail page keeps item-level stock visibility (quantity, status,
+  recipient).
+- HTML forms carry the CSRF token, `expectedModAt` and a per-render hidden
+  `idempotencyKey` (OD-06); a validation re-render keeps the officer's key so a
+  retry stays idempotent. The service re-checks the lot quantity and version
+  under the row lock, so the forms are not authoritative.
+- The Issue-form hint is derived from the on-hand quantity (`Quantity > 1`
+  supports partial issue). A read-only `Stackability(ctx, equid)` helper remains
+  available for display only; the write path never consults it (OD-01 revised
+  2026-11-23, §1.15).
+
+Validation: `internal/api/admin_movement_pages_test.go` covers the Issue form
+render, partial issue (quantity 10, issue 5 to Joe, one active lot, `GivenTo`
+NULL, one `ISSUE` movement), full-stack issue, validation re-render,
+quantity-based partial-issue eligibility, the Return full/partial branches, the
+administratively-removed return guard, the history page (rows, filters,
+opening-balance empty state, unknown-lot `404`), the idempotency-key format and
+the mode-text helpers; `internal/web/inventory_ui_test.go` asserts the new
+templates use the shared nav, carry CSRF and expose the movement access links.
+`gofmt -l`, `go build ./...`, `go vet ./...` and `go test ./...` are clean. Phase
+6 and Phase 7 remain out of scope.
+
+### 1.15 Partial-issuance stackability gate removed (Option A, implemented 2026-11-23)
+
+The owner approved **Option A**: partial issuance is permitted for any active
+lot with `Quantity > 1`, and the `EQUID` stackability gate was removed from the
+write path. `EQUID` stackability is now advisory metadata used for display only.
+
+- `service.Issue` no longer rejects a partial issue based on stackability. The
+  partial/full decision is `in.Quantity < current.Quantity`; a quantity `1` lot
+  therefore takes the whole-stack path.
+- `domain.Stackability.AllowsPartialIssue` was removed so the classification
+  cannot gate a write.
+- The API issue/return forms and handlers no longer look up stackability. The
+  issue view data exposes `PartialSupported: item.Quantity > 1`, and the issue
+  form label reads "Partial issue" (formerly "Stackability").
+- The read-only `Stackability` helper and repository classification are retained
+  for display only and may be removed when no longer useful.
+
+This change also fixed a latent bug in the service fake store: its transaction
+rollback restored a snapshot of `movements` only when the movement slice had
+been rewritten, so a rolled-back issue could leak a movement row. The restore is
+now unconditional inside the transaction. The old stackability gate had masked
+the bug because it rejected the issue before the movement write.
+
+Validation (2026-11-23): service, domain, API and page tests were updated so a
+non-stackable-equivalent lot with `Quantity > 1` issues partially, the lot stays
+active, `GivenTo` stays empty and one `ISSUE` movement with the recipient is
+recorded. `gofmt -l`, `go build ./...`, `go vet ./...` and `go test -count=1
+./...` are clean. Bundled with the already-implemented Phase 5 UI; no new
+migration or live-database write.
 
 ---
 
@@ -780,6 +905,9 @@ has been authorized; the owner review of the Phase 5 implementation is the gate.
 | 2.8 | 2026-11-22 | Partial-issuance Phase 1 schema implemented: additive `0006_inventory_movement.sql` creates the append-only `InventoryMovement` ledger with the approved indexes and constraints; migration manifest hash and migration assertions updated; no service, API, UI, audit or movement workflow code changed; no existing lot data, quantity or `GivenTo` value mutated. Phase 2 remains gated on owner review |
 | 2.9 | 2026-11-22 | Partial-issuance Phase 2 domain and repository implemented: movement types, append-only ledger read/write contracts, bounded newest-first history reads, on-hand `SUM(Quantity)` support, temporary EQUID stackability allow-list and the existing admin transaction helpers were extended; no service, API, UI, audit-workflow or business operation was added. `gofmt` applied, `go vet ./...` clean and `go test ./...` passing; no live database write because the development container remains at `0005`. Phase 3 remains gated on owner review |
 | 2.10 | 2026-11-22 | Partial-issuance Phase 3 service layer implemented: `Issue` and `Return` operations with atomic lot updates, movement and audit writes; partial/full-stack issue rules; active-row `GivenTo` invariant; stackability enforcement; approved RECEIVE vs RETURN restore integration; on-hand totals; movement history reads; bulk-removal movements and unit counts; idempotency-key persistence and duplicate rejection. Service/fake tests added and updated; `gofmt`, `go build ./...`, `go vet ./...` and `go test ./...` clean. API routes, UI, public inventory and Phase 4 work remain out of scope |
+| 2.11 | 2026-11-22 | Partial-issuance Phase 4 JSON API implemented: `POST /api/v1/items/:id/issue`, `POST /api/v1/items/:id/return`, `GET /api/v1/admin/items/:id/movements` and `GET /api/v1/admin/movements/:movementID` under the existing admin group. Issue/return responses include the lot and `currentOnHand`; movement history is bounded with documented filters (`movementType`, `recipient`, `correlationId`, `from`, `to`, `page`, `pageSize`) and an unknown lot returns `404`. The generic `PUT /api/v1/items/:id` contract now rejects `quantity` by name (quantity changes only through movement operations) and permits `givenTo` omission while preserving the active-row invariant. `Idempotency-Key` header transport, `422 validation_failed` for non-stackable partial issues and `409` for stale/duplicate requests are covered by API tests. `gofmt`, `go build ./...`, `go vet ./...` and `go test ./...` clean. HTML issue/return pages and forms remain Phase 5 and were not added |
+| 2.12 | 2026-11-23 | Partial-issuance Phase 5 officer UI implemented: HTML Issue (`GET/POST /admin/inventory/:id/issue`), Return (`GET/POST /admin/inventory/:id/return`) and per-record Movement history (`GET /admin/inventory/:id/movements`) pages over the existing Phase 3/4 service and API layer, plus Issue/Return/Movement-history actions and stock visibility on the admin detail and list pages. Forms carry CSRF, `expectedModAt` and a per-render hidden `idempotencyKey` (OD-06); a read-only `Stackability` helper backs the issue-form hint. Handler tests (`admin_movement_pages_test.go`) and template assertions (`inventory_ui_test.go`) were added; `gofmt -l`, `go build ./...`, `go vet ./...` and `go test ./...` clean. No business-rule change; Phase 6 public-inventory changes and Phase 7 cleanup remain out of scope |
+| 2.13 | 2026-11-23 | Partial-issuance Option A implemented: partial issue is permitted for any active lot with `Quantity > 1` and the `EQUID` stackability gate was removed from the write path. `service.Issue` decides partial vs whole-stack solely on quantity; `domain.Stackability.AllowsPartialIssue` was removed so classification cannot gate a write; API issue/return handlers no longer look up stackability (`PartialSupported: item.Quantity > 1`) and the issue form label reads "Partial issue". A latent service-fake rollback bug was fixed while in the transaction (the movement snapshot restore is now unconditional); the old stackability gate had masked it. Service, domain, API and page tests updated so a non-stackable-equivalent lot with `Quantity > 1` issues partially, keeps the lot active, leaves `GivenTo` empty and records one `ISSUE` movement with the recipient. No migration or live-database write; `gofmt -l`, `go build ./...`, `go vet ./...` and `go test -count=1 ./...` clean |
 
 ---
 

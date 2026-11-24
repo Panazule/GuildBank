@@ -232,6 +232,75 @@ type adminRemovePageData struct {
 	Item adminItemView
 }
 
+// adminMovementView is the presentation of one ledger row. It deliberately
+// omits the idempotency key and source address: the movement history is a
+// business record, not a transport log.
+type adminMovementView struct {
+	MovementID        int64
+	Type              string
+	Quantity          uint32
+	Recipient         string
+	ActorUserName     string
+	OccurredAtValue   string
+	OccurredAtText    string
+	FromLocation      string
+	ToLocation        string
+	RemainingQuantity uint32
+	Note              string
+	CorrelationID     string
+	RelatedItemID     string
+}
+
+// adminMovementFormValues carries the re-posted officer form values so a
+// validation failure does not lose what the officer typed.
+type adminMovementFormValues struct {
+	Quantity       string
+	Recipient      string
+	Note           string
+	ExpectedModAt  string
+	IdempotencyKey string
+}
+
+// adminMovementFormPageData backs the Issue and Return forms. Mode states in
+// plain text what the submit will do, so the officer sees the effect before
+// acting. PartialSupported reports the quantity-based issue rule (an active lot
+// with more than one unit on hand supports partial issue); it is false on the
+// return form.
+type adminMovementFormPageData struct {
+	pageData
+	Ready            bool
+	Item             adminItemView
+	Form             adminMovementFormValues
+	Mode             string
+	PartialSupported bool
+}
+
+type adminMovementFilterView struct {
+	MovementType  string
+	Recipient     string
+	CorrelationID string
+	PageSize      string
+}
+
+type adminMovementHistoryPageData struct {
+	pageData
+	Ready      bool
+	Item       adminItemView
+	Movements  []adminMovementView
+	Filter     adminMovementFilterView
+	TypeOpts   []inventorySelectOption
+	Total      int
+	Page       int
+	PageSize   int
+	TotalPages int
+	Empty      bool
+	PrevURL    string
+	NextURL    string
+	FirstURL   string
+	LastURL    string
+	PageLinks  []inventoryPageLink
+}
+
 // adminBulkRemovePageData is the page-local bulk-removal preview (AI-01).
 // Targets are the opaque "id|modAt" tokens re-posted by the apply form.
 type adminBulkRemovePageData struct {
@@ -339,6 +408,14 @@ func (v *views) adminRemove(c *gin.Context, status int, data adminRemovePageData
 
 func (v *views) adminBulkRemove(c *gin.Context, status int, data adminBulkRemovePageData) {
 	v.render(c, status, "admin_bulk_remove.html", data)
+}
+
+func (v *views) adminMovementForm(c *gin.Context, status int, name string, data adminMovementFormPageData) {
+	v.render(c, status, name, data)
+}
+
+func (v *views) adminMovementHistory(c *gin.Context, status int, data adminMovementHistoryPageData) {
+	v.render(c, status, "admin_inventory_history.html", data)
 }
 
 func (v *views) adminAudit(c *gin.Context, status int, data adminAuditPageData) {

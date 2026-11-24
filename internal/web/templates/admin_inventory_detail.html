@@ -34,14 +34,17 @@
       <a class="link" href="/admin/inventory">Back to inventory</a>
       {{if not .Item.Deleted}}
         <a class="link primary" href="/admin/inventory/{{.Item.ID}}/edit">Edit record</a>
+        <a class="link" href="/admin/inventory/{{.Item.ID}}/issue">Issue</a>
         <a class="link" href="/admin/inventory/{{.Item.ID}}/remove">Remove record</a>
       {{else}}
+        {{if .Item.GivenTo}}<a class="link primary" href="/admin/inventory/{{.Item.ID}}/return">Return</a>{{end}}
         <form method="post" action="/admin/inventory/{{.Item.ID}}/restore" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{.CSRF}}">
           <input type="hidden" name="expectedModAt" value="{{.Item.ModAtValue}}">
           <button type="submit" class="primary">Restore record</button>
         </form>
       {{end}}
+      <a class="link" href="/admin/inventory/{{.Item.ID}}/movements">Movement history</a>
     </div>
 
     <h2>Recent history</h2>

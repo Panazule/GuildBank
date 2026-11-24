@@ -101,6 +101,72 @@ func TestAdminTemplatesExistAndCarryCSRF(t *testing.T) {
 	}
 }
 
+// TestOfficerMovementTemplatesExistAndCarryCSRF pins the Phase 5 officer
+// workflows: the Issue, Return and Movement history pages are server-rendered,
+// use the shared nav, carry a CSRF token and never reach for template.HTML.
+func TestOfficerMovementTemplatesExistAndCarryCSRF(t *testing.T) {
+	for _, name := range []string{
+		"templates/admin_inventory_issue.html",
+		"templates/admin_inventory_return.html",
+		"templates/admin_inventory_history.html",
+	} {
+		body := readEmbedded(t, name)
+		if !strings.Contains(body, `{{template "nav" .}}`) {
+			t.Fatalf("%s does not use the shared nav", name)
+		}
+		if strings.Contains(body, "template.HTML") || strings.Contains(body, "<script") {
+			t.Fatalf("%s contains unsafe rendering", name)
+		}
+	}
+
+	issue := readEmbedded(t, "templates/admin_inventory_issue.html")
+	for _, want := range []string{
+		`name="csrf_token"`, `name="expectedModAt"`, `name="idempotencyKey"`,
+		`name="quantity"`, `name="recipient"`, `action="/admin/inventory/{{.Item.ID}}/issue"`,
+		"On hand",
+	} {
+		if !strings.Contains(issue, want) {
+			t.Fatalf("issue form is missing %q", want)
+		}
+	}
+
+	ret := readEmbedded(t, "templates/admin_inventory_return.html")
+	for _, want := range []string{
+		`name="csrf_token"`, `name="idempotencyKey"`, `action="/admin/inventory/{{.Item.ID}}/return"`,
+	} {
+		if !strings.Contains(ret, want) {
+			t.Fatalf("return form is missing %q", want)
+		}
+	}
+
+	history := readEmbedded(t, "templates/admin_inventory_history.html")
+	for _, want := range []string{
+		"Movement type", "Recipient", "Correlation ID", "opening balance", "Remaining",
+	} {
+		if !strings.Contains(history, want) {
+			t.Fatalf("movement history page is missing %q", want)
+		}
+	}
+}
+
+// TestAdminDetailExposesMovementAccess pins the item-level stock visibility and
+// movement access approved for Phase 5 (PD5-33..PD5-38 briefly, §7.1/§7.3).
+func TestAdminDetailExposesMovementAccess(t *testing.T) {
+	detail := readEmbedded(t, "templates/admin_inventory_detail.html")
+	for _, want := range []string{
+		`/admin/inventory/{{.Item.ID}}/issue`, `/admin/inventory/{{.Item.ID}}/return`,
+		`/admin/inventory/{{.Item.ID}}/movements`, "Movement history",
+	} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("admin detail is missing %q", want)
+		}
+	}
+	list := readEmbedded(t, "templates/admin_inventory.html")
+	if !strings.Contains(list, `/admin/inventory/{{.ID}}/movements`) {
+		t.Fatal("admin list is missing the movement history action")
+	}
+}
+
 // TestInventoryCSSUIAmendments pins PD5-33, PD5-35 and PD5-38 in the stylesheet.
 func TestInventoryCSSUIAmendments(t *testing.T) {
 	body, err := Static.ReadFile("static/app.css")

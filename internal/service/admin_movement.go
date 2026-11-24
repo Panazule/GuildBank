@@ -136,7 +136,9 @@ func movementAudit(item domain.AdminInventoryItem, movement domain.InventoryMove
 	}, nil
 }
 
-// lookupStackability resolves the approved classification for one EQUID.
+// lookupStackability resolves the advisory classification for one EQUID. The
+// classification is presentation-only: no write path consults it, because
+// partial issuance is governed by the on-hand lot quantity.
 func (s *AdminInventoryService) lookupStackability(ctx context.Context, equid uint64) (domain.Stackability, error) {
 	values, err := s.store.LookupStackability(ctx, []uint64{equid})
 	if err != nil {
@@ -210,17 +212,12 @@ func (s *AdminInventoryService) issueAttempt(ctx context.Context, in domain.Issu
 			"quantity cannot exceed the on-hand quantity")
 	}
 
+	// Partial issuance is governed by the on-hand lot quantity, not by EQUID
+	// stackability metadata: any active lot with more than one unit on hand may
+	// be issued partially. in.Quantity is already bounded to 1..current.Quantity
+	// above, so a partial issue always leaves at least one unit in the lot and an
+	// equal quantity routes to the full-stack path.
 	partial := in.Quantity < current.Quantity
-	if partial {
-		level, err := s.lookupStackability(ctx, current.EQUID)
-		if err != nil {
-			return AdminWriteResult{}, err
-		}
-		if !level.AllowsPartialIssue() {
-			return AdminWriteResult{}, domain.NewValidationError("quantity",
-				"a partial issue requires a stackable EQUID; issue the full quantity instead")
-		}
-	}
 
 	at := s.now().UTC()
 	remaining := current.Quantity - in.Quantity
@@ -531,12 +528,39 @@ func (s *AdminInventoryService) OnHand(ctx context.Context, filter domain.AdminI
 }
 
 // ListMovements returns one bounded page of the append-only ledger. The
-// repository applies the allowlisted filters and newest-first ordering.
+// repository applies the allowlisted filters and newest-first ordering. A
+// history request scoped to one lot first resolves the lot so an unknown lot ID
+// is a 404 rather than an empty page.
 func (s *AdminInventoryService) ListMovements(ctx context.Context, filter domain.MovementFilter) (domain.MovementPage, error) {
 	if err := s.requireReady(); err != nil {
 		return domain.MovementPage{}, err
 	}
+	if filter.Page <= 0 {
+		filter.Page = 1
+	}
+	if filter.PageSize <= 0 {
+		filter.PageSize = AdminDefaultPageSize
+	}
+	if filter.GuildBankItemID > 0 {
+		if _, err := s.store.GetAdminInventory(ctx, filter.GuildBankItemID); err != nil {
+			return domain.MovementPage{}, err
+		}
+	}
 	return s.store.ListMovements(ctx, filter)
+}
+
+// Stackability reports the advisory classification for one EQUID. It is
+// presentation-only: the issue path never blocks on it, because partial issuance
+// is governed by the on-hand lot quantity. The read is retained so a future
+// EQUID metadata source can surface the value without changing the write rules.
+func (s *AdminInventoryService) Stackability(ctx context.Context, equid uint64) (domain.Stackability, error) {
+	if err := s.requireReady(); err != nil {
+		return domain.StackabilityUnknown, err
+	}
+	if equid == 0 {
+		return domain.StackabilityUnknown, nil
+	}
+	return s.lookupStackability(ctx, equid)
 }
 
 // GetMovement returns one ledger row by ID.

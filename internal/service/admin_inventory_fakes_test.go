@@ -260,9 +260,10 @@ func (f *fakeAdmin) Rollback() error {
 			f.items = f.backupItems
 		}
 		f.audits = f.backupAudits
-		if f.backupMovements != nil {
-			f.movements = f.backupMovements
-		}
+		// inTx guarantees BeginAdminWrite took a snapshot, so restore the
+		// movement slice even when the snapshot is nil (no prior movements);
+		// guarding on nil here would leave the failed attempt's movement in place.
+		f.movements = f.backupMovements
 	}
 	f.inTx = false
 	f.backupItems = nil

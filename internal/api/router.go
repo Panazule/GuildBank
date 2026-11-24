@@ -147,12 +147,19 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	admin.GET("/admin/inventory/:id", adminHandler.detailPage)
 	admin.GET("/admin/inventory/:id/edit", adminHandler.editPage)
 	admin.GET("/admin/inventory/:id/remove", adminHandler.removePage)
+	admin.GET("/admin/inventory/:id/issue", adminHandler.issuePage)
+	admin.GET("/admin/inventory/:id/return", adminHandler.returnPage)
+	admin.GET("/admin/inventory/:id/movements", adminHandler.movementsPage)
+
 	admin.POST("/admin/inventory", adminHandler.createForm)
 	admin.POST("/admin/inventory/bulk-remove", adminHandler.bulkRemovePreview)
 	admin.POST("/admin/inventory/bulk-remove/apply", adminHandler.bulkRemoveForm)
 	admin.POST("/admin/inventory/:id", adminHandler.updateForm)
 	admin.POST("/admin/inventory/:id/remove", adminHandler.removeForm)
 	admin.POST("/admin/inventory/:id/restore", adminHandler.restoreForm)
+	admin.POST("/admin/inventory/:id/issue", adminHandler.issueForm)
+	admin.POST("/admin/inventory/:id/return", adminHandler.returnForm)
+
 	admin.GET("/admin/audit", adminHandler.auditPage)
 	admin.GET("/api/v1/admin/items", adminHandler.list)
 	admin.GET("/api/v1/admin/items/:id", adminHandler.getItem)
@@ -160,6 +167,12 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	admin.PUT("/api/v1/items/:id", adminHandler.update)
 	admin.DELETE("/api/v1/items/:id", adminHandler.remove)
 	admin.POST("/api/v1/items/:id/restore", adminHandler.restore)
+	// Partial-issuance movement routes (partial-issuance Phase 4). The admin
+	// group already enforces RequireAuth -> CSRF -> RequireAdmin.
+	admin.POST("/api/v1/items/:id/issue", adminHandler.issue)
+	admin.POST("/api/v1/items/:id/return", adminHandler.returnItem)
+	admin.GET("/api/v1/admin/items/:id/movements", adminHandler.movements)
+	admin.GET("/api/v1/admin/movements/:movementID", adminHandler.movement)
 	admin.GET("/api/v1/audit", adminHandler.auditList)
 	admin.GET("/api/v1/audit/:id", adminHandler.auditEntry)
 

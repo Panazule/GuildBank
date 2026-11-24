@@ -299,12 +299,10 @@ func updateInputFrom(id int64, req updateItemRequest) (domain.UpdateItemInput, *
 	} else {
 		in.ExpectedModAt = value
 	}
-	if !req.Quantity.Set {
-		fields["quantity"] = "quantity is required"
-	} else if req.Quantity.Value > uint64(service.AdminMaxSpellQuantity) {
-		fields["quantity"] = "quantity exceeds the storage range"
-	} else {
-		in.Quantity = uint32(req.Quantity.Value)
+	// Quantity is not part of the generic update contract. A request that sends
+	// it is rejected by name so a client cannot silently change stock levels.
+	if req.Quantity != nil {
+		fields["quantity"] = "quantity is not editable; use the issue, return or adjust operation"
 	}
 	in.SourceLocation = parseOptionalString("sourceLocation", req.SourceLocation, fields)
 	in.GivenTo = parseOptionalString("givenTo", req.GivenTo, fields)

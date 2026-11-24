@@ -1,0 +1,62 @@
+{{define "admin_inventory_issue.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-card">
+    <p class="eyebrow">Administration · Issue</p>
+    <h1>Issue {{.Item.Name}}</h1>
+    <p class="item-identity">Inventory ID {{.Item.ID}} · EQUID {{.Item.EQUID}}</p>
+
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    {{if not .Ready}}
+      <div class="alert alert-error" role="status">The guild inventory store is unavailable, so nothing can be issued.</div>
+    {{end}}
+
+    <dl class="detail-list">
+      <div><dt>On hand</dt><dd>{{.Item.Quantity}}</dd></div>
+      <div><dt>Location group</dt><dd><span class="group-badge">{{.Item.LocationGroupLabel}}</span></dd></div>
+      <div><dt>Source location</dt><dd>{{if .Item.SourceLocation}}{{.Item.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</dd></div>
+      <div><dt>Partial issue</dt><dd>{{if .PartialSupported}}Supported{{else}}Whole lot only{{end}}</dd></div>
+    </dl>
+
+    <p class="help">{{.Mode}}</p>
+
+    <form method="post" action="/admin/inventory/{{.Item.ID}}/issue" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="expectedModAt" value="{{.Form.ExpectedModAt}}">
+      <input type="hidden" name="idempotencyKey" value="{{.Form.IdempotencyKey}}">
+
+      <div class="field-row">
+        <label>Quantity
+          <input name="quantity" type="text" inputmode="numeric" required value="{{.Form.Quantity}}" aria-describedby="issue-qty-help">
+          <span class="help" id="issue-qty-help">Issue up to {{.Item.Quantity}}. Entering {{.Item.Quantity}} issues the whole stack.</span>
+          {{with index .ErrorFields "quantity"}}<span class="field-error">{{.}}</span>{{end}}
+        </label>
+        <label>Recipient
+          <input name="recipient" type="text" maxlength="128" required value="{{.Form.Recipient}}" aria-describedby="issue-recipient-help">
+          <span class="help" id="issue-recipient-help">Recorded on the ISSUE movement. The active record keeps no recipient.</span>
+          {{with index .ErrorFields "recipient"}}<span class="field-error">{{.}}</span>{{end}}
+        </label>
+      </div>
+
+      <label>Note
+        <input name="note" type="text" maxlength="255" value="{{.Form.Note}}">
+        {{with index .ErrorFields "note"}}<span class="field-error">{{.}}</span>{{end}}
+      </label>
+
+      {{with index .ErrorFields "expectedModAt"}}<div class="alert alert-error" role="alert">{{.}}</div>{{end}}
+
+      <div class="wizard-actions">
+        <a class="link" href="/admin/inventory/{{.Item.ID}}">Cancel</a>
+        <button type="submit" class="primary"{{if not .Ready}} disabled{{end}}>Issue</button>
+      </div>
+      <p class="help">A partial issue reduces this record and keeps the same lot; the recipient is recorded in movement history. Issuing the full quantity records the recipient on the record and moves it to history (removed). Every issue writes one movement and one audit entry.</p>
+    </form>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

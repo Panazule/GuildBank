@@ -3,6 +3,7 @@
 **Status:** review-only; **no decision approved**, no application code, template,
 route, migration or runtime behavior changed.
 **Date:** 2026-11-22
+**Revision (2026-11-23):** the owner approved **Option A** for the stackability question (OD-01 revised): partial issue is governed by the on-hand lot quantity, not `EQUID` stackability. Any active lot with `Quantity > 1` supports partial issue; a `Quantity = 1` lot is issued whole; stackability metadata is advisory display only and never gates a write. The stackability-gate discussion in §7 and the D-ISS-13 records below are superseded by this rule.
 **Scope:** H-02 and H-05 in `Docs/OfficerUsabilityReviewV1.md`.
 **Purpose:** define the intended business rules for inventory issuance, receipt,
 movement, correction, removal, restoration and public visibility so H-02 (item
@@ -30,10 +31,11 @@ until the owner accepts or rejects it.
    stack quantity from 55 to 45 and write a separate issuance movement for 10.
    Do **not** split the stack into a new active row. If all 55 are given away,
    set `GivenTo` and soft-remove the whole record. See §6.
-4. **How should non-stackable items differ?** A non-stackable item is one
-   physical unit per record. Issue the whole record; partial quantity is not
-   allowed. A non-stackable record with `Quantity > 1` is a data-quality problem
-   and must be corrected or split before issuance. See §7.
+4. **How should non-stackable items differ?** *(Revised 2026-11-23.)* Partial
+   issue is decided by the on-hand quantity, not the stackability label: any
+   active record with `Quantity > 1` may be issued partially, and a `Quantity = 1`
+   record is issued whole. `EQUID` stackability is advisory display only and does
+   not block a write. See §7.
 5. **How should issuance interact with the rest of the system?** Every issue,
    receive, move, adjustment, removal and restoration must be auditable and must
    leave the active quantity and public projection consistent. See §8–§12.
@@ -323,17 +325,19 @@ A split into quantity-1 lots is acceptable here because the physical model reall
 is one unit per row. This is the opposite of the stackable issue case, where
 splitting is rejected.
 
-### 7.5 If stackability is unknown
+### 7.5 Resolution (owner-approved Option A, 2026-11-23)
 
-Until the owner chooses a source of truth, the safest temporary rule is:
+The owner settled this open model choice by making partial issuance
+quantity-based, so no stackability source of truth is required for the write
+path:
 
-- Treat `Quantity = 1` as a single unit and allow only whole-lot issue.
-- Treat `Quantity > 1` as a stack and allow partial issue.
-- Flag any item whose metadata says non-stackable but whose lot quantity is
-  greater than 1 for correction.
+- Treat `Quantity = 1` as a single unit: only whole-lot issue.
+- Treat `Quantity > 1` as a stack: partial issue is allowed.
+- `EQUID` stackability is advisory metadata used for display only. It is never
+  read on a write path and never blocks an issue.
 
-This proxy is operationally usable but not a substitute for real stackability
-metadata. It should be documented as temporary, not as the final model.
+This replaces the earlier temporary proxy and the proposed `EQUID` metadata
+gate. The D-ISS-13 record below is updated to match.
 
 ## 8. Movement workflows and rules
 
@@ -434,8 +438,10 @@ and dates in one save. That is the source of the H-05 ambiguity. Recommended rul
 - **Do not allow quantity and recipient to be changed together in one ambiguous
   save.** A whole-record issue is a named action; a partial issue is a movement.
 - **Do not allow quantity to be changed to zero.** Use removal.
-- **Do not allow quantity to be changed on a non-stackable lot above 1.** Treat
-  that as a data-quality error requiring a split or correction.
+- The quantity-correction guard is quantity-based: a correction must not set a
+  lot's quantity above what the officer can justify, and partial issue is
+  allowed for any active lot with `Quantity > 1` regardless of stackability
+  metadata (OD-01 revised 2026-11-23).
 
 If the owner decides to keep the generic edit form for V1, the minimum safe change
 is to separate “correct quantity” from “issue to recipient” and to show the
@@ -498,7 +504,9 @@ generic JSON diff. The recommended rules are:
 - Every quantity change must be audited and should have a movement record.
 - A quantity edit must not also set `GivenTo`; that would recreate the ambiguity.
 - A quantity edit to zero is a removal, not an edit.
-- A quantity edit on a non-stackable row above 1 is a data-quality error.
+- Partial issue is allowed for any active lot with `Quantity > 1`; stackability
+  metadata is advisory and does not gate a quantity correction (OD-01 revised
+  2026-11-23).
 - The generic edit form can remain for corrections, but the normal daily actions
   should be named actions with before/after quantities and explicit effects.
 
@@ -658,7 +666,7 @@ review.
 
 | ID | Decision | Rationale | Status |
 |---|---|---|---|
-| D-ISS-13 | Stackability is item metadata (`EQUID`-level), not inferred from name, `ItemType` or quantity. A non-stackable lot has quantity 1 and can only be issued whole. | The current schema has no stackability flag; guessing would create silent data errors. | Proposed |
+| D-ISS-13 | Partial-issue eligibility is governed by the on-hand lot quantity, not `EQUID` stackability. Any active lot with `Quantity > 1` supports partial issue; `Quantity = 1` is issued whole. Stackability metadata is advisory display only. | The owner revised OD-01 on 2026-11-23 (Option A) to remove the metadata gate. | **Revised 2026-11-23** |
 | D-ISS-14 | The audit taxonomy should either gain distinct movement event names or carry an explicit movement type in structured audit fields. A generic `GivenTo`-only audit entry is not sufficient. | Keeps issue, receive, move and write-off distinguishable in audit and reporting. | Proposed |
 | D-ISS-15 | Legacy active rows with `GivenTo` are an owner-reviewed data-quality list. They are not automatically converted to issued or cleared. | Free text cannot reliably distinguish a handout, a reservation and a note. | Proposed |
 

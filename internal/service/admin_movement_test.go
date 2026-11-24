@@ -19,7 +19,9 @@ func TestAdminIssuePartialReducesLotAndWritesMovement(t *testing.T) {
 	store := newFakeAdmin()
 	item := issuedItem()
 	store.items[item.ID] = item
-	store.stackability = map[uint64]domain.Stackability{item.EQUID: domain.StackabilityStackable}
+	// Partial issue is governed by the on-hand quantity, so a non-stackable
+	// classification must not block it.
+	store.stackability = map[uint64]domain.Stackability{item.EQUID: domain.StackabilityNonStackable}
 	svc := testAdminService(store, nil, testClock())
 
 	result, err := svc.Issue(context.Background(), domain.IssueItemInput{
@@ -78,27 +80,35 @@ func TestAdminIssueFullStackSoftDeletesAndRecordsRecipient(t *testing.T) {
 	}
 }
 
-func TestAdminIssueRejectsPartialForNonStackable(t *testing.T) {
+func TestAdminIssuePartialAllowedByQuantityNotMetadata(t *testing.T) {
 	store := newFakeAdmin()
 	item := issuedItem()
 	item.Quantity = 5
 	store.items[item.ID] = item
+	// A non-stackable classification must not block a partial issue: the rule is
+	// the active lot quantity currently on hand, which is 5 here.
 	store.stackability = map[uint64]domain.Stackability{item.EQUID: domain.StackabilityNonStackable}
 	svc := testAdminService(store, nil, testClock())
 
-	_, err := svc.Issue(context.Background(), domain.IssueItemInput{
+	result, err := svc.Issue(context.Background(), domain.IssueItemInput{
 		GuildBankItemID: item.ID, ExpectedModAt: item.ModAt, Quantity: 2,
 		Recipient: "Alice", Actor: testActor(),
 	})
-	var validation *domain.ValidationError
-	if !errors.As(err, &validation) || validation.Fields["quantity"] == "" {
-		t.Fatalf("err = %v, want quantity validation", err)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
 	}
-	if len(store.movements) != 0 || len(store.audits) != 0 {
-		t.Fatalf("movements/audits = %d/%d, want 0/0", len(store.movements), len(store.audits))
+	if result.Item.Quantity != 3 || result.Item.DeletedFg || result.Item.GivenTo != "" {
+		t.Fatalf("result = %+v, want active quantity 3 and no recipient", result.Item)
 	}
-	if store.rolled != 1 || store.items[item.ID].Quantity != 5 {
-		t.Fatalf("rolled = %d quantity = %d, want 1/5", store.rolled, store.items[item.ID].Quantity)
+	if len(store.movements) != 1 || store.movements[0].MovementType != domain.MovementIssue ||
+		store.movements[0].Quantity != 2 || store.movements[0].RemainingQuantity != 3 {
+		t.Fatalf("movements = %+v", store.movements)
+	}
+	if len(store.audits) != 1 || store.audits[0].EventType != "ITEM_ISSUED" {
+		t.Fatalf("audits = %+v, want one ITEM_ISSUED", store.audits)
+	}
+	if store.committed != 1 || store.rolled != 0 {
+		t.Fatalf("committed/rolled = %d/%d, want 1/0", store.committed, store.rolled)
 	}
 }
 
@@ -294,7 +304,6 @@ func TestAdminListAndGetMovement(t *testing.T) {
 	store := newFakeAdmin()
 	item := issuedItem()
 	store.items[item.ID] = item
-	store.stackability = map[uint64]domain.Stackability{item.EQUID: domain.StackabilityStackable}
 	svc := testAdminService(store, nil, testClock())
 
 	if _, err := svc.Issue(context.Background(), domain.IssueItemInput{
@@ -325,7 +334,8 @@ func TestAdminIssueIdempotencyKeyConflictRollsBack(t *testing.T) {
 	store := newFakeAdmin()
 	item := issuedItem()
 	store.items[item.ID] = item
-	store.stackability = map[uint64]domain.Stackability{item.EQUID: domain.StackabilityStackable}
+	// No classification is registered, so the fake reports unknown: partial
+	// issue must still succeed because it is quantity-based.
 	svc := testAdminService(store, nil, testClock())
 
 	first, err := svc.Issue(context.Background(), domain.IssueItemInput{

@@ -100,6 +100,12 @@ func adminNotice(code string) string {
 		return "The record was removed."
 	case "restored":
 		return "The record was restored."
+	case "issued":
+		return "The issue was recorded."
+	case "returned":
+		return "The return was recorded."
+	case "returned-new":
+		return "The return was recorded as a new active record."
 	case "updated-removed":
 		return "The record was updated and removed."
 	case "bulk-removed":

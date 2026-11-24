@@ -640,8 +640,10 @@ func spellMergeAudit(target domain.AdminInventoryItem, sum uint32, in domain.Cre
 	}, nil
 }
 
-// Update applies the editable fields of one row. All editable keys are required;
-// DateAdded, identity and the name sort never change.
+// Update applies the editable fields of one row. SourceLocation and the lifecycle
+// dates are required; quantity and givenTo are optional. A zero quantity leaves
+// the stored quantity untouched, and an omitted givenTo preserves the stored
+// recipient. DateAdded, identity and the name sort never change.
 func (s *AdminInventoryService) Update(ctx context.Context, in domain.UpdateItemInput) (AdminWriteResult, error) {
 	if err := s.requireReady(); err != nil {
 		return AdminWriteResult{}, err
@@ -653,9 +655,8 @@ func (s *AdminInventoryService) Update(ctx context.Context, in domain.UpdateItem
 		return AdminWriteResult{}, domain.ErrNotFound
 	}
 	fields := make(map[string]string)
-	if in.Quantity < 1 {
-		fields["quantity"] = "quantity must be at least 1"
-	}
+	// A zero quantity means "leave the stored quantity unchanged". The generic
+	// update contract does not change stock levels; movement operations do.
 	if in.ExpectedModAt.IsZero() {
 		fields["expectedModAt"] = "expectedModAt is required"
 	}
@@ -664,9 +665,10 @@ func (s *AdminInventoryService) Update(ctx context.Context, in domain.UpdateItem
 	} else {
 		in.SourceLocation = adminOptionalText("sourceLocation", in.SourceLocation, AdminMaxLocationRunes, fields)
 	}
-	if !in.GivenTo.Set {
-		fields["givenTo"] = "givenTo is required (use null to clear)"
-	} else {
+	// GivenTo is optional on an ordinary edit: omitting it preserves the stored
+	// value. When supplied it is still bounded and must satisfy the active-row
+	// invariant below.
+	if in.GivenTo.Set {
 		in.GivenTo = adminOptionalText("givenTo", in.GivenTo, AdminMaxGivenToRunes, fields)
 	}
 	// A plain edit may not leave a recipient on an active row. Save-and-remove
@@ -714,9 +716,19 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 	if !sameModAt(current.ModAt, in.ExpectedModAt) {
 		return AdminWriteResult{}, fmt.Errorf("%w: the record changed since it was loaded", domain.ErrConflict)
 	}
-	if current.ItemType == domain.ItemTypeItem && uint64(in.Quantity) > uint64(AdminMaxItemQuantity) {
+	if in.Quantity != 0 && current.ItemType == domain.ItemTypeItem && uint64(in.Quantity) > uint64(AdminMaxItemQuantity) {
 		return AdminWriteResult{}, domain.NewValidationError("quantity",
 			fmt.Sprintf("quantity must be between 1 and %d for an item", AdminMaxItemQuantity))
+	}
+	// A zero quantity leaves the stored quantity unchanged. GivenTo is likewise
+	// optional: an omitted value preserves the stored recipient.
+	quantity := current.Quantity
+	if in.Quantity != 0 {
+		quantity = in.Quantity
+	}
+	givenTo := current.GivenTo
+	if in.GivenTo.Set {
+		givenTo = in.GivenTo.String()
 	}
 
 	open, bazaar := current.DateOpen, current.DateBazaar
@@ -764,13 +776,13 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 	}
 
 	changed := make(map[string]bool, 5)
-	if in.Quantity != current.Quantity {
+	if in.Quantity != 0 && in.Quantity != current.Quantity {
 		changed["quantity"] = true
 	}
 	if in.SourceLocation.String() != current.SourceLocation {
 		changed["sourceLocation"] = true
 	}
-	if in.GivenTo.String() != current.GivenTo {
+	if in.GivenTo.Set && in.GivenTo.String() != current.GivenTo {
 		changed["givenTo"] = true
 	}
 	if !sameDay(open, current.DateOpen) {
@@ -791,11 +803,11 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 	row := domain.AdminUpdateRow{
 		ID: current.ID, SourceLocation: in.SourceLocation.String(),
 		LocationGroup: location.Group, LocationSort: TruncateRunes(location.Sort, 80),
-		GivenTo: in.GivenTo.String(), ModAt: modAt, Actor: in.Actor,
+		GivenTo: givenTo, ModAt: modAt, Actor: in.Actor,
 	}
 	if changed["quantity"] {
-		quantity := in.Quantity
-		row.Quantity = &quantity
+		value := quantity
+		row.Quantity = &value
 	}
 	if changed["dateOpen"] {
 		value := open
@@ -819,8 +831,8 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 		if err := tx.SetDeleted(ctx, current.ID, true, modAt, in.Actor); err != nil {
 			return AdminWriteResult{}, err
 		}
-		writtenOff := newMovement(current, domain.MovementWriteOff, in.Quantity, 0,
-			in.GivenTo.String(), current.SourceLocation, "", "", in.Actor, modAt,
+		writtenOff := newMovement(current, domain.MovementWriteOff, quantity, 0,
+			givenTo, current.SourceLocation, "", "", in.Actor, modAt,
 			in.CorrelationID, "")
 		movementID, err := tx.InsertMovement(ctx, writtenOff)
 		if err != nil {
@@ -853,11 +865,11 @@ func (s *AdminInventoryService) updateAttempt(ctx context.Context, in domain.Upd
 	committed = true
 
 	updated := current
-	updated.Quantity = in.Quantity
+	updated.Quantity = quantity
 	updated.SourceLocation = in.SourceLocation.String()
 	updated.LocationGroup = location.Group
 	updated.LocationSort = TruncateRunes(location.Sort, 80)
-	updated.GivenTo = in.GivenTo.String()
+	updated.GivenTo = givenTo
 	updated.DateOpen = open
 	updated.DateBazaar = bazaar
 	updated.DeletedFg = in.Remove

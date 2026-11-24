@@ -213,14 +213,18 @@ type createItemRequest struct {
 	Availability    *json.RawMessage `json:"availability"`
 }
 
-// updateItemRequest is the update DTO. All editable keys are required.
+// updateItemRequest is the update DTO. Quantity is deliberately absent: the
+// generic update contract cannot change stock levels. Quantity changes are
+// recorded by the issue, return and future adjust operations only.
 type updateItemRequest struct {
 	ExpectedModAt  *string          `json:"expectedModAt"`
-	Quantity       decimalUint      `json:"quantity"`
 	SourceLocation *json.RawMessage `json:"sourceLocation"`
-	GivenTo        *json.RawMessage `json:"givenTo"`
-	DateOpen       *json.RawMessage `json:"dateOpen"`
-	DateBazaar     *json.RawMessage `json:"dateBazaar"`
+	// Quantity is decoded only so a client that sends it receives a named 422
+	// instead of a generic unknown-field 400.
+	Quantity   *json.RawMessage `json:"quantity"`
+	GivenTo    *json.RawMessage `json:"givenTo"`
+	DateOpen   *json.RawMessage `json:"dateOpen"`
+	DateBazaar *json.RawMessage `json:"dateBazaar"`
 	// Remove asks for the same transaction to soft-delete the record (AI-02).
 	Remove *bool `json:"remove"`
 

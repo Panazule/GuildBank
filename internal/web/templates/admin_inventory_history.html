@@ -1,0 +1,116 @@
+{{define "admin_inventory_history.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-card">
+    <p class="eyebrow">Administration · Movement history</p>
+    <h1>{{.Item.Name}}</h1>
+    <p class="item-identity">Inventory ID {{.Item.ID}} · EQUID {{.Item.EQUID}}</p>
+
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <dl class="detail-list">
+      <div><dt>Stock on hand</dt><dd>{{if .Item.Deleted}}0<span class="muted"> (removed)</span>{{else}}{{.Item.Quantity}}{{end}}</dd></div>
+      <div><dt>Status</dt><dd><span class="status-badge {{if .Item.Deleted}}status-Failed{{else}}status-Completed{{end}}">{{if .Item.Deleted}}Removed{{else}}Active{{end}}</span></dd></div>
+      <div><dt>Recipient</dt><dd>{{if .Item.GivenTo}}{{.Item.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</dd></div>
+    </dl>
+
+    <div class="wizard-actions">
+      <a class="link" href="/admin/inventory/{{.Item.ID}}">Back to record</a>
+      {{if not .Item.Deleted}}<a class="link primary" href="/admin/inventory/{{.Item.ID}}/issue">Issue</a>{{end}}
+      {{if .Item.Deleted}}{{if .Item.GivenTo}}<a class="link" href="/admin/inventory/{{.Item.ID}}/return">Return</a>{{end}}{{end}}
+    </div>
+
+    <form method="get" action="/admin/inventory/{{.Item.ID}}/movements" class="inventory-filters">
+      <div class="filter-grid admin-filter-grid">
+        <label>Movement type
+          <select name="movementType">
+            {{range .TypeOpts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Recipient
+          <input name="recipient" type="text" maxlength="128" value="{{.Filter.Recipient}}" autocomplete="off">
+        </label>
+        <label>Correlation ID
+          <input name="correlationId" type="text" maxlength="36" value="{{.Filter.CorrelationID}}" autocomplete="off">
+        </label>
+        <label>Page size
+          <select name="pageSize">
+            <option value="25"{{if eq .Filter.PageSize "25"}} selected{{end}}>25</option>
+            <option value="50"{{if eq .Filter.PageSize "50"}} selected{{end}}>50</option>
+            <option value="100"{{if eq .Filter.PageSize "100"}} selected{{end}}>100</option>
+            <option value="200"{{if eq .Filter.PageSize "200"}} selected{{end}}>200</option>
+          </select>
+        </label>
+        <div class="filter-actions">
+          <button type="submit" class="primary">Apply</button>
+          <a class="link" href="/admin/inventory/{{.Item.ID}}/movements">Clear</a>
+        </div>
+      </div>
+    </form>
+
+    <p class="result-summary" aria-live="polite">
+      {{if .Total}}{{.Total}} movement{{if ne .Total 1}}s{{end}} · page {{.Page}} of {{.TotalPages}}{{else}}No movements recorded{{end}}
+    </p>
+
+    {{if .Empty}}
+      <div class="empty-state">
+        <p>No movements have been recorded for this record.</p>
+        <p class="help">Records that predate the movement ledger show this record as an opening balance; no history is fabricated for them.</p>
+      </div>
+    {{else}}
+      <div class="table-scroll" role="region" aria-label="Movement history results" tabindex="0">
+        <table class="audit-table">
+          <caption class="sr-only">Movement history for this inventory record</caption>
+          <thead>
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">When</th>
+              <th scope="col">Type</th>
+              <th scope="col">Quantity</th>
+              <th scope="col">From → To</th>
+              <th scope="col">Recipient</th>
+              <th scope="col">Actor</th>
+              <th scope="col">Remaining</th>
+              <th scope="col">Note</th>
+              <th scope="col">Correlation</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Movements}}
+            <tr>
+              <td class="cell-nowrap mono">{{.MovementID}}</td>
+              <td class="cell-nowrap"><time datetime="{{.OccurredAtValue}}">{{.OccurredAtText}}</time></td>
+              <td class="cell-nowrap"><span class="status-badge">{{.Type}}</span></td>
+              <td class="cell-nowrap">{{.Quantity}}</td>
+              <td class="cell-nowrap">{{if .FromLocation}}{{.FromLocation}}{{else}}<span class="muted">—</span>{{end}}{{if .ToLocation}} → {{.ToLocation}}{{end}}{{if .RelatedItemID}} <span class="muted">(record {{.RelatedItemID}})</span>{{end}}</td>
+              <td class="cell-nowrap">{{if .Recipient}}{{.Recipient}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td class="cell-nowrap">{{.ActorUserName}}</td>
+              <td class="cell-nowrap">{{.RemainingQuantity}}</td>
+              <td>{{if .Note}}{{.Note}}{{else}}<span class="muted">—</span>{{end}}</td>
+              <td class="cell-nowrap mono">{{if .CorrelationID}}<a href="/admin/audit?correlationId={{.CorrelationID}}">{{.CorrelationID}}</a>{{else}}<span class="muted" aria-label="No correlation id">—</span>{{end}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{end}}
+
+    {{if or .PrevURL .NextURL .PageLinks}}
+    <nav class="pager inventory-pager" aria-label="Movement history pages">
+      {{if .FirstURL}}<a href="{{.FirstURL}}">First</a>{{end}}
+      {{if .PrevURL}}<a href="{{.PrevURL}}" rel="prev">Previous</a>{{end}}
+      {{range .PageLinks}}
+        {{if .Current}}<span class="page-current" aria-current="page">{{.Page}}</span>{{else}}<a href="{{.URL}}">{{.Page}}</a>{{end}}
+      {{end}}
+      {{if .NextURL}}<a href="{{.NextURL}}" rel="next">Next</a>{{end}}
+      {{if .LastURL}}<a href="{{.LastURL}}">Last</a>{{end}}
+    </nav>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

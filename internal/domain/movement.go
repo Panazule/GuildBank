@@ -44,7 +44,9 @@ func (t MovementType) FirstRelease() bool {
 // RequiresRecipient reports whether the movement type requires a recipient.
 func (t MovementType) RequiresRecipient() bool { return t == MovementIssue }
 
-// Stackability is the approved EQUID-level stackability classification.
+// Stackability is the advisory EQUID-level classification. It is descriptive
+// metadata only: partial issuance is governed by the on-hand lot quantity, so no
+// write path consults this value.
 type Stackability string
 
 const (
@@ -170,9 +172,6 @@ type MovementPage struct {
 	TotalPages int
 	Filter     MovementFilter
 }
-
-// AllowsPartialIssue reports whether the classification permits partial issue.
-func (s Stackability) AllowsPartialIssue() bool { return s == StackabilityStackable }
 
 // IssueItemInput is the approved issue command shape. The service operation is
 // introduced in a later phase; this type only fixes the contract.

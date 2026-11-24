@@ -1,6 +1,7 @@
 # Partial issuance - implementation plan
 
-**Status:** approved plan. Phase 1 schema is implemented (`0006_inventory_movement.sql`, 2026-11-22); Phases 2–7 are not started. This document remains the design baseline. Owner decisions OD-01 to OD-07 are recorded in section 12.
+**Status:** approved plan. Phases 1–5 are implemented: Phase 1 schema (`0006_inventory_movement.sql`, 2026-11-22), Phase 2 domain/repository, Phase 3 service layer, Phase 4 JSON API and Phase 5 officer UI (issue/return forms and per-record movement history, 2026-11-23). Phases 6 (audit taxonomy/public totals) and 7 (legacy `GivenTo` cleanup) are not started. This document remains the design baseline. Owner decisions OD-01 to OD-07 are recorded in section 12.
+**Revision (2026-11-23):** OD-01 was revised (Option A). Partial issue is governed by the on-hand lot quantity, not `EQUID` stackability: any active lot with `Quantity > 1` supports partial issue, and stackability metadata is advisory display only. Wherever this document still gates partial issue on stackability or an allow-list, the quantity-based rule in section 4.3 and section 12 governs.
 **Date:** 2026-11-22
 **Baseline:** `Docs/PartialIssuanceApprovalPackage.md` and the owner decisions recorded for D-ISS-01 through D-ISS-15 and R-ISS-01 through R-ISS-16.
 **Implementation gate:** do not start code until this plan and the readiness conditions in section 13 are accepted.
@@ -55,7 +56,7 @@
 | D-ISS-10 | Quantity editing is a correction path only. It requires a reason, writes `ADJUST`, and never sets `GivenTo`. **Deferred by OD-04.** |
 | D-ISS-11 | Public inventory shows active on-hand quantity only. It never exposes `GivenTo`, exact location or removed lots. |
 | D-ISS-12 | H-02 and H-05 use one definition: on hand = sum of active lot quantities. |
-| D-ISS-13 | Stackability is `EQUID`-level metadata (OD-01). Until metadata coverage is sufficient, an explicit allow-list governs partial issue; ambiguous items are blocked. |
+| D-ISS-13 | Partial issue is governed by the on-hand lot quantity (OD-01, revised 2026-11-23): any active lot with `Quantity > 1` supports partial issue. `EQUID` stackability metadata is advisory display only. |
 | D-ISS-14 | Audit gains distinct movement event names or a structured movement type. A generic `GivenTo`-only entry is insufficient. |
 | D-ISS-15 | Legacy active rows with `GivenTo` are an owner-reviewed data-quality list. No automatic conversion. |
 | R-ISS-01 | On-hand queries use `SUM(Quantity)` for active lots only. |
@@ -64,8 +65,8 @@
 | R-ISS-04 | Every issue writes one immutable movement with lot ID, quantity, recipient, timestamp, actor, source location, remaining quantity and correlation ID. |
 | R-ISS-05 | Full-stack issue sets `GivenTo`, writes `ISSUE`, soft-removes the row and leaves `Quantity` unchanged. |
 | R-ISS-06 | Partial issue may not reduce a lot to zero. Equal quantity routes to the full-stack path. |
-| R-ISS-07 | Non-stackable lot has quantity 1 and can only be issued whole. A non-stackable lot with quantity greater than 1 is a data-quality error. |
-| R-ISS-08 | Stackability is read from `EQUID` metadata or the approved temporary allow-list, never inferred from name, type or quantity. Ambiguous items cannot use partial issue. |
+| R-ISS-07 | Partial issue is quantity-based: any active lot with `Quantity > 1` may be issued partially. A lot with `Quantity = 1` can only be issued whole. |
+| R-ISS-08 | `EQUID` stackability metadata is advisory (display only) and never gates a write. Partial-issue eligibility is decided solely by the active lot quantity currently on hand. |
 | R-ISS-09 | Receives increase a chosen lot or create a new lot. Movement-managed lots are exempt from spell-style auto-merge (OD-07); no merge is attempted in the first release. |
 | R-ISS-10 | Partial move creates a destination lot. Whole move updates location. Destination inherits source lifecycle dates. **Deferred by OD-04.** |
 | R-ISS-11 | Removal is whole-lot. Bulk actions show affected record count and unit count. |
@@ -122,9 +123,15 @@ Table name: `InventoryMovement` (implemented in `0006_inventory_movement.sql`).
 
 The application exposes insert and read only. No update or delete method is added. Corrections are new movements.
 
-### 4.3 Stackability metadata
+### 4.3 Stackability metadata (advisory)
 
-OD-01 approved `EQUID`-level metadata. The table below is the target design; until metadata coverage is sufficient, an explicit allow-list is used.
+OD-01 was **revised on 2026-11-23**: partial issuance is now governed by the
+on-hand lot quantity, not by `EQUID` stackability. The `ItemStackRule` table
+below is no longer required and is retained only as a target design if a future
+release decides to surface an EQUID classification. Stackability metadata is
+advisory and display only; no write path consults it, so the table is not part
+of the first release. The existing read helper and allow-list remain in the
+repository for display and can be removed when no longer useful.
 
 ```sql
 CREATE TABLE ItemStackRule (
@@ -137,7 +144,7 @@ CREATE TABLE ItemStackRule (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-Until metadata coverage is sufficient, the explicit allow-list governs partial issue. An item absent from the allow-list is treated as unknown and cannot be partially issued. The allow-list is temporary and documented as such. The `ItemStackRule` table is not part of the first-release migration; it is the target design for when metadata coverage justifies it.
+The `ItemStackRule` table above is **not** part of any migration and is not required: OD-01 was revised on 2026-11-23 so partial issue is decided by the on-hand lot quantity. No allow-list governs partial issue; the read helper and its classification are advisory display only. The table is retained purely as a possible future display design.
 
 ### 4.4 No changes to existing columns
 
@@ -159,7 +166,7 @@ Add to `internal/domain/inventory_admin.go` or a new `internal/domain/movement.g
 - `ReturnItemInput`: lot ID, expected `ModAt`, quantity, optional recipient, optional note, idempotency key, actor, correlation ID, source IP. Dates are copied from the source lot (OD-03).
 - `AdjustItemInput` and `MoveItemInput`: defined for schema completeness but **deferred by OD-04**.
 - `MovementFilter` and `MovementPage` for the admin history.
-- `Stackability` enum: `stackable`, `non_stackable`, `unknown`.
+- `Stackability` enum: `stackable`, `non_stackable`, `unknown` (advisory display only since OD-01 was revised on 2026-11-23; never gates a write).
 
 ### 5.2 Repository interface
 
@@ -185,7 +192,7 @@ New `AdminInventoryService.Issue(ctx, input)` in `internal/service/admin_invento
 2. Lock the lot with `LockRow`.
 3. Reject if the lot is removed or `GivenTo` is non-empty.
 4. Reject if `input.Quantity` is zero or greater than on hand.
-5. Reject if the item is non-stackable and quantity is greater than 1.
+5. Decide partial vs whole-stack from the quantity comparison; `EQUID` stackability metadata does not gate the issue (OD-01 revised 2026-11-23).
 6. If quantity equals on hand, route to the full-stack path.
 7. Partial path: `UPDATE GuildBankItems SET Quantity = Quantity - ?, ModAt = ?, ModBy = ?, ModByUserID = ? WHERE GuildBankItemID = ? AND DeletedFg = 0`.
 8. Insert one `ISSUE` movement with `RemainingQuantity = onHand - quantity`.
@@ -333,7 +340,7 @@ The Adjust and Move contracts are documented for schema completeness but are **d
 | Lot changed since load | `409` | `conflict` |
 | Lot already removed | `409` | `conflict` |
 | Partial issue equals full quantity | `200` | Routes to the full-stack path automatically; no error |
-| Non-stackable partial issue | `422` | `validation_error` |
+| Partial issue with `Quantity > 1` (any stackability) | `201` | Allowed; stackability metadata is not consulted |
 | Return exceeds issued quantity | `422` | `validation_error` |
 | Duplicate idempotency key | `409` | `conflict` |
 
@@ -523,7 +530,7 @@ Do not put the movement type only in free text.
   - Partial issue equal to full quantity routes to full-stack.
   - Partial issue greater than on hand is rejected.
   - Active row with `GivenTo` is rejected.
-  - Non-stackable partial issue is rejected.
+  - Partial issue with `Quantity > 1` succeeds regardless of `EQUID` stackability; a quantity-1 lot routes to the full-stack path.
   - Return to active lot increases quantity and writes `RETURN`.
   - Full return of a whole-issued row restores the row and clears `GivenTo`.
   - Partial return after a whole-stack issue creates a new lot and leaves the original as history.
@@ -571,7 +578,7 @@ Do not put the movement type only in free text.
 4. Return all 45 against the whole-issued row -> original row restored and `GivenTo` cleared.
 5. Remove an active lot -> `WRITE_OFF` movement and audit.
 6. Restore a whole-issued row -> `RETURN`, `GivenTo` cleared; restore an administratively removed row -> `RECEIVE` (OD-02).
-7. Attempt a partial issue on a non-stackable or unclassified `EQUID` -> blocked with `422`.
+7. Partial-issue a lot with `Quantity > 1` regardless of `EQUID` stackability metadata -> allowed; the lot quantity decreases and the same active lot remains.
 8. Submit the same issue twice with one idempotency key -> second request returns `409` and no duplicate movement.
 9. Confirm public totals show units and no internal fields.
 10. Adjust and move manual checks are **deferred by OD-04**.
@@ -580,7 +587,7 @@ Do not put the movement type only in free text.
 
 1. **Approval gate** - approve this plan. Owner decisions in section 12 are recorded; no further decision is outstanding for the first release.
 2. **Schema** - add `0006_inventory_movement.sql`, update migration manifest and docs. No lot data mutation.
-3. **Domain and repository** - movement types, ledger reads/writes, on-hand calculator, stackability lookup and transaction helpers.
+3. **Domain and repository** - movement types, ledger reads/writes, on-hand calculator, advisory stackability read and transaction helpers.
 4. **Service** - issue, full-stack issue, return, receive/restore and write-off paths with invariants. Move and adjust are deferred by OD-04.
 5. **API** - new routes and contract changes; error semantics.
 6. **Admin UI** - issue/return forms, movement history, unit totals, `GivenTo` removal from generic forms.
@@ -597,7 +604,7 @@ The owner reviewed the decision matrix on 2026-11-22. The following decisions ar
 
 | ID | Decision | Owner disposition | Implementation consequence |
 |---|---|---|---|
-| **OD-01** | Stackability source of truth | **Approved** - `EQUID`-level metadata; explicit allow-list until metadata coverage is sufficient. | Partial issue is permitted only for `EQUID`s classified as stackable. Unknown or unclassified items are blocked with `422 validation_error`. The allow-list is temporary and documented. |
+| **OD-01** | Partial-issue eligibility | **Revised 2026-11-23 (Option A)** - partial issue is governed by the active lot quantity currently on hand, not by `EQUID` stackability metadata. | Any active lot with `Quantity > 1` supports partial issue; stackability is not consulted on the write path and is advisory display only. The earlier `EQUID` allow-list gate is removed. |
 | **OD-02** | Restore semantics | **Approved** - administrative restore writes `RECEIVE`; return from a recipient writes `RETURN`. | Restore branches on prior issue state: a row issued to a recipient restores as `RETURN` and clears `GivenTo`; a row removed administratively restores as `RECEIVE`. |
 | **OD-03** | Return date policy | **Approved** - copy the original lot's dates by default; fresh-date override deferred. | Return copies the source lot's open/bazaar dates. No fresh-date override in the first release. |
 | **OD-04** | First-release scope | **Approved** - `ISSUE` and `RETURN` only; `MOVE` and `ADJUST` deferred. | The ledger schema supports all movement types, but only issue and return are exposed in the first release. Move and adjust routes, forms and tests are deferred. |
@@ -612,7 +619,7 @@ The owner reviewed the decision matrix on 2026-11-22. The following decisions ar
 ### 13.1 Remaining required work
 
 1. **Schema** - add `0006_inventory_movement.sql`, indexes, constraints and migration manifest/hash updates. No lot data mutation.
-2. **Domain and repository** - movement types, append-only ledger reads/writes, on-hand calculator, stackability lookup and transaction helpers.
+2. **Domain and repository** - movement types, append-only ledger reads/writes, on-hand calculator, advisory stackability read and transaction helpers.
 3. **Service** - atomic issue, full-stack issue, return, receive/restore and write-off paths with row locking, expected-state checks and the active-row `GivenTo` invariant.
 4. **API** - `POST /api/v1/items/:id/issue`, `POST /api/v1/items/:id/return`, movement history reads, and the create/update/delete/restore contract changes. `Idempotency-Key` header parsing.
 5. **Admin UI** - issue and return forms, movement history page, unit totals and `GivenTo` removal from generic active-row forms. Hidden idempotency field in HTML forms.
@@ -629,7 +636,7 @@ The owner reviewed the decision matrix on 2026-11-22. The following decisions ar
 | Import-generated `RECEIVE` movements | OD-05 deferred; imports remain inventory state only. | When receipt history for imports is required. |
 | Fresh-date return override | OD-03 deferred. | When returned stock genuinely has new dates. |
 | Movement-aware spell merge (`MERGE`) | OD-07 exempts movement-managed lots. | When merge rules can preserve ledger integrity. |
-| Stackability metadata coverage | OD-01 uses an allow-list until metadata is sufficient. | When `EQUID` metadata is populated for the catalogue. |
+| Stackability metadata coverage | OD-01 (revised) no longer gates partial issue on metadata; the advisory classification is display only. | Only if a richer EQUID metadata source is added for display. |
 
 ### 13.3 Estimated implementation phases
 
@@ -637,7 +644,7 @@ The owner reviewed the decision matrix on 2026-11-22. The following decisions ar
 |---|---|---|
 | 0 - Approval and baseline | Owner decisions recorded; plan approved. | This document approved. |
 | 1 - Schema | Movement ledger migration, indexes, constraints, migration tests and docs. | Migration applies and rolls back cleanly; no lot data changed. |
-| 2 - Domain and repository | Movement types, ledger reads/writes, on-hand calculator, stackability lookup. | Repository tests pass; ledger is append-only. |
+| 2 - Domain and repository | Movement types, ledger reads/writes, on-hand calculator, advisory stackability read. | Repository tests pass; ledger is append-only. |
 | 3 - Service | Issue, full-stack issue, return, restore and write-off with invariants and idempotency. | Service tests pass; stale state returns `409`; no partial writes. |
 | 4 - API | Issue/return routes, history reads, contract changes, error semantics. | API tests pass; authentication and CSRF enforced. |
 | 5 - Admin UI | Issue/return forms, history page, unit totals, `GivenTo` removal. | Manual acceptance for issue and return passes. |
@@ -658,7 +665,7 @@ Phases 1-3 are sequential. Phase 4 depends on 3. Phase 5 depends on 4. Phase 6 c
 
 ### 13.5 Validation approach
 
-- **Unit** - service invariants: partial vs full-stack issue, return to active lot, return after whole-stack issue, restore branching (`RECEIVE` vs `RETURN`), return date copying, stackability allow-list blocking, idempotency conflicts, stale `expectedModAt`.
+- **Unit** - service invariants: partial vs full-stack issue, quantity-based partial-issue eligibility (stackability never gates), return to active lot, return after whole-stack issue, restore branching (`RECEIVE` vs `RETURN`), return date copying, idempotency conflicts, stale `expectedModAt`.
 - **Repository** - movement round trip, atomic movement plus audit, append-only enforcement, on-hand `SUM(Quantity)` excludes removed lots and movement rows, migration apply/rollback.
 - **Integration** - concurrent issues from one lot (one succeeds, one `409`), import creates no movements, public totals show units, public pages expose no internal fields.
 - **API** - authentication and CSRF on new routes, request validation, `409`/`422` semantics, `Idempotency-Key` header and hidden form field share duplicate-key behavior, history pagination and filters, no movement data in public JSON.
@@ -668,4 +675,4 @@ Phases 1-3 are sequential. Phase 4 depends on 3. Phase 5 depends on 4. Phase 6 c
 
 ## 14. Implementation status
 
-This document was a plan when approved. Phase 1 schema is now implemented: `internal/repository/mariadb/migrations/0006_inventory_movement.sql` adds the append-only `InventoryMovement` ledger with the approved indexes and constraints. The migration manifest and migration assertions were updated. No service, API, UI, audit or movement workflow code was changed; no existing lot data, quantity or `GivenTo` value was mutated. Owner decisions OD-01 to OD-07 are recorded in section 12. Phases 2–7 remain gated on owner review.
+This document was a plan when approved. Phase 1 schema is now implemented: `internal/repository/mariadb/migrations/0006_inventory_movement.sql` adds the append-only `InventoryMovement` ledger with the approved indexes and constraints. The migration manifest and migration assertions were updated. No service, API, UI, audit or movement workflow code was changed; no existing lot data, quantity or `GivenTo` value was mutated. Owner decisions OD-01 to OD-07 are recorded in section 12. Phases 2–5 are now also implemented: the domain/repository layer, the `Issue`/`Return` service operations, the JSON API and the Phase 5 officer UI (issue and return forms plus per-record movement history). Phase 6 (movement audit taxonomy and public unit totals) and Phase 7 (legacy `GivenTo` cleanup and release) remain and are the only outstanding phases.

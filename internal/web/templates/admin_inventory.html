@@ -116,6 +116,8 @@
               <td class="cell-nowrap actions-cell">
                 <a href="/admin/inventory/{{.ID}}/edit">Edit</a>
                 <a href="/admin/inventory/{{.ID}}">History</a>
+                <a href="/admin/inventory/{{.ID}}/movements">Movements</a>
+                {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/issue">Issue</a>{{else}}{{if .GivenTo}}<a href="/admin/inventory/{{.ID}}/return">Return</a>{{end}}{{end}}
                 {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/remove">Remove</a>{{end}}
               </td>
             </tr>
