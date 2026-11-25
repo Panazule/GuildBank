@@ -18,6 +18,13 @@ var migrationFiles embed.FS
 
 const migrateLockName = "guildbank:migrate:"
 
+// schemaMigrationsVersionMaxLen mirrors the width of the schema_migrations.Version
+// column. A version is the migration filename without its extension, so a longer
+// filename would execute its statements and then fail to record itself (error 1406),
+// leaving partially applied schema behind that every later run trips over (error
+// 1060). Reject an over-long version before executing any statement.
+const schemaMigrationsVersionMaxLen = 32
+
 // Migrate applies the embedded guild-store migrations once under a
 // database-specific advisory lock and returns the latest applied version.
 func (s *Store) Migrate(ctx context.Context) (string, error) {
@@ -65,6 +72,11 @@ func (s *Store) Migrate(ctx context.Context) (string, error) {
 	}
 	for _, path := range names {
 		version := strings.TrimSuffix(strings.TrimPrefix(path, "migrations/"), ".sql")
+		if len(version) > schemaMigrationsVersionMaxLen {
+			return latest, fmt.Errorf(
+				"mariadb: migration %s: version is %d characters but schema_migrations.Version holds %d",
+				version, len(version), schemaMigrationsVersionMaxLen)
+		}
 		if _, ok := applied[version]; ok {
 			if version > latest {
 				latest = version

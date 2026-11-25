@@ -102,6 +102,9 @@ func movementFields(movement *domain.InventoryMovement) map[string]any {
 	if movement.RelatedItemID != nil {
 		fields["relatedItemId"] = *movement.RelatedItemID
 	}
+	if movement.RelatedMovementID != nil {
+		fields["relatedMovementId"] = *movement.RelatedMovementID
+	}
 	return fields
 }
 
@@ -332,9 +335,21 @@ func (s *AdminInventoryService) returnAttempt(ctx context.Context, in domain.Ret
 		return AdminWriteResult{}, fmt.Errorf("%w: the record changed since it was loaded", domain.ErrConflict)
 	}
 	at := s.now().UTC()
+	// A lot-level return is attributed FIFO to the earliest outstanding ISSUE
+	// movement on the same lot, so the issued rows it closes leave the Issued
+	// view. A stock return against a lot with no outstanding issuance stays
+	// unattributed (RelatedMovementID = nil).
+	relatedID, err := tx.EarliestOutstandingIssue(ctx, current.ID)
+	if err != nil {
+		return AdminWriteResult{}, err
+	}
+	var related *int64
+	if relatedID > 0 {
+		related = &relatedID
+	}
 
 	if !current.DeletedFg {
-		result, err := s.returnToActive(ctx, tx, current, in, at)
+		result, err := s.returnToActive(ctx, tx, current, in, at, related)
 		if err == nil {
 			committed = true
 		}
@@ -349,22 +364,153 @@ func (s *AdminInventoryService) returnAttempt(ctx context.Context, in domain.Ret
 			"return quantity cannot exceed the issued quantity")
 	}
 	if in.Quantity == current.Quantity {
-		result, err := s.returnWholeIssued(ctx, tx, current, in, at)
+		result, err := s.returnWholeIssued(ctx, tx, current, in, at, related)
 		if err == nil {
 			committed = true
 		}
 		return result, err
 	}
-	result, err := s.returnPartialIssued(ctx, tx, current, in, at)
+	result, err := s.returnPartialIssued(ctx, tx, current, in, at, related)
 	if err == nil {
 		committed = true
 	}
 	return result, err
 }
 
+// ReturnIssuance closes part or all of one ISSUE movement. The lot-side branch
+// is selected exactly as the lot-level return selects it, but the RETURN is
+// attributed to the addressed movement rather than to the FIFO movement.
+func (s *AdminInventoryService) ReturnIssuance(ctx context.Context, in domain.ReturnIssuanceInput) (AdminWriteResult, error) {
+	if err := s.requireReady(); err != nil {
+		return AdminWriteResult{}, err
+	}
+	if err := validateActor(in.Actor); err != nil {
+		return AdminWriteResult{}, err
+	}
+	if in.MovementID <= 0 {
+		return AdminWriteResult{}, domain.ErrNotFound
+	}
+	fields := make(map[string]string)
+	if in.Quantity < 1 {
+		fields["quantity"] = "quantity must be at least 1"
+	}
+	if in.ExpectedModAt.IsZero() {
+		fields["expectedModAt"] = "expectedModAt is required"
+	}
+	in.Recipient = normalizeMovementText("recipient", in.Recipient, AdminMaxGivenToRunes, false, fields)
+	in.Note = normalizeMovementText("note", in.Note, AdminMaxNoteRunes, false, fields)
+	in.IdempotencyKey = normalizeIdempotencyKey(in.IdempotencyKey, fields)
+	if len(fields) > 0 {
+		return AdminWriteResult{}, &domain.ValidationError{Fields: fields}
+	}
+	return s.withDeadlockRetry("return", func() (AdminWriteResult, error) {
+		return s.returnIssuanceAttempt(ctx, in)
+	})
+}
+
+func (s *AdminInventoryService) returnIssuanceAttempt(ctx context.Context, in domain.ReturnIssuanceInput) (AdminWriteResult, error) {
+	tx, err := s.store.BeginAdminWrite(ctx)
+	if err != nil {
+		return AdminWriteResult{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	movement, outstanding, err := tx.LockMovementOutstanding(ctx, in.MovementID)
+	if err != nil {
+		return AdminWriteResult{}, err
+	}
+	if movement.MovementType != domain.MovementIssue {
+		return AdminWriteResult{}, domain.NewValidationError("movementId",
+			"only an issued movement can be returned")
+	}
+	if outstanding == 0 {
+		return AdminWriteResult{}, fmt.Errorf("%w: the issuance has no outstanding quantity", domain.ErrConflict)
+	}
+	if in.Quantity > outstanding {
+		return AdminWriteResult{}, domain.NewValidationError("quantity",
+			"return quantity cannot exceed the outstanding quantity")
+	}
+	current, err := tx.LockInventory(ctx, movement.GuildBankItemID)
+	if err != nil {
+		return AdminWriteResult{}, err
+	}
+	if !sameModAt(current.ModAt, in.ExpectedModAt) {
+		return AdminWriteResult{}, fmt.Errorf("%w: the record changed since it was loaded", domain.ErrConflict)
+	}
+	if strings.TrimSpace(in.Recipient) == "" {
+		in.Recipient = strings.TrimSpace(movement.Recipient)
+	}
+	at := s.now().UTC()
+	related := movement.MovementID
+	item := returnItemInputOf(in)
+	var result AdminWriteResult
+	switch {
+	case !current.DeletedFg:
+		result, err = s.returnToActive(ctx, tx, current, item, at, &related)
+	case strings.TrimSpace(current.GivenTo) != "" && in.Quantity == current.Quantity:
+		result, err = s.returnWholeIssued(ctx, tx, current, item, at, &related)
+	default:
+		// A partial return of a whole-stack issue, or any return against an
+		// administratively removed lot, lands the units in a new active lot
+		// while the source lot keeps its state (D6).
+		result, err = s.returnPartialIssued(ctx, tx, current, item, at, &related)
+	}
+	if err == nil {
+		committed = true
+	}
+	return result, err
+}
+
+// returnItemInputOf adapts the movement-targeted command to the shared lot-side
+// return branches. GuildBankItemID is unused by those branches; the lot is
+// passed explicitly.
+func returnItemInputOf(in domain.ReturnIssuanceInput) domain.ReturnItemInput {
+	return domain.ReturnItemInput{
+		Quantity:       in.Quantity,
+		Recipient:      in.Recipient,
+		Note:           in.Note,
+		IdempotencyKey: in.IdempotencyKey,
+		Actor:          in.Actor,
+		CorrelationID:  in.CorrelationID,
+		SourceIP:       in.SourceIP,
+	}
+}
+
+// IssuanceForReturn resolves one ISSUE movement into the lot record, the
+// outstanding quantity and the movement itself, for the return form.
+func (s *AdminInventoryService) IssuanceForReturn(ctx context.Context, movementID int64) (domain.InventoryMovement, domain.AdminInventoryItem, uint32, error) {
+	if err := s.requireReady(); err != nil {
+		return domain.InventoryMovement{}, domain.AdminInventoryItem{}, 0, err
+	}
+	if movementID <= 0 {
+		return domain.InventoryMovement{}, domain.AdminInventoryItem{}, 0, domain.ErrNotFound
+	}
+	movement, err := s.store.GetMovement(ctx, movementID)
+	if err != nil {
+		return domain.InventoryMovement{}, domain.AdminInventoryItem{}, 0, err
+	}
+	if movement.MovementType != domain.MovementIssue {
+		return domain.InventoryMovement{}, domain.AdminInventoryItem{}, 0, domain.ErrNotFound
+	}
+	item, err := s.store.GetAdminInventory(ctx, movement.GuildBankItemID)
+	if err != nil {
+		return domain.InventoryMovement{}, domain.AdminInventoryItem{}, 0, err
+	}
+	outstanding, err := s.store.GetMovementOutstanding(ctx, movementID)
+	if err != nil {
+		return domain.InventoryMovement{}, domain.AdminInventoryItem{}, 0, err
+	}
+	return movement, item, outstanding, nil
+}
+
 // returnToActive increases an active lot's quantity and records a RETURN.
 func (s *AdminInventoryService) returnToActive(ctx context.Context, tx AdminWriteTx,
-	current domain.AdminInventoryItem, in domain.ReturnItemInput, at time.Time) (AdminWriteResult, error) {
+	current domain.AdminInventoryItem, in domain.ReturnItemInput, at time.Time, related *int64) (AdminWriteResult, error) {
 	if strings.TrimSpace(current.GivenTo) != "" {
 		return AdminWriteResult{}, fmt.Errorf("%w: an active row cannot carry a recipient", domain.ErrConflict)
 	}
@@ -390,6 +536,7 @@ func (s *AdminInventoryService) returnToActive(ctx context.Context, tx AdminWrit
 	movement := newMovement(current, domain.MovementReturn, in.Quantity, quantity,
 		in.Recipient, "", current.SourceLocation, in.Note, in.Actor, at,
 		in.CorrelationID, in.IdempotencyKey)
+	movement.RelatedMovementID = related
 	movementID, err := tx.InsertMovement(ctx, movement)
 	if err != nil {
 		return AdminWriteResult{}, err
@@ -416,7 +563,7 @@ func (s *AdminInventoryService) returnToActive(ctx context.Context, tx AdminWrit
 
 // returnWholeIssued restores a whole-issued row and clears GivenTo (OD-02).
 func (s *AdminInventoryService) returnWholeIssued(ctx context.Context, tx AdminWriteTx,
-	current domain.AdminInventoryItem, in domain.ReturnItemInput, at time.Time) (AdminWriteResult, error) {
+	current domain.AdminInventoryItem, in domain.ReturnItemInput, at time.Time, related *int64) (AdminWriteResult, error) {
 	if err := tx.SetDeleted(ctx, current.ID, false, at, in.Actor); err != nil {
 		return AdminWriteResult{}, err
 	}
@@ -435,6 +582,7 @@ func (s *AdminInventoryService) returnWholeIssued(ctx context.Context, tx AdminW
 	movement := newMovement(current, domain.MovementReturn, in.Quantity, in.Quantity,
 		in.Recipient, "", current.SourceLocation, in.Note, in.Actor, at,
 		in.CorrelationID, in.IdempotencyKey)
+	movement.RelatedMovementID = related
 	movementID, err := tx.InsertMovement(ctx, movement)
 	if err != nil {
 		return AdminWriteResult{}, err
@@ -463,7 +611,7 @@ func (s *AdminInventoryService) returnWholeIssued(ctx context.Context, tx AdminW
 // returnPartialIssued creates a new active lot for the returned quantity and
 // leaves the issued row as history. The movement references the issued row.
 func (s *AdminInventoryService) returnPartialIssued(ctx context.Context, tx AdminWriteTx,
-	current domain.AdminInventoryItem, in domain.ReturnItemInput, at time.Time) (AdminWriteResult, error) {
+	current domain.AdminInventoryItem, in domain.ReturnItemInput, at time.Time, related *int64) (AdminWriteResult, error) {
 	actorID := in.Actor.UserID
 	row := domain.GuildBankItem{
 		ItemType: current.ItemType, EQUID: current.EQUID,
@@ -486,8 +634,9 @@ func (s *AdminInventoryService) returnPartialIssued(ctx context.Context, tx Admi
 	movement := newMovement(item, domain.MovementReturn, in.Quantity, in.Quantity,
 		in.Recipient, "", row.SourceLocation, in.Note, in.Actor, at,
 		in.CorrelationID, in.IdempotencyKey)
-	related := current.ID
-	movement.RelatedItemID = &related
+	relatedItem := current.ID
+	movement.RelatedItemID = &relatedItem
+	movement.RelatedMovementID = related
 	movementID, err := tx.InsertMovement(ctx, movement)
 	if err != nil {
 		return AdminWriteResult{}, err

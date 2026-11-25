@@ -20,7 +20,7 @@ const (
 // no update or delete statement exists in this package.
 const movementColumns = `MovementID, GuildBankItemID, EQUID, MovementType, Quantity,
 	Recipient, ActorUserID, ActorName, OccurredAt, FromLocation, ToLocation,
-	RemainingQuantity, RelatedItemID, Note, CorrelationID, IdempotencyKey`
+	RemainingQuantity, RelatedItemID, RelatedMovementID, Note, CorrelationID, IdempotencyKey`
 
 // ListMovements reads one bounded page from one read-only snapshot.
 func (s *Store) ListMovements(ctx context.Context, filter domain.MovementFilter) (domain.MovementPage, error) {
@@ -85,6 +85,92 @@ func (s *Store) GetMovement(ctx context.Context, movementID int64) (domain.Inven
 	return scanMovement(row)
 }
 
+// GetMovementOutstanding returns the outstanding quantity of one ISSUE
+// movement: its issued quantity minus every attributed RETURN. A movement that
+// is not an ISSUE, or an ISSUE that is fully returned, returns 0.
+func (s *Store) GetMovementOutstanding(ctx context.Context, movementID int64) (uint32, error) {
+	if movementID <= 0 {
+		return 0, domain.ErrNotFound
+	}
+	var movementType string
+	var quantity int64
+	var returned sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT m.MovementType, m.Quantity, (
+			SELECT SUM(r.Quantity) FROM InventoryMovement r
+			WHERE r.MovementType = 'RETURN' AND r.RelatedMovementID = m.MovementID
+		) FROM InventoryMovement m WHERE m.MovementID = ?`, movementID).
+		Scan(&movementType, &quantity, &returned); err != nil {
+		if errorsIsNoRows(err) {
+			return 0, domain.ErrNotFound
+		}
+		return 0, mapStoreError("read movement outstanding", err)
+	}
+	return outstandingOf(movementType, quantity, returned), nil
+}
+
+// outstandingOf clamps the issued-minus-returned arithmetic to a uint32 and
+// reports 0 for anything that is not an outstanding ISSUE.
+func outstandingOf(movementType string, quantity int64, returned sql.NullInt64) uint32 {
+	if domain.MovementType(movementType) != domain.MovementIssue || quantity < 1 {
+		return 0
+	}
+	outstanding := quantity
+	if returned.Valid {
+		outstanding -= returned.Int64
+	}
+	if outstanding <= 0 {
+		return 0
+	}
+	return uint32(outstanding)
+}
+
+// LockMovementOutstanding locks one movement row and returns it with its
+// outstanding quantity, both read inside the caller's write transaction.
+func (c *adminWriteTx) LockMovementOutstanding(ctx context.Context, movementID int64) (domain.InventoryMovement, uint32, error) {
+	row := c.tx.QueryRowContext(ctx,
+		`SELECT `+movementColumns+` FROM InventoryMovement WHERE MovementID = ? FOR UPDATE`, movementID)
+	movement, err := scanMovement(row)
+	if err != nil {
+		return domain.InventoryMovement{}, 0, err
+	}
+	var quantity int64
+	var returned sql.NullInt64
+	if err := c.tx.QueryRowContext(ctx, `
+		SELECT m.Quantity, (
+			SELECT SUM(r.Quantity) FROM InventoryMovement r
+			WHERE r.MovementType = 'RETURN' AND r.RelatedMovementID = m.MovementID
+		) FROM InventoryMovement m WHERE m.MovementID = ?`, movementID).
+		Scan(&quantity, &returned); err != nil {
+		return domain.InventoryMovement{}, 0, mapStoreError("read movement outstanding", err)
+	}
+	return movement, outstandingOf(string(movement.MovementType), quantity, returned), nil
+}
+
+// EarliestOutstandingIssue returns the earliest ISSUE movement on the lot whose
+// outstanding quantity is still greater than zero, or 0 when the lot has no
+// outstanding issuance. It is the FIFO attribution used by the lot-level return.
+func (c *adminWriteTx) EarliestOutstandingIssue(ctx context.Context, lotID int64) (int64, error) {
+	var movementID sql.NullInt64
+	if err := c.tx.QueryRowContext(ctx, `
+		SELECT m.MovementID FROM InventoryMovement m
+		WHERE m.MovementType = 'ISSUE' AND m.GuildBankItemID = ?
+		  AND m.Quantity > COALESCE((
+			SELECT SUM(r.Quantity) FROM InventoryMovement r
+			WHERE r.MovementType = 'RETURN' AND r.RelatedMovementID = m.MovementID
+		  ), 0)
+		ORDER BY m.MovementID ASC LIMIT 1 FOR UPDATE`, lotID).Scan(&movementID); err != nil {
+		if errorsIsNoRows(err) {
+			return 0, nil
+		}
+		return 0, mapStoreError("find outstanding issue", err)
+	}
+	if !movementID.Valid {
+		return 0, nil
+	}
+	return movementID.Int64, nil
+}
+
 // InsertMovement appends one ledger row inside the caller's admin write
 // transaction. A duplicate non-null IdempotencyKey maps to ErrConflict.
 func (c *adminWriteTx) InsertMovement(ctx context.Context, movement domain.InventoryMovement) (int64, error) {
@@ -94,14 +180,15 @@ func (c *adminWriteTx) InsertMovement(ctx context.Context, movement domain.Inven
 	result, err := c.tx.ExecContext(ctx, `INSERT INTO InventoryMovement
 		(GuildBankItemID, EQUID, MovementType, Quantity, Recipient, ActorUserID,
 		 ActorName, OccurredAt, FromLocation, ToLocation, RemainingQuantity,
-		 RelatedItemID, Note, CorrelationID, IdempotencyKey)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 RelatedItemID, RelatedMovementID, Note, CorrelationID, IdempotencyKey)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		movement.GuildBankItemID, movement.EQUID, string(movement.MovementType),
 		movement.Quantity, nullableString(movement.Recipient),
 		nullableInt64Ptr(movement.ActorUserID), movement.ActorUserName,
 		movement.OccurredAt.UTC(), nullableString(movement.FromLocation),
 		nullableString(movement.ToLocation), movement.RemainingQuantity,
-		nullableInt64Ptr(movement.RelatedItemID), nullableString(movement.Note),
+		nullableInt64Ptr(movement.RelatedItemID), nullableInt64Ptr(movement.RelatedMovementID),
+		nullableString(movement.Note),
 		nullableString(movement.CorrelationID), nullableString(movement.IdempotencyKey))
 	if err != nil {
 		return 0, mapStoreError("insert inventory movement", err)
@@ -214,6 +301,7 @@ func scanMovement(scanner interface{ Scan(...any) error }) (domain.InventoryMove
 		fromLocation   sql.NullString
 		toLocation     sql.NullString
 		relatedItemID  sql.NullInt64
+		relatedMoveID  sql.NullInt64
 		note           sql.NullString
 		correlationID  sql.NullString
 		idempotencyKey sql.NullString
@@ -221,7 +309,7 @@ func scanMovement(scanner interface{ Scan(...any) error }) (domain.InventoryMove
 	if err := scanner.Scan(&movement.MovementID, &movement.GuildBankItemID, &equid,
 		&movementType, &quantity, &recipient, &actorUserID, &movement.ActorUserName,
 		&movement.OccurredAt, &fromLocation, &toLocation, &remaining, &relatedItemID,
-		&note, &correlationID, &idempotencyKey); err != nil {
+		&relatedMoveID, &note, &correlationID, &idempotencyKey); err != nil {
 		if errorsIsNoRows(err) {
 			return domain.InventoryMovement{}, domain.ErrNotFound
 		}
@@ -252,6 +340,10 @@ func scanMovement(scanner interface{ Scan(...any) error }) (domain.InventoryMove
 	if relatedItemID.Valid {
 		value := relatedItemID.Int64
 		movement.RelatedItemID = &value
+	}
+	if relatedMoveID.Valid {
+		value := relatedMoveID.Int64
+		movement.RelatedMovementID = &value
 	}
 	return movement, nil
 }

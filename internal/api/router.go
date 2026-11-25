@@ -147,9 +147,13 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	admin.GET("/admin/inventory/:id", adminHandler.detailPage)
 	admin.GET("/admin/inventory/:id/edit", adminHandler.editPage)
 	admin.GET("/admin/inventory/:id/remove", adminHandler.removePage)
+	admin.GET("/admin/inventory/:id/restore", adminHandler.restorePage)
 	admin.GET("/admin/inventory/:id/issue", adminHandler.issuePage)
 	admin.GET("/admin/inventory/:id/return", adminHandler.returnPage)
 	admin.GET("/admin/inventory/:id/movements", adminHandler.movementsPage)
+	// Movement-targeted return (issued-row projection). The admin group already
+	// enforces RequireAuth -> CSRF -> RequireAdmin.
+	admin.GET("/admin/inventory/movements/:movementID/return", adminHandler.returnIssuancePage)
 
 	admin.POST("/admin/inventory", adminHandler.createForm)
 	admin.POST("/admin/inventory/bulk-remove", adminHandler.bulkRemovePreview)
@@ -159,6 +163,7 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	admin.POST("/admin/inventory/:id/restore", adminHandler.restoreForm)
 	admin.POST("/admin/inventory/:id/issue", adminHandler.issueForm)
 	admin.POST("/admin/inventory/:id/return", adminHandler.returnForm)
+	admin.POST("/admin/inventory/movements/:movementID/return", adminHandler.returnIssuanceForm)
 
 	admin.GET("/admin/audit", adminHandler.auditPage)
 	admin.GET("/api/v1/admin/items", adminHandler.list)

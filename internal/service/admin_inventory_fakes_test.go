@@ -113,6 +113,65 @@ func (f *fakeAdmin) GetMovement(ctx context.Context, movementID int64) (domain.I
 	return domain.InventoryMovement{}, domain.ErrNotFound
 }
 
+// movementOutstanding mirrors the repository arithmetic for the fake ledger.
+func (f *fakeAdmin) movementOutstanding(movementID int64) uint32 {
+	var issue *domain.InventoryMovement
+	for i := range f.movements {
+		if f.movements[i].MovementID == movementID {
+			issue = &f.movements[i]
+			break
+		}
+	}
+	if issue == nil || issue.MovementType != domain.MovementIssue {
+		return 0
+	}
+	outstanding := int64(issue.Quantity)
+	for _, movement := range f.movements {
+		if movement.MovementType == domain.MovementReturn && movement.RelatedMovementID != nil &&
+			*movement.RelatedMovementID == movementID {
+			outstanding -= int64(movement.Quantity)
+		}
+	}
+	if outstanding <= 0 {
+		return 0
+	}
+	return uint32(outstanding)
+}
+
+func (f *fakeAdmin) GetMovementOutstanding(ctx context.Context, movementID int64) (uint32, error) {
+	for _, movement := range f.movements {
+		if movement.MovementID == movementID {
+			return f.movementOutstanding(movementID), nil
+		}
+	}
+	return 0, domain.ErrNotFound
+}
+
+func (f *fakeAdmin) LockMovementOutstanding(ctx context.Context, movementID int64) (domain.InventoryMovement, uint32, error) {
+	for _, movement := range f.movements {
+		if movement.MovementID == movementID {
+			return movement, f.movementOutstanding(movementID), nil
+		}
+	}
+	return domain.InventoryMovement{}, 0, domain.ErrNotFound
+}
+
+func (f *fakeAdmin) EarliestOutstandingIssue(ctx context.Context, lotID int64) (int64, error) {
+	best := int64(0)
+	for _, movement := range f.movements {
+		if movement.MovementType != domain.MovementIssue || movement.GuildBankItemID != lotID {
+			continue
+		}
+		if f.movementOutstanding(movement.MovementID) == 0 {
+			continue
+		}
+		if best == 0 || movement.MovementID < best {
+			best = movement.MovementID
+		}
+	}
+	return best, nil
+}
+
 func (f *fakeAdmin) LookupStackability(ctx context.Context, equids []uint64) (map[uint64]domain.Stackability, error) {
 	result := make(map[uint64]domain.Stackability, len(equids))
 	for _, equid := range equids {

@@ -125,19 +125,42 @@ type adminItemView struct {
 	LocationGroupLabel string
 	GivenTo            string
 	Deleted            bool
-	DateAddedISO       string
-	DateAddedText      string
-	DateOpenISO        string
-	DateOpenText       string
-	DateBazaarISO      string
-	DateBazaarText     string
-	Availability       domain.AvailabilityState
-	AvailabilityLabel  string
-	StatusLabel        string
-	StatusClass        string
-	ModAtValue         string
-	ModAtText          string
-	ModBy              string
+	// Restorable reports whether the admin list may offer the Restore action:
+	// the row is administratively removed (DeletedFg = true with no recipient)
+	// and was not absorbed by the item-consolidation command. It is presentation
+	// only; the service re-checks the same rules under lock.
+	Restorable        bool
+	DateAddedISO      string
+	DateAddedText     string
+	DateOpenISO       string
+	DateOpenText      string
+	DateBazaarISO     string
+	DateBazaarText    string
+	Availability      domain.AvailabilityState
+	AvailabilityLabel string
+	StatusLabel       string
+	StatusClass       string
+	// IssuedURL links an issued row to the recipient's issued queue. It is empty
+	// for active and administratively removed rows.
+	IssuedURL  string
+	ModAtValue string
+	ModAtText  string
+	ModBy      string
+	// MovementBacked marks a movement-derived issued row. It is true only for
+	// the Issued projection and the issued half of the All tab; lot-derived
+	// rows leave it false so the existing action and selection branches apply.
+	MovementBacked bool
+	MovementID     int64
+	// RowKey is unique across both sources ("l:<LotID>" vs "m:<MovementID>")
+	// and anchors the row in the shared page.
+	RowKey         string
+	IssuedQuantity uint32
+	IssuedAtISO    string
+	IssuedAtText   string
+	IssuedBy       string
+	// ReturnURL is the movement-targeted return link. It is empty for
+	// lot-derived rows, whose Return (if any) uses the lot route.
+	ReturnURL string
 }
 
 type adminFilterView struct {
@@ -159,6 +182,15 @@ type adminLocationOption struct {
 	Selected bool
 }
 
+// adminStatusTab is one lifecycle-state shortcut on the admin list. The URL is
+// the same filtered view with the tab's status applied and the page reset to 1.
+type adminStatusTab struct {
+	Value   string
+	Label   string
+	URL     string
+	Current bool
+}
+
 type adminListPageData struct {
 	pageData
 	Ready          bool
@@ -168,16 +200,22 @@ type adminListPageData struct {
 	ItemTypeOpts   []inventorySelectOption
 	MetadataOpts   []inventorySelectOption
 	StatusOpts     []inventorySelectOption
+	StatusTabs     []adminStatusTab
 	SortOpts       []inventorySortOption
 	PageSizeOpts   []inventorySelectOption
-	Total          int
-	Page           int
-	PageSize       int
-	TotalPages     int
-	Empty          bool
-	BeyondLast     bool
-	Notice         string
-	ClearURL       string
+	// IssuedHint is set when the officer filtered Active by recipient: active
+	// rows never carry a recipient, so the page explains the empty result and
+	// links to the same recipient's issued queue.
+	IssuedHint    bool
+	IssuedHintURL string
+	Total         int
+	Page          int
+	PageSize      int
+	TotalPages    int
+	Empty         bool
+	BeyondLast    bool
+	Notice        string
+	ClearURL      string
 	// SelfURL is the current list URL with every active filter, carried through
 	// the row actions so an officer returns to the same filtered view.
 	SelfURL     string
@@ -245,6 +283,16 @@ type adminRemovePageData struct {
 	ReturnTo string
 }
 
+// adminRestorePageData backs the Restore confirmation page. It mirrors the
+// Remove page so the officer sees the record and the reversible effect before
+// the POST reaches the existing restore workflow.
+type adminRestorePageData struct {
+	pageData
+	Item adminItemView
+	// ReturnTo is the sanitized inventory-list URL the officer came from.
+	ReturnTo string
+}
+
 // adminMovementView is the presentation of one ledger row. It deliberately
 // omits the idempotency key and source address: the movement history is a
 // business record, not a transport log.
@@ -286,6 +334,9 @@ type adminMovementFormPageData struct {
 	Form             adminMovementFormValues
 	Mode             string
 	PartialSupported bool
+	// FormAction is the POST target. It is the lot route for a lot-level form
+	// and the movement route for a movement-derived issued row.
+	FormAction string
 	// ReturnTo is the sanitized inventory-list URL the officer came from.
 	ReturnTo string
 }
@@ -305,18 +356,23 @@ type adminHistoryBannerView struct {
 	ActionLabel string
 	// ActionURL is the target of the banner action. When ActionForm is true the
 	// action is a POST form (restore); otherwise it is a GET link.
-	ActionURL  string
+	ActionURL string
+	// ReturnTo is the sanitized inventory-list URL carried through the banner
+	// action so the officer lands back on the same filtered view.
+	ReturnTo   string
 	ActionForm bool
 }
 
 type adminMovementHistoryPageData struct {
 	pageData
-	Ready      bool
-	Item       adminItemView
-	Movements  []adminMovementView
-	Filter     adminMovementFilterView
-	TypeOpts   []inventorySelectOption
-	Banner     adminHistoryBannerView
+	Ready     bool
+	Item      adminItemView
+	Movements []adminMovementView
+	Filter    adminMovementFilterView
+	TypeOpts  []inventorySelectOption
+	Banner    adminHistoryBannerView
+	// ReturnTo is the sanitized inventory-list URL the officer came from.
+	ReturnTo   string
 	Total      int
 	Page       int
 	PageSize   int
@@ -434,6 +490,10 @@ func (v *views) adminInventoryDetail(c *gin.Context, status int, data adminDetai
 
 func (v *views) adminRemove(c *gin.Context, status int, data adminRemovePageData) {
 	v.render(c, status, "admin_remove.html", data)
+}
+
+func (v *views) adminRestore(c *gin.Context, status int, data adminRestorePageData) {
+	v.render(c, status, "admin_restore.html", data)
 }
 
 func (v *views) adminBulkRemove(c *gin.Context, status int, data adminBulkRemovePageData) {

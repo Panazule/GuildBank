@@ -71,6 +71,7 @@ type AdminStore interface {
 	SumActiveQuantity(ctx context.Context, filter domain.AdminInventoryFilter) (uint64, error)
 	ListMovements(ctx context.Context, filter domain.MovementFilter) (domain.MovementPage, error)
 	GetMovement(ctx context.Context, movementID int64) (domain.InventoryMovement, error)
+	GetMovementOutstanding(ctx context.Context, movementID int64) (uint32, error)
 	LookupStackability(ctx context.Context, equids []uint64) (map[uint64]domain.Stackability, error)
 	BeginAdminWrite(ctx context.Context) (AdminWriteTx, error)
 	ListAudit(ctx context.Context, filter domain.AuditFilter) (domain.AuditPage, error)
@@ -87,6 +88,13 @@ type AdminWriteTx interface {
 	UpdateInventory(ctx context.Context, in domain.AdminUpdateRow) error
 	SetDeleted(ctx context.Context, id int64, deleted bool, at time.Time, actor domain.Actor) error
 	InsertMovement(ctx context.Context, movement domain.InventoryMovement) (int64, error)
+	// LockMovementOutstanding locks one ISSUE movement and returns it with its
+	// outstanding quantity, so a movement-targeted return validates against the
+	// same snapshot it will decrement.
+	LockMovementOutstanding(ctx context.Context, movementID int64) (domain.InventoryMovement, uint32, error)
+	// EarliestOutstandingIssue attributes a lot-level return to the earliest
+	// outstanding ISSUE movement on the lot (FIFO), or 0 when none exists.
+	EarliestOutstandingIssue(ctx context.Context, lotID int64) (int64, error)
 	InsertAudit(ctx context.Context, entry domain.AuditEntry) error
 	Commit() error
 	Rollback() error
@@ -222,9 +230,9 @@ func NormalizeAdminInventoryFilter(filter domain.AdminInventoryFilter) (domain.A
 	switch filter.Status {
 	case "":
 		filter.Status = domain.AdminStatusActive
-	case domain.AdminStatusActive, domain.AdminStatusRemoved, domain.AdminStatusAll:
+	case domain.AdminStatusActive, domain.AdminStatusIssued, domain.AdminStatusRemoved, domain.AdminStatusAll:
 	default:
-		fields["status"] = "status must be active, removed or all"
+		fields["status"] = "status must be active, issued, removed or all"
 	}
 
 	if filter.Sort == "" {

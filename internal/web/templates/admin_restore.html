@@ -1,0 +1,36 @@
+{{define "admin_restore.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-card">
+    <p class="eyebrow">Administration</p>
+    <h1>Restore record</h1>
+
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <p>Restoring this record clears its removal and returns it to the active inventory. The change is recorded in the record's movement history.</p>
+
+    <dl class="detail-list">
+      <div><dt>Inventory ID</dt><dd class="mono">{{.Item.ID}}</dd></div>
+      <div><dt>EQUID</dt><dd class="mono">{{.Item.EQUID}}</dd></div>
+      <div><dt>Name</dt><dd>{{.Item.Name}}</dd></div>
+      <div><dt>Type</dt><dd>{{.Item.ItemType}}</dd></div>
+      <div><dt>Quantity</dt><dd>{{.Item.Quantity}}</dd></div>
+      <div><dt>Source location</dt><dd>{{if .Item.SourceLocation}}{{.Item.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</dd></div>
+      <div><dt>Recipient</dt><dd>{{if .Item.GivenTo}}{{.Item.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</dd></div>
+    </dl>
+
+    <form method="post" action="/admin/inventory/{{.Item.ID}}/restore" class="wizard-actions">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="expectedModAt" value="{{.Item.ModAtValue}}">
+      <input type="hidden" name="returnTo" value="{{.ReturnTo}}">
+      <a class="link" href="{{if .ReturnTo}}{{.ReturnTo}}{{else}}/admin/inventory/{{.Item.ID}}{{end}}">Cancel</a>
+      <button type="submit" class="primary">Restore record</button>
+    </form>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

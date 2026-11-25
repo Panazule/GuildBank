@@ -104,6 +104,39 @@ func (f *movementFakeStore) GetMovement(ctx context.Context, movementID int64) (
 	return domain.InventoryMovement{}, domain.ErrNotFound
 }
 
+func (f *movementFakeStore) movementOutstanding(movementID int64) uint32 {
+	var issue *domain.InventoryMovement
+	for i := range f.movements {
+		if f.movements[i].MovementID == movementID {
+			issue = &f.movements[i]
+			break
+		}
+	}
+	if issue == nil || issue.MovementType != domain.MovementIssue {
+		return 0
+	}
+	outstanding := int64(issue.Quantity)
+	for _, movement := range f.movements {
+		if movement.MovementType == domain.MovementReturn && movement.RelatedMovementID != nil &&
+			*movement.RelatedMovementID == movementID {
+			outstanding -= int64(movement.Quantity)
+		}
+	}
+	if outstanding <= 0 {
+		return 0
+	}
+	return uint32(outstanding)
+}
+
+func (f *movementFakeStore) GetMovementOutstanding(ctx context.Context, movementID int64) (uint32, error) {
+	for _, movement := range f.movements {
+		if movement.MovementID == movementID {
+			return f.movementOutstanding(movementID), nil
+		}
+	}
+	return 0, domain.ErrNotFound
+}
+
 func (f *movementFakeStore) LookupStackability(ctx context.Context, equids []uint64) (map[uint64]domain.Stackability, error) {
 	out := make(map[uint64]domain.Stackability, len(equids))
 	for _, equid := range equids {
@@ -223,6 +256,31 @@ func (t *movementFakeTx) InsertMovement(ctx context.Context, movement domain.Inv
 func (t *movementFakeTx) InsertAudit(ctx context.Context, entry domain.AuditEntry) error {
 	t.store.audits = append(t.store.audits, entry)
 	return nil
+}
+
+func (t *movementFakeTx) LockMovementOutstanding(ctx context.Context, movementID int64) (domain.InventoryMovement, uint32, error) {
+	for _, movement := range t.store.movements {
+		if movement.MovementID == movementID {
+			return movement, t.store.movementOutstanding(movementID), nil
+		}
+	}
+	return domain.InventoryMovement{}, 0, domain.ErrNotFound
+}
+
+func (t *movementFakeTx) EarliestOutstandingIssue(ctx context.Context, lotID int64) (int64, error) {
+	best := int64(0)
+	for _, movement := range t.store.movements {
+		if movement.MovementType != domain.MovementIssue || movement.GuildBankItemID != lotID {
+			continue
+		}
+		if t.store.movementOutstanding(movement.MovementID) == 0 {
+			continue
+		}
+		if best == 0 || movement.MovementID < best {
+			best = movement.MovementID
+		}
+	}
+	return best, nil
 }
 
 func (t *movementFakeTx) Commit() error   { return nil }

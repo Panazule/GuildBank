@@ -132,7 +132,7 @@ func TestOfficerMovementTemplatesExistAndCarryCSRF(t *testing.T) {
 
 	ret := readEmbedded(t, "templates/admin_inventory_return.html")
 	for _, want := range []string{
-		`name="csrf_token"`, `name="idempotencyKey"`, `action="/admin/inventory/{{.Item.ID}}/return"`,
+		`name="csrf_token"`, `name="idempotencyKey"`, `action="{{.FormAction}}"`,
 	} {
 		if !strings.Contains(ret, want) {
 			t.Fatalf("return form is missing %q", want)
@@ -179,6 +179,8 @@ func TestInventoryCSSUIAmendments(t *testing.T) {
 		".admin-filter-grid",
 		"repeat(auto-fit, minmax(11rem, 1fr))",
 		".external-link",
+		".status-tabs",
+		".status-tab.current",
 		"white-space: nowrap",
 	} {
 		if !strings.Contains(css, want) {

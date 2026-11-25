@@ -33,6 +33,26 @@ func TestNormalizeAdminInventoryFilter(t *testing.T) {
 	}
 }
 
+// TestNormalizeAdminInventoryFilterAcceptsIssued locks the mutually exclusive
+// lifecycle contract: active, issued, removed and all are the only statuses.
+func TestNormalizeAdminInventoryFilterAcceptsIssued(t *testing.T) {
+	for _, status := range []domain.AdminInventoryStatus{
+		domain.AdminStatusActive, domain.AdminStatusIssued,
+		domain.AdminStatusRemoved, domain.AdminStatusAll,
+	} {
+		got, err := NormalizeAdminInventoryFilter(domain.AdminInventoryFilter{Status: status, Page: 1, PageSize: 50})
+		if err != nil {
+			t.Fatalf("status %q: %v", status, err)
+		}
+		if got.Status != status {
+			t.Fatalf("status %q normalized to %q", status, got.Status)
+		}
+	}
+	if _, err := NormalizeAdminInventoryFilter(domain.AdminInventoryFilter{Status: "issued ", Page: 1, PageSize: 50}); err == nil {
+		t.Fatal("an unknown status must be rejected")
+	}
+}
+
 func TestNormalizeAuditFilter(t *testing.T) {
 	from := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)

@@ -101,7 +101,7 @@ func TestAdminListRendersIssuedBadgeAndContextLinks(t *testing.T) {
 	}
 	body := buf.String()
 	for _, want := range []string{
-		`<span class="status-badge status-Issued">Issued</span>`,
+		`<a class="status-badge status-Issued" href="/admin/inventory?givenTo=Joe&amp;status=issued">Issued</a>`,
 		`returnTo=%2Fadmin%2Finventory%3Fq%3Dant`,
 		`name="returnTo" value="/admin/inventory?q=ant&amp;status=all"`,
 	} {

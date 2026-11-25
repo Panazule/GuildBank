@@ -14,7 +14,7 @@
 
     <p>
       <span class="availability-badge availability-{{.Item.Availability}}">{{.Item.AvailabilityLabel}}</span>
-      <span class="status-badge {{.Item.StatusClass}}">{{.Item.StatusLabel}}</span>
+      {{if .Item.IssuedURL}}<a class="status-badge {{.Item.StatusClass}}" href="{{.Item.IssuedURL}}">{{.Item.StatusLabel}}</a>{{else}}<span class="status-badge {{.Item.StatusClass}}">{{.Item.StatusLabel}}</span>{{end}}
       {{if .Item.MetadataMissing}}<span class="warning-badge">Metadata missing</span>{{end}}
     </p>
 
@@ -24,7 +24,7 @@
       <div><dt>Races</dt><dd>{{.Item.RaceText}}</dd></div>
       <div><dt>Source location</dt><dd>{{if .Item.SourceLocation}}{{.Item.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</dd></div>
       <div><dt>Location group</dt><dd><span class="group-badge">{{.Item.LocationGroupLabel}}</span></dd></div>
-      <div><dt>Recipient</dt><dd>{{if .Item.GivenTo}}{{.Item.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</dd></div>
+      <div><dt>Recipient</dt><dd>{{if .Item.IssuedURL}}<a href="{{.Item.IssuedURL}}">{{.Item.GivenTo}}</a>{{else}}{{if .Item.GivenTo}}{{.Item.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}{{end}}</dd></div>
       <div><dt>Date added</dt><dd><time datetime="{{.Item.DateAddedISO}}">{{.Item.DateAddedText}}</time></dd></div>
       <div><dt>Open to personas</dt><dd><time datetime="{{.Item.DateOpenISO}}">{{.Item.DateOpenText}}</time></dd></div>
       <div><dt>Open to bazaar</dt><dd><time datetime="{{.Item.DateBazaarISO}}">{{.Item.DateBazaarText}}</time></dd></div>
@@ -39,14 +39,16 @@
         <a class="link" href="/admin/inventory/{{.Item.ID}}/remove{{if .ReturnTo}}?returnTo={{.ReturnTo | urlquery}}{{end}}">Remove record</a>
       {{else}}
         {{if .Item.GivenTo}}<a class="link primary" href="/admin/inventory/{{.Item.ID}}/return{{if .ReturnTo}}?returnTo={{.ReturnTo | urlquery}}{{end}}">Return</a>{{end}}
+        {{if .Item.Restorable}}
         <form method="post" action="/admin/inventory/{{.Item.ID}}/restore" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{.CSRF}}">
           <input type="hidden" name="expectedModAt" value="{{.Item.ModAtValue}}">
           {{if .ReturnTo}}<input type="hidden" name="returnTo" value="{{.ReturnTo}}">{{end}}
           <button type="submit" class="primary">Restore record</button>
         </form>
+        {{end}}
       {{end}}
-      <a class="link" href="/admin/inventory/{{.Item.ID}}/movements">Movement history</a>
+      <a class="link" href="/admin/inventory/{{.Item.ID}}/movements{{if .ReturnTo}}?returnTo={{.ReturnTo | urlquery}}{{end}}">Movement history</a>
     </div>
 
     <h2>Recent history</h2>

@@ -2,18 +2,22 @@ package domain
 
 import "time"
 
-// AdminInventoryStatus is the soft-delete filter on the administrative list.
+// AdminInventoryStatus is the lifecycle filter on the administrative list. The
+// values are mutually exclusive: a row is either active (DeletedFg=0), issued
+// (DeletedFg=1 with a recipient) or removed (DeletedFg=1 without a recipient).
+// "all" is the union of the three and carries no predicate.
 type AdminInventoryStatus string
 
 const (
 	AdminStatusActive  AdminInventoryStatus = "active"
+	AdminStatusIssued  AdminInventoryStatus = "issued"
 	AdminStatusRemoved AdminInventoryStatus = "removed"
 	AdminStatusAll     AdminInventoryStatus = "all"
 )
 
 // AdminInventoryStatuses is the canonical allowlist for API/UI validation.
 var AdminInventoryStatuses = []AdminInventoryStatus{
-	AdminStatusActive, AdminStatusRemoved, AdminStatusAll,
+	AdminStatusActive, AdminStatusIssued, AdminStatusRemoved, AdminStatusAll,
 }
 
 // AdminInventorySort is the administrative order allowlist. No caller-supplied
@@ -33,6 +37,8 @@ const (
 	AdminSortDateOpenDesc   AdminInventorySort = "date_open_desc"
 	AdminSortDateBazaar     AdminInventorySort = "date_bazaar"
 	AdminSortDateBazaarDesc AdminInventorySort = "date_bazaar_desc"
+	AdminSortRecipient      AdminInventorySort = "recipient"
+	AdminSortRecipientDesc  AdminInventorySort = "recipient_desc"
 )
 
 // AdminInventorySorts is the canonical, ordered sort allowlist.
@@ -49,6 +55,8 @@ var AdminInventorySorts = []AdminInventorySort{
 	AdminSortDateOpenDesc,
 	AdminSortDateBazaar,
 	AdminSortDateBazaarDesc,
+	AdminSortRecipient,
+	AdminSortRecipientDesc,
 }
 
 // Valid reports whether the sort is one of the approved admin values.
@@ -107,6 +115,14 @@ type AdminInventoryItem struct {
 	LocationSort      string
 	GivenTo           string
 	DeletedFg         bool
+	// MovementID is set on a movement-derived issued row (the ISSUE movement it
+	// represents) and is 0 on a lot-derived row. IssuedQuantity, IssuedAt and
+	// IssuedBy describe that issuance; Quantity carries the outstanding units so
+	// the shared Quantity cell renders correctly.
+	MovementID     int64
+	IssuedQuantity uint32
+	IssuedAt       time.Time
+	IssuedBy       string
 	// ConsolidatedInto is set on a row absorbed by the item-consolidation
 	// maintenance command. It names the surviving row and blocks restore.
 	ConsolidatedInto *int64

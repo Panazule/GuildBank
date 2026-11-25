@@ -87,6 +87,10 @@ type InventoryMovement struct {
 	ToLocation        string
 	RemainingQuantity uint32
 	RelatedItemID     *int64
+	// RelatedMovementID attributes a RETURN to the specific ISSUE movement it
+	// closes. It is nil on ISSUE rows and on returns that have no issuance
+	// behind them (a stock return against an active lot).
+	RelatedMovementID *int64
 	Note              string
 	CorrelationID     string
 	IdempotencyKey    string
@@ -121,6 +125,9 @@ func (m InventoryMovement) Validate() error {
 	}
 	if m.RelatedItemID != nil && *m.RelatedItemID <= 0 {
 		fields["relatedItemId"] = "relatedItemId must be a positive integer when supplied"
+	}
+	if m.RelatedMovementID != nil && *m.RelatedMovementID <= 0 {
+		fields["relatedMovementId"] = "relatedMovementId must be a positive integer when supplied"
 	}
 	if len([]rune(m.Recipient)) > 128 {
 		fields["recipient"] = "recipient must be at most 128 characters"
@@ -199,6 +206,21 @@ type ReturnItemInput struct {
 	Actor           Actor
 	CorrelationID   string
 	SourceIP        string
+}
+
+// ReturnIssuanceInput closes part or all of one ISSUE movement. ExpectedModAt is
+// the lot's ModAt as shown on the issued row; the movement's outstanding
+// quantity is re-checked under the write lock.
+type ReturnIssuanceInput struct {
+	MovementID     int64
+	ExpectedModAt  time.Time
+	Quantity       uint32
+	Recipient      string
+	Note           string
+	IdempotencyKey string
+	Actor          Actor
+	CorrelationID  string
+	SourceIP       string
 }
 
 // AdjustItemInput is defined for schema completeness and is deferred by OD-04.

@@ -53,24 +53,47 @@ func adminClassText(value string) string {
 func adminItemViewOf(item domain.AdminInventoryItem) adminItemView {
 	now := time.Now().UTC()
 	state := service.Availability(now, item.DateOpen, item.DateBazaar)
-	// A removed row that carries a recipient is an issued lot; the persisted
-	// DeletedFg flag is unchanged and no predicate or filter moves. Only the
-	// rendered status label distinguishes it from an administrative removal.
+	// A movement-derived issued row is a movement, not a lot: it is always
+	// Issued and is returned through its movement route (D5/D6). A removed lot
+	// that carries a recipient is the legacy whole-stack issue; it keeps the
+	// lot-level Return route.
+	movementBacked := item.MovementID > 0
 	statusLabel, statusClass := "Active", "status-Completed"
 	switch {
+	case movementBacked:
+		statusLabel, statusClass = "Issued", "status-Issued"
 	case item.DeletedFg && strings.TrimSpace(item.GivenTo) != "":
 		statusLabel, statusClass = "Issued", "status-Issued"
 	case item.DeletedFg:
 		statusLabel, statusClass = "Removed", "status-Failed"
 	}
-	return adminItemView{
+	recipient := strings.TrimSpace(item.GivenTo)
+	issuedURL := adminIssuedURL(item)
+	returnURL := ""
+	rowKey := "l:" + strconv.FormatInt(item.ID, 10)
+	issuedQuantity := item.Quantity
+	if movementBacked {
+		issuedURL = ""
+		if recipient != "" {
+			issuedURL = adminIssuedRecipientURL(recipient)
+		}
+		rowKey = "m:" + strconv.FormatInt(item.MovementID, 10)
+		returnURL = "/admin/inventory/movements/" + strconv.FormatInt(item.MovementID, 10) + "/return"
+		issuedQuantity = item.IssuedQuantity
+	}
+	view := adminItemView{
 		ID: item.ID, EQUID: item.EQUID, Name: item.Name, ItemType: string(item.ItemType),
 		Quantity: item.Quantity, ClassText: adminClassText(item.ClassString),
 		RaceText: adminClassText(item.RaceString), MetadataMissing: item.MetadataMissingFg,
 		SourceLocation: item.SourceLocation, LocationGroup: item.LocationGroup,
 		LocationGroupLabel: adminGroupLabel(item.LocationGroup),
 		GivenTo:            item.GivenTo, Deleted: item.DeletedFg,
+		// Restore is offered only for a plain administrative removal. An issued
+		// row is handled by Return, and a row absorbed by consolidation names a
+		// survivor and cannot be restored.
+		Restorable:  item.DeletedFg && strings.TrimSpace(item.GivenTo) == "" && item.ConsolidatedInto == nil,
 		StatusLabel: statusLabel, StatusClass: statusClass,
+		IssuedURL:      issuedURL,
 		DateAddedISO:   item.DateAdded.Format("2006-01-02"),
 		DateAddedText:  item.DateAdded.Format("Jan 2, 2006"),
 		DateOpenISO:    item.DateOpen.Format("2006-01-02"),
@@ -78,10 +101,28 @@ func adminItemViewOf(item domain.AdminInventoryItem) adminItemView {
 		DateBazaarISO:  item.DateBazaar.Format("2006-01-02"),
 		DateBazaarText: item.DateBazaar.Format("Jan 2, 2006"),
 		Availability:   state, AvailabilityLabel: availabilityLabel(state),
-		ModAtValue: item.ModAt.UTC().Format(time.RFC3339Nano),
-		ModAtText:  item.ModAt.UTC().Format("2006-01-02 15:04 UTC"),
-		ModBy:      item.ModBy,
+		ModAtValue:     item.ModAt.UTC().Format(time.RFC3339Nano),
+		ModAtText:      item.ModAt.UTC().Format("2006-01-02 15:04 UTC"),
+		ModBy:          item.ModBy,
+		MovementBacked: movementBacked, MovementID: item.MovementID, RowKey: rowKey,
+		IssuedQuantity: issuedQuantity, IssuedBy: item.IssuedBy, ReturnURL: returnURL,
 	}
+	if movementBacked && !item.IssuedAt.IsZero() {
+		view.IssuedAtISO = item.IssuedAt.UTC().Format(time.RFC3339Nano)
+		view.IssuedAtText = item.IssuedAt.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	return view
+}
+
+// adminIssuedURL returns the recipient's issued queue for an issued row and ""
+// for every other state. The empty value keeps the recipient and status cells
+// plain text on active and administratively removed rows.
+func adminIssuedURL(item domain.AdminInventoryItem) string {
+	recipient := strings.TrimSpace(item.GivenTo)
+	if !item.DeletedFg || recipient == "" {
+		return ""
+	}
+	return adminIssuedRecipientURL(recipient)
 }
 
 func auditEntryViewOf(entry domain.AuditEntry) auditEntryView {
@@ -137,9 +178,37 @@ func adminMetadataOptions(selected string) []inventorySelectOption {
 func adminStatusOptions(selected string) []inventorySelectOption {
 	return []inventorySelectOption{
 		{Value: string(domain.AdminStatusActive), Label: "Active", Selected: selected == string(domain.AdminStatusActive)},
+		{Value: string(domain.AdminStatusIssued), Label: "Issued", Selected: selected == string(domain.AdminStatusIssued)},
 		{Value: string(domain.AdminStatusRemoved), Label: "Removed", Selected: selected == string(domain.AdminStatusRemoved)},
 		{Value: string(domain.AdminStatusAll), Label: "All", Selected: selected == string(domain.AdminStatusAll)},
 	}
+}
+
+// adminIssuedRecipientURL is the recipient's issued queue: the same admin list
+// filtered to issued lots and to one recipient. It is the only link target the
+// recipient and issued-badge links use.
+func adminIssuedRecipientURL(recipient string) string {
+	values := url.Values{}
+	values.Set("status", string(domain.AdminStatusIssued))
+	values.Set("givenTo", recipient)
+	return adminInventoryListPath + "?" + values.Encode()
+}
+
+// adminStatusTabs builds the lifecycle-state shortcuts. Each tab keeps every
+// active filter except the status and resets the page to 1.
+func adminStatusTabs(filter domain.AdminInventoryFilter) []adminStatusTab {
+	tabs := make([]adminStatusTab, 0, len(domain.AdminInventoryStatuses))
+	for _, status := range domain.AdminInventoryStatuses {
+		candidate := filter
+		candidate.Status = status
+		tabs = append(tabs, adminStatusTab{
+			Value:   string(status),
+			Label:   strings.ToUpper(string(status[:1])) + string(status[1:]),
+			URL:     adminListURL(candidate, 1),
+			Current: filter.Status == status,
+		})
+	}
+	return tabs
 }
 
 func adminSortOptions(selected domain.AdminInventorySort) []inventorySortOption {
@@ -150,6 +219,7 @@ func adminSortOptions(selected domain.AdminInventorySort) []inventorySortOption 
 		domain.AdminSortDateAdded: "Date added (oldest)", domain.AdminSortDateAddedDesc: "Date added (newest)",
 		domain.AdminSortDateOpen: "Open date (earliest)", domain.AdminSortDateOpenDesc: "Open date (latest)",
 		domain.AdminSortDateBazaar: "Bazaar date (earliest)", domain.AdminSortDateBazaarDesc: "Bazaar date (latest)",
+		domain.AdminSortRecipient: "Recipient", domain.AdminSortRecipientDesc: "Recipient (reverse)",
 	}
 	out := make([]inventorySortOption, 0, len(domain.AdminInventorySorts))
 	for _, sort := range domain.AdminInventorySorts {
@@ -232,6 +302,16 @@ func adminListPageOf(page domain.AdminInventoryPage, groups []string) adminListP
 		BeyondLast: page.Total > 0 && page.Page > page.TotalPages,
 		ClearURL:   "/admin/inventory",
 		SelfURL:    adminListURL(filter, page.Page),
+		StatusTabs: adminStatusTabs(filter),
+	}
+	// Active + recipient is the one combination that can never match: active
+	// rows carry no recipient. Explain the empty result and offer the issued
+	// queue for the same recipient instead of leaving a dead end.
+	if filter.Status == domain.AdminStatusActive && filter.GivenTo != "" {
+		issued := filter
+		issued.Status = domain.AdminStatusIssued
+		data.IssuedHint = true
+		data.IssuedHintURL = adminListURL(issued, 1)
 	}
 	selected := filter.LocationGroup
 	data.LocationGroups = []adminLocationOption{{Value: "", Label: "Any location", Selected: selected == ""}}

@@ -297,6 +297,123 @@ func (h *adminInventoryHandler) returnForm(c *gin.Context) {
 		"/admin/inventory/"+strconv.FormatInt(result.Item.ID, 10), notice)
 }
 
+// parseMovementID reads :movementID. A malformed or non-positive id is treated
+// as not found.
+func parseMovementID(c *gin.Context) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("movementID"), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+// returnIssuancePage renders the return form for one outstanding issuance. It
+// is the movement-targeted counterpart of returnPage: the target is an ISSUE
+// movement, not a lot.
+func (h *adminInventoryHandler) returnIssuancePage(c *gin.Context) {
+	movementID, ok := parseMovementID(c)
+	if !ok {
+		h.views.errorPage(c, http.StatusNotFound, "That issued record was not found.")
+		return
+	}
+	movement, item, outstanding, err := h.admin.IssuanceForReturn(c.Request.Context(), movementID)
+	if err != nil {
+		h.respondAdminPageError(c, err)
+		return
+	}
+	if outstanding == 0 {
+		h.views.errorPage(c, http.StatusConflict, "This issuance has no outstanding quantity to return.")
+		return
+	}
+	h.renderMovementForm(c, http.StatusOK, "admin_inventory_return.html", false,
+		adminIssuanceView(item, movement, outstanding), adminMovementFormValues{
+			Quantity:       strconv.FormatUint(uint64(outstanding), 10),
+			Recipient:      strings.TrimSpace(movement.Recipient),
+			ExpectedModAt:  item.ModAt.UTC().Format(time.RFC3339Nano),
+			IdempotencyKey: newMovementIdempotencyKey(),
+		}, adminIssuanceReturnModeText(outstanding), "", nil, adminReturnTo(c))
+}
+
+// adminIssuanceView overlays the movement identity on the lot view so the shared
+// return form renders the issuance, not the lot.
+func adminIssuanceView(item domain.AdminInventoryItem, movement domain.InventoryMovement, outstanding uint32) adminItemView {
+	view := adminItemViewOf(item)
+	view.MovementBacked = true
+	view.MovementID = movement.MovementID
+	view.RowKey = "m:" + strconv.FormatInt(movement.MovementID, 10)
+	view.StatusLabel, view.StatusClass = "Issued", "status-Issued"
+	view.GivenTo = movement.Recipient
+	view.IssuedQuantity = outstanding
+	view.Quantity = outstanding
+	view.ReturnURL = "/admin/inventory/movements/" + strconv.FormatInt(movement.MovementID, 10) + "/return"
+	if !movement.OccurredAt.IsZero() {
+		view.IssuedAtISO = movement.OccurredAt.UTC().Format(time.RFC3339Nano)
+		view.IssuedAtText = movement.OccurredAt.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	return view
+}
+
+// adminIssuanceReturnModeText explains what the movement-targeted return will do.
+func adminIssuanceReturnModeText(outstanding uint32) string {
+	text := "This issuance has " + strconv.FormatUint(uint64(outstanding), 10) + " units outstanding. "
+	if outstanding == 1 {
+		text = "This issuance has 1 unit outstanding. "
+	}
+	return text + "Returning the full amount closes the issued row; a smaller amount reduces it. The units return to this lot when it is active and to a new active lot when it was removed."
+}
+
+// returnIssuanceForm applies a return against one ISSUE movement. Over-return,
+// a stale lot version and a fully returned issuance are rejected by the service.
+func (h *adminInventoryHandler) returnIssuanceForm(c *gin.Context) {
+	movementID, ok := parseMovementID(c)
+	if !ok {
+		h.views.errorPage(c, http.StatusNotFound, "That issued record was not found.")
+		return
+	}
+	actor, ok := adminActor(c)
+	if !ok {
+		return
+	}
+	movement, item, outstanding, err := h.admin.IssuanceForReturn(c.Request.Context(), movementID)
+	if err != nil {
+		h.respondAdminPageError(c, err)
+		return
+	}
+	if outstanding == 0 {
+		h.views.errorPage(c, http.StatusConflict, "This issuance has no outstanding quantity to return.")
+		return
+	}
+	view := adminIssuanceView(item, movement, outstanding)
+	mode := adminIssuanceReturnModeText(outstanding)
+	values := adminMovementFormValuesFrom(c)
+	quantity, note, expected, fields := movementFormInput(values, outstanding)
+	if len(fields) > 0 {
+		h.renderMovementForm(c, http.StatusUnprocessableEntity, "admin_inventory_return.html", true,
+			view, values, mode, "The return was not recorded. Correct the highlighted fields.", fields, adminReturnToForm(c))
+		return
+	}
+	in := domain.ReturnIssuanceInput{
+		MovementID: movementID, ExpectedModAt: expected, Quantity: quantity,
+		Recipient: values.Recipient, Note: note, IdempotencyKey: values.IdempotencyKey,
+	}
+	in.Actor, in.CorrelationID, in.SourceIP = actor, GetRequestID(c), c.ClientIP()
+	ctx, cancel := context.WithTimeout(c.Request.Context(), adminWriteTimeout)
+	defer cancel()
+	result, err := h.admin.ReturnIssuance(ctx, in)
+	if err != nil {
+		h.renderMovementFormError(c, "admin_inventory_return.html", view, values, mode, err, adminReturnToForm(c))
+		return
+	}
+	h.logger.Info("admin inventory issuance returned (html)", "request_id", GetRequestID(c),
+		"user_id", actor.UserID, "movement_id", movementID, "quantity", quantity)
+	notice := "returned"
+	if result.CreatedCount > 0 {
+		notice = "returned-new"
+	}
+	adminNoticeRedirect(c, adminReturnToForm(c),
+		"/admin/inventory/"+strconv.FormatInt(result.Item.ID, 10), notice)
+}
+
 // renderMovementForm renders an Issue or Return form with its banner, field
 // errors and the pre-submit description of the action. A re-render after a
 // validation failure keeps the officer's idempotency key so a retry stays
@@ -308,8 +425,13 @@ func (h *adminInventoryHandler) renderMovementForm(c *gin.Context, status int, n
 		values.IdempotencyKey = newMovementIdempotencyKey()
 	}
 	title := "Issue " + item.Name
+	action := "/admin/inventory/" + strconv.FormatInt(item.ID, 10) + "/issue"
 	if name == "admin_inventory_return.html" {
 		title = "Return " + item.Name
+		action = "/admin/inventory/" + strconv.FormatInt(item.ID, 10) + "/return"
+		if item.ReturnURL != "" {
+			action = item.ReturnURL
+		}
 	}
 	h.views.adminMovementForm(c, status, name, adminMovementFormPageData{
 		pageData: pageData{
@@ -317,7 +439,7 @@ func (h *adminInventoryHandler) renderMovementForm(c *gin.Context, status int, n
 			Error: banner, ErrorFields: fields,
 		},
 		Ready: h.admin.Ready(), Item: item, Form: values, Mode: mode,
-		PartialSupported: item.Quantity > 1, ReturnTo: returnTo,
+		PartialSupported: item.Quantity > 1, FormAction: action, ReturnTo: returnTo,
 	})
 }
 
@@ -338,8 +460,9 @@ func (h *adminInventoryHandler) renderMovementFormError(c *gin.Context, name str
 	}
 }
 
-// movementHistoryURL rebuilds the history URL with the active filters.
-func movementHistoryURL(itemID int64, filter domain.MovementFilter, page int) string {
+// movementHistoryURL rebuilds the history URL with the active filters and the
+// carried inventory-list context so paging and filtering never drop returnTo.
+func movementHistoryURL(itemID int64, filter domain.MovementFilter, page int, returnTo string) string {
 	values := url.Values{}
 	if filter.MovementType != "" {
 		values.Set("movementType", string(filter.MovementType))
@@ -349,6 +472,9 @@ func movementHistoryURL(itemID int64, filter domain.MovementFilter, page int) st
 	}
 	if filter.CorrelationID != "" {
 		values.Set("correlationId", filter.CorrelationID)
+	}
+	if returnTo != "" {
+		values.Set(adminReturnToParam, returnTo)
 	}
 	if filter.PageSize != 0 && filter.PageSize != service.AdminDefaultPageSize {
 		values.Set("pageSize", strconv.Itoa(filter.PageSize))
@@ -394,6 +520,9 @@ func (h *adminInventoryHandler) movementsPage(c *gin.Context) {
 	for _, movement := range page.Movements {
 		movements = append(movements, adminMovementViewOf(movement))
 	}
+	returnTo := adminReturnTo(c)
+	banner := adminHistoryBannerFor(item)
+	banner.ReturnTo = returnTo
 	data := adminMovementHistoryPageData{
 		pageData: pageData{Title: "Movement history · " + item.Name, CSRF: CSRF(c), User: currentUserPointer(c)},
 		Ready:    true, Item: adminItemViewOf(item), Movements: movements,
@@ -402,7 +531,8 @@ func (h *adminInventoryHandler) movementsPage(c *gin.Context) {
 			CorrelationID: filter.CorrelationID, PageSize: strconv.Itoa(filter.PageSize),
 		},
 		TypeOpts: adminMovementTypeOptions(string(filter.MovementType)),
-		Banner:   adminHistoryBannerFor(item),
+		Banner:   banner,
+		ReturnTo: returnTo,
 		Total:    page.Total, Page: page.Page, PageSize: page.PageSize,
 		TotalPages: page.TotalPages, Empty: page.Total == 0,
 	}
@@ -412,12 +542,12 @@ func (h *adminInventoryHandler) movementsPage(c *gin.Context) {
 			if previous > page.TotalPages {
 				previous = page.TotalPages
 			}
-			data.PrevURL = movementHistoryURL(id, page.Filter, previous)
-			data.FirstURL = movementHistoryURL(id, page.Filter, 1)
+			data.PrevURL = movementHistoryURL(id, page.Filter, previous, returnTo)
+			data.FirstURL = movementHistoryURL(id, page.Filter, 1, returnTo)
 		}
 		if page.Page < page.TotalPages {
-			data.NextURL = movementHistoryURL(id, page.Filter, page.Page+1)
-			data.LastURL = movementHistoryURL(id, page.Filter, page.TotalPages)
+			data.NextURL = movementHistoryURL(id, page.Filter, page.Page+1, returnTo)
+			data.LastURL = movementHistoryURL(id, page.Filter, page.TotalPages, returnTo)
 		}
 		start := page.Page - 2
 		if start < 1 {
@@ -433,7 +563,7 @@ func (h *adminInventoryHandler) movementsPage(c *gin.Context) {
 		}
 		for candidate := start; candidate <= end; candidate++ {
 			data.PageLinks = append(data.PageLinks, inventoryPageLink{
-				Page: candidate, URL: movementHistoryURL(id, page.Filter, candidate), Current: candidate == page.Page,
+				Page: candidate, URL: movementHistoryURL(id, page.Filter, candidate, returnTo), Current: candidate == page.Page,
 			})
 		}
 	}

@@ -238,6 +238,39 @@ func (h *adminInventoryHandler) removePage(c *gin.Context) {
 	})
 }
 
+// restorePage renders the Restore confirmation for a row the list may restore.
+// It writes nothing; the POST goes to the existing restoreForm workflow. The
+// guards mirror the action's eligibility so a crafted URL cannot reach a
+// confirmation page for an active, issued or consolidated row.
+func (h *adminInventoryHandler) restorePage(c *gin.Context) {
+	id, ok := parseAdminID(c, true)
+	if !ok {
+		return
+	}
+	item, err := h.admin.Get(c.Request.Context(), id)
+	if err != nil {
+		h.respondAdminPageError(c, err)
+		return
+	}
+	view := adminItemViewOf(item)
+	switch {
+	case !view.Deleted:
+		h.views.errorPage(c, http.StatusConflict, "This record is not removed.")
+		return
+	case strings.TrimSpace(item.GivenTo) != "":
+		h.views.errorPage(c, http.StatusConflict, "This record is issued to someone; use Return instead of Restore.")
+		return
+	case item.ConsolidatedInto != nil:
+		h.views.errorPage(c, http.StatusConflict, "This record was consolidated into another row and cannot be restored.")
+		return
+	}
+	h.views.adminRestore(c, http.StatusOK, adminRestorePageData{
+		pageData: pageData{Title: "Restore " + item.Name, CSRF: CSRF(c), User: currentUserPointer(c)},
+		Item:     view,
+		ReturnTo: adminReturnTo(c),
+	})
+}
+
 func createInputFromForm(c *gin.Context) (domain.CreateItemInput, adminFormValues, map[string]string) {
 	values := adminFormValues{
 		ItemType:       c.PostForm("itemType"),

@@ -7,7 +7,7 @@
   <main class="card admin-card">
     <p class="eyebrow">Administration</p>
     <h1>Guild inventory</h1>
-    <p class="muted">Every field here is server-owned except the editable values on each record. Removed rows stay visible with <em>status</em> set to <em>removed</em>; a removed row that was issued to someone is shown as <em>issued</em>.</p>
+    <p class="muted">Every field here is server-owned except the editable values on each record. Use the lifecycle tabs to switch between <em>active</em>, <em>issued</em>, <em>removed</em> and <em>all</em> rows. A removed row that was issued to someone is <em>issued</em>; a plain administrative removal is <em>removed</em>.</p>
     <p><a class="link primary" href="/admin/inventory/new">Add item</a> <a class="link" href="/admin/audit">Audit viewer</a></p>
 
     {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
@@ -65,9 +65,20 @@
       </div>
     </form>
 
+    <nav class="status-tabs" aria-label="Inventory lifecycle state">
+      {{range .StatusTabs}}<a href="{{.URL}}" class="status-tab{{if .Current}} current{{end}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}
+    </nav>
+
     <p class="result-summary" aria-live="polite">
       {{if .Total}}{{.Total}} record{{if ne .Total 1}}s{{end}} · page {{.Page}} of {{.TotalPages}}{{else}}No matching records{{end}}
     </p>
+
+    {{if and .Empty .IssuedHint}}
+      <div class="alert" role="status">
+        No active records carry this recipient. The same recipient's issued lots are on the
+        <a href="{{.IssuedHintURL}}">Issued</a> queue.
+      </div>
+    {{end}}
 
     {{if .BeyondLast}}
       <div class="alert" role="status">This page is beyond the available results.
@@ -102,8 +113,8 @@
           </thead>
           <tbody>
             {{range .Items}}
-            <tr{{if .Deleted}} class="row-removed"{{end}}>
-              <td class="cell-nowrap">{{if not .Deleted}}<input type="checkbox" name="remove" value="{{.ID}}|{{.ModAtValue}}" aria-label="Select record {{.ID}} {{.Name}} for removal">{{else}}<span class="muted" aria-label="Removed records cannot be selected">—</span>{{end}}</td>
+            <tr id="{{.RowKey}}"{{if .Deleted}} class="row-removed"{{end}}>
+              <td class="cell-nowrap">{{if and (not .Deleted) (not .MovementBacked)}}<input type="checkbox" name="remove" value="{{.ID}}|{{.ModAtValue}}" aria-label="Select record {{.ID}} {{.Name}} for removal">{{else}}<span class="muted" aria-label="This row cannot be selected for removal">—</span>{{end}}</td>
               <td class="cell-nowrap mono">{{.ID}}</td>
               <td class="cell-nowrap mono">{{.EQUID}}</td>
               <td class="cell-nowrap"><a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">{{.Name}}</a></td>
@@ -111,15 +122,22 @@
               <td class="cell-nowrap">{{.Quantity}}</td>
               <td class="cell-nowrap">{{if .SourceLocation}}{{.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</td>
               <td class="cell-nowrap"><span class="group-badge">{{.LocationGroupLabel}}</span></td>
-              <td class="cell-nowrap">{{if .GivenTo}}{{.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</td>
-              <td class="cell-nowrap"><span class="status-badge {{.StatusClass}}">{{.StatusLabel}}</span></td>
+              <td class="cell-nowrap">{{if .IssuedURL}}<a href="{{.IssuedURL}}">{{.GivenTo}}</a>{{else}}{{if .GivenTo}}{{.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}{{end}}</td>
+              <td class="cell-nowrap">{{if .IssuedURL}}<a class="status-badge {{.StatusClass}}" href="{{.IssuedURL}}">{{.StatusLabel}}</a>{{else}}<span class="status-badge {{.StatusClass}}">{{.StatusLabel}}</span>{{end}}</td>
               <td class="cell-nowrap">{{.ModAtText}}</td>
               <td class="cell-nowrap actions-cell">
-                <a href="/admin/inventory/{{.ID}}/edit?returnTo={{$.SelfURL | urlquery}}">Edit</a>
-                <a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">History</a>
-                <a href="/admin/inventory/{{.ID}}/movements">Movements</a>
-                {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/issue?returnTo={{$.SelfURL | urlquery}}">Issue</a>{{else}}{{if .GivenTo}}<a href="/admin/inventory/{{.ID}}/return?returnTo={{$.SelfURL | urlquery}}">Return</a>{{end}}{{end}}
-                {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/remove?returnTo={{$.SelfURL | urlquery}}">Remove</a>{{end}}
+                {{if .MovementBacked}}
+                  <a href="{{.ReturnURL}}?returnTo={{$.SelfURL | urlquery}}">Return</a>
+                  <a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">History</a>
+                  <a href="/admin/inventory/{{.ID}}/movements?returnTo={{$.SelfURL | urlquery}}">Movements</a>
+                {{else}}
+                  <a href="/admin/inventory/{{.ID}}/edit?returnTo={{$.SelfURL | urlquery}}">Edit</a>
+                  <a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">History</a>
+                  <a href="/admin/inventory/{{.ID}}/movements?returnTo={{$.SelfURL | urlquery}}">Movements</a>
+                  {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/issue?returnTo={{$.SelfURL | urlquery}}">Issue</a>{{else}}{{if .GivenTo}}<a href="/admin/inventory/{{.ID}}/return?returnTo={{$.SelfURL | urlquery}}">Return</a>{{end}}{{end}}
+                  {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/remove?returnTo={{$.SelfURL | urlquery}}">Remove</a>{{end}}
+                  {{if .Restorable}}<a href="/admin/inventory/{{.ID}}/restore?returnTo={{$.SelfURL | urlquery}}">Restore</a>{{end}}
+                {{end}}
               </td>
             </tr>
             {{end}}
