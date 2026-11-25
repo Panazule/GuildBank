@@ -122,7 +122,7 @@ func (h *adminInventoryHandler) issuePage(c *gin.Context) {
 			Quantity:       strconv.FormatUint(uint64(item.Quantity), 10),
 			ExpectedModAt:  item.ModAt.UTC().Format(time.RFC3339Nano),
 			IdempotencyKey: newMovementIdempotencyKey(),
-		}, adminIssueModeText(item.Quantity), "", nil)
+		}, adminIssueModeText(item.Quantity), "", nil, adminReturnTo(c))
 }
 
 // adminIssueModeText explains the issue form's behaviour before an officer
@@ -158,7 +158,7 @@ func (h *adminInventoryHandler) issueForm(c *gin.Context) {
 	if len(fields) > 0 {
 		h.renderMovementForm(c, http.StatusUnprocessableEntity, "admin_inventory_issue.html", true,
 			adminItemViewOf(item), values, adminIssueModeText(item.Quantity),
-			"The issue was not recorded. Correct the highlighted fields.", fields)
+			"The issue was not recorded. Correct the highlighted fields.", fields, adminReturnToForm(c))
 		return
 	}
 	in := domain.IssueItemInput{
@@ -171,13 +171,13 @@ func (h *adminInventoryHandler) issueForm(c *gin.Context) {
 	result, err := h.admin.Issue(ctx, in)
 	if err != nil {
 		h.renderMovementFormError(c, "admin_inventory_issue.html", adminItemViewOf(item), values,
-			adminIssueModeText(item.Quantity), err)
+			adminIssueModeText(item.Quantity), err, adminReturnToForm(c))
 		return
 	}
 	h.logger.Info("admin inventory issued (html)", "request_id", GetRequestID(c),
 		"user_id", actor.UserID, "item_id", id, "quantity", quantity)
-	c.Redirect(http.StatusSeeOther,
-		"/admin/inventory/"+strconv.FormatInt(result.Item.ID, 10)+"?notice=issued")
+	adminNoticeRedirect(c, adminReturnToForm(c),
+		"/admin/inventory/"+strconv.FormatInt(result.Item.ID, 10), "issued")
 }
 
 func (h *adminInventoryHandler) returnPage(c *gin.Context) {
@@ -198,9 +198,10 @@ func (h *adminInventoryHandler) returnPage(c *gin.Context) {
 	h.renderMovementForm(c, http.StatusOK, "admin_inventory_return.html", false,
 		adminItemViewOf(item), adminMovementFormValues{
 			Quantity:       strconv.FormatUint(uint64(item.Quantity), 10),
+			Recipient:      strings.TrimSpace(item.GivenTo),
 			ExpectedModAt:  item.ModAt.UTC().Format(time.RFC3339Nano),
 			IdempotencyKey: newMovementIdempotencyKey(),
-		}, mode, "", nil)
+		}, mode, "", nil, adminReturnTo(c))
 }
 
 // adminReturnModeText states what a return will do and whether it is available
@@ -216,6 +217,34 @@ func adminReturnModeText(item domain.AdminInventoryItem) (string, bool) {
 		return "This record was removed administratively, so it cannot be returned. Restore it instead.", false
 	}
 	return "Returning the full issued quantity restores this record and clears the recipient. A smaller quantity creates a new active record and leaves this one in history.", true
+}
+
+// adminHistoryBannerFor describes a lot's current state and the single canonical
+// action an officer can take from the movement-history page. It never adds a
+// per-row action to the ledger table.
+func adminHistoryBannerFor(item domain.AdminInventoryItem) adminHistoryBannerView {
+	id := strconv.FormatInt(item.ID, 10)
+	switch {
+	case !item.DeletedFg:
+		return adminHistoryBannerView{
+			Text:        "This lot is active and ready to issue.",
+			ActionLabel: "Issue",
+			ActionURL:   "/admin/inventory/" + id + "/issue",
+		}
+	case strings.TrimSpace(item.GivenTo) != "":
+		return adminHistoryBannerView{
+			Text:        "This lot is currently issued to " + strings.TrimSpace(item.GivenTo) + ".",
+			ActionLabel: "Return",
+			ActionURL:   "/admin/inventory/" + id + "/return",
+		}
+	default:
+		return adminHistoryBannerView{
+			Text:        "This lot was removed administratively. Restore it to return it to active inventory.",
+			ActionLabel: "Restore record",
+			ActionURL:   "/admin/inventory/" + id + "/restore",
+			ActionForm:  true,
+		}
+	}
 }
 
 func (h *adminInventoryHandler) returnForm(c *gin.Context) {
@@ -242,7 +271,7 @@ func (h *adminInventoryHandler) returnForm(c *gin.Context) {
 	if len(fields) > 0 {
 		h.renderMovementForm(c, http.StatusUnprocessableEntity, "admin_inventory_return.html", true,
 			adminItemViewOf(item), values, mode,
-			"The return was not recorded. Correct the highlighted fields.", fields)
+			"The return was not recorded. Correct the highlighted fields.", fields, adminReturnToForm(c))
 		return
 	}
 	in := domain.ReturnItemInput{
@@ -255,7 +284,7 @@ func (h *adminInventoryHandler) returnForm(c *gin.Context) {
 	result, err := h.admin.Return(ctx, in)
 	if err != nil {
 		h.renderMovementFormError(c, "admin_inventory_return.html", adminItemViewOf(item), values,
-			mode, err)
+			mode, err, adminReturnToForm(c))
 		return
 	}
 	h.logger.Info("admin inventory returned (html)", "request_id", GetRequestID(c),
@@ -264,8 +293,8 @@ func (h *adminInventoryHandler) returnForm(c *gin.Context) {
 	if result.CreatedCount > 0 {
 		notice = "returned-new"
 	}
-	c.Redirect(http.StatusSeeOther,
-		"/admin/inventory/"+strconv.FormatInt(result.Item.ID, 10)+"?notice="+notice)
+	adminNoticeRedirect(c, adminReturnToForm(c),
+		"/admin/inventory/"+strconv.FormatInt(result.Item.ID, 10), notice)
 }
 
 // renderMovementForm renders an Issue or Return form with its banner, field
@@ -274,7 +303,7 @@ func (h *adminInventoryHandler) returnForm(c *gin.Context) {
 // idempotent.
 func (h *adminInventoryHandler) renderMovementForm(c *gin.Context, status int, name string, retain bool,
 	item adminItemView, values adminMovementFormValues, mode string,
-	banner string, fields map[string]string) {
+	banner string, fields map[string]string, returnTo string) {
 	if !retain && values.IdempotencyKey == "" {
 		values.IdempotencyKey = newMovementIdempotencyKey()
 	}
@@ -288,22 +317,22 @@ func (h *adminInventoryHandler) renderMovementForm(c *gin.Context, status int, n
 			Error: banner, ErrorFields: fields,
 		},
 		Ready: h.admin.Ready(), Item: item, Form: values, Mode: mode,
-		PartialSupported: item.Quantity > 1,
+		PartialSupported: item.Quantity > 1, ReturnTo: returnTo,
 	})
 }
 
 // renderMovementFormError maps a service failure onto the form or the shared
 // error page. A stale version and a duplicate idempotency key are both 409.
 func (h *adminInventoryHandler) renderMovementFormError(c *gin.Context, name string, item adminItemView,
-	values adminMovementFormValues, mode string, err error) {
+	values adminMovementFormValues, mode string, err error, returnTo string) {
 	var validation *domain.ValidationError
 	switch {
 	case errors.As(err, &validation):
 		h.renderMovementForm(c, http.StatusUnprocessableEntity, name, true, item, values, mode,
-			"The action was not recorded. Correct the highlighted fields.", validation.Fields)
+			"The action was not recorded. Correct the highlighted fields.", validation.Fields, returnTo)
 	case errors.Is(err, domain.ErrConflict):
 		h.renderMovementForm(c, http.StatusConflict, name, true, item, values, mode,
-			"This record changed since the form was loaded, or the request was already submitted. Reload the record and try again.", nil)
+			"This record changed since the form was loaded, or the request was already submitted. Reload the record and try again.", nil, returnTo)
 	default:
 		h.respondAdminPageError(c, err)
 	}
@@ -373,6 +402,7 @@ func (h *adminInventoryHandler) movementsPage(c *gin.Context) {
 			CorrelationID: filter.CorrelationID, PageSize: strconv.Itoa(filter.PageSize),
 		},
 		TypeOpts: adminMovementTypeOptions(string(filter.MovementType)),
+		Banner:   adminHistoryBannerFor(item),
 		Total:    page.Total, Page: page.Page, PageSize: page.PageSize,
 		TotalPages: page.TotalPages, Empty: page.Total == 0,
 	}

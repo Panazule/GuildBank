@@ -10,10 +10,11 @@
     <p class="item-identity">Inventory ID {{.Item.ID}} · EQUID {{.Item.EQUID}}</p>
 
     {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+    {{if .NameWarning}}<div class="alert alert-warn" role="status">{{.NameWarning}}</div>{{end}}
 
     <p>
       <span class="availability-badge availability-{{.Item.Availability}}">{{.Item.AvailabilityLabel}}</span>
-      <span class="status-badge {{if .Item.Deleted}}status-Failed{{else}}status-Completed{{end}}">{{if .Item.Deleted}}Removed{{else}}Active{{end}}</span>
+      <span class="status-badge {{.Item.StatusClass}}">{{.Item.StatusLabel}}</span>
       {{if .Item.MetadataMissing}}<span class="warning-badge">Metadata missing</span>{{end}}
     </p>
 
@@ -31,16 +32,17 @@
     </dl>
 
     <div class="wizard-actions">
-      <a class="link" href="/admin/inventory">Back to inventory</a>
+      {{if .ReturnTo}}<a class="link" href="{{.ReturnTo}}">Back to inventory</a>{{else}}<a class="link" href="/admin/inventory">Back to inventory</a>{{end}}
       {{if not .Item.Deleted}}
-        <a class="link primary" href="/admin/inventory/{{.Item.ID}}/edit">Edit record</a>
-        <a class="link" href="/admin/inventory/{{.Item.ID}}/issue">Issue</a>
-        <a class="link" href="/admin/inventory/{{.Item.ID}}/remove">Remove record</a>
+        <a class="link primary" href="/admin/inventory/{{.Item.ID}}/edit{{if .ReturnTo}}?returnTo={{.ReturnTo | urlquery}}{{end}}">Edit record</a>
+        <a class="link" href="/admin/inventory/{{.Item.ID}}/issue{{if .ReturnTo}}?returnTo={{.ReturnTo | urlquery}}{{end}}">Issue</a>
+        <a class="link" href="/admin/inventory/{{.Item.ID}}/remove{{if .ReturnTo}}?returnTo={{.ReturnTo | urlquery}}{{end}}">Remove record</a>
       {{else}}
-        {{if .Item.GivenTo}}<a class="link primary" href="/admin/inventory/{{.Item.ID}}/return">Return</a>{{end}}
+        {{if .Item.GivenTo}}<a class="link primary" href="/admin/inventory/{{.Item.ID}}/return{{if .ReturnTo}}?returnTo={{.ReturnTo | urlquery}}{{end}}">Return</a>{{end}}
         <form method="post" action="/admin/inventory/{{.Item.ID}}/restore" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{.CSRF}}">
           <input type="hidden" name="expectedModAt" value="{{.Item.ModAtValue}}">
+          {{if .ReturnTo}}<input type="hidden" name="returnTo" value="{{.ReturnTo}}">{{end}}
           <button type="submit" class="primary">Restore record</button>
         </form>
       {{end}}

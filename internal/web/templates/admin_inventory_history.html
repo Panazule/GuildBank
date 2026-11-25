@@ -11,16 +11,29 @@
 
     {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
 
+    {{if .Banner}}
+    <div class="alert" role="status">
+      <p>{{.Banner.Text}}</p>
+      {{if .Banner.ActionForm}}
+        <form method="post" action="{{.Banner.ActionURL}}" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+          <input type="hidden" name="expectedModAt" value="{{.Item.ModAtValue}}">
+          <button type="submit" class="primary">{{.Banner.ActionLabel}}</button>
+        </form>
+      {{else}}
+        <a class="link primary" href="{{.Banner.ActionURL}}">{{.Banner.ActionLabel}}</a>
+      {{end}}
+    </div>
+    {{end}}
+
     <dl class="detail-list">
       <div><dt>Stock on hand</dt><dd>{{if .Item.Deleted}}0<span class="muted"> (removed)</span>{{else}}{{.Item.Quantity}}{{end}}</dd></div>
-      <div><dt>Status</dt><dd><span class="status-badge {{if .Item.Deleted}}status-Failed{{else}}status-Completed{{end}}">{{if .Item.Deleted}}Removed{{else}}Active{{end}}</span></dd></div>
+      <div><dt>Status</dt><dd><span class="status-badge {{.Item.StatusClass}}">{{.Item.StatusLabel}}</span></dd></div>
       <div><dt>Recipient</dt><dd>{{if .Item.GivenTo}}{{.Item.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</dd></div>
     </dl>
 
     <div class="wizard-actions">
       <a class="link" href="/admin/inventory/{{.Item.ID}}">Back to record</a>
-      {{if not .Item.Deleted}}<a class="link primary" href="/admin/inventory/{{.Item.ID}}/issue">Issue</a>{{end}}
-      {{if .Item.Deleted}}{{if .Item.GivenTo}}<a class="link" href="/admin/inventory/{{.Item.ID}}/return">Return</a>{{end}}{{end}}
     </div>
 
     <form method="get" action="/admin/inventory/{{.Item.ID}}/movements" class="inventory-filters">

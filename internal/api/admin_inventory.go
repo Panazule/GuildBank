@@ -58,6 +58,18 @@ func adminWarningsOf(warnings []service.ItemWarning) []adminWarningResponse {
 	return out
 }
 
+// adminHasWarning reports whether one write result carried a given warning code.
+// The HTML adapter uses it to surface an advisory notice after a successful
+// write without changing the JSON contract.
+func adminHasWarning(warnings []service.ItemWarning, code string) bool {
+	for _, warning := range warnings {
+		if warning.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
 // adminFilterFrom parses the documented admin list query parameters. Repeated
 // parameters use their first value, matching the public list.
 func adminFilterFrom(c *gin.Context) (domain.AdminInventoryFilter, map[string]string) {

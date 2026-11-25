@@ -133,6 +133,8 @@ type adminItemView struct {
 	DateBazaarText     string
 	Availability       domain.AvailabilityState
 	AvailabilityLabel  string
+	StatusLabel        string
+	StatusClass        string
 	ModAtValue         string
 	ModAtText          string
 	ModBy              string
@@ -176,12 +178,15 @@ type adminListPageData struct {
 	BeyondLast     bool
 	Notice         string
 	ClearURL       string
-	PrevURL        string
-	NextURL        string
-	FirstURL       string
-	LastURL        string
-	LastPageURL    string
-	PageLinks      []inventoryPageLink
+	// SelfURL is the current list URL with every active filter, carried through
+	// the row actions so an officer returns to the same filtered view.
+	SelfURL     string
+	PrevURL     string
+	NextURL     string
+	FirstURL    string
+	LastURL     string
+	LastPageURL string
+	PageLinks   []inventoryPageLink
 }
 
 type adminFormValues struct {
@@ -225,11 +230,19 @@ type adminDetailPageData struct {
 	Item    adminItemView
 	History []auditEntryView
 	Notice  string
+	// ReturnTo is the sanitized inventory-list URL the officer came from, so the
+	// page and its actions can return to the same filtered view.
+	ReturnTo string
+	// NameWarning is the non-blocking advisory shown when a created name
+	// differed from the item metadata name.
+	NameWarning string
 }
 
 type adminRemovePageData struct {
 	pageData
 	Item adminItemView
+	// ReturnTo is the sanitized inventory-list URL the officer came from.
+	ReturnTo string
 }
 
 // adminMovementView is the presentation of one ledger row. It deliberately
@@ -273,6 +286,8 @@ type adminMovementFormPageData struct {
 	Form             adminMovementFormValues
 	Mode             string
 	PartialSupported bool
+	// ReturnTo is the sanitized inventory-list URL the officer came from.
+	ReturnTo string
 }
 
 type adminMovementFilterView struct {
@@ -282,6 +297,18 @@ type adminMovementFilterView struct {
 	PageSize      string
 }
 
+// adminHistoryBannerView is the state-driven action banner on the movement
+// history page. It offers exactly one canonical action for the lot's current
+// state (Issue, Return or Restore).
+type adminHistoryBannerView struct {
+	Text        string
+	ActionLabel string
+	// ActionURL is the target of the banner action. When ActionForm is true the
+	// action is a POST form (restore); otherwise it is a GET link.
+	ActionURL  string
+	ActionForm bool
+}
+
 type adminMovementHistoryPageData struct {
 	pageData
 	Ready      bool
@@ -289,6 +316,7 @@ type adminMovementHistoryPageData struct {
 	Movements  []adminMovementView
 	Filter     adminMovementFilterView
 	TypeOpts   []inventorySelectOption
+	Banner     adminHistoryBannerView
 	Total      int
 	Page       int
 	PageSize   int
@@ -307,6 +335,8 @@ type adminBulkRemovePageData struct {
 	pageData
 	Items   []adminItemView
 	Targets []string
+	// ReturnTo is the sanitized inventory-list URL the officer came from.
+	ReturnTo string
 }
 
 type auditFilterView struct {

@@ -25,7 +25,8 @@
     <form method="post" action="/admin/inventory/{{.Item.ID}}/remove" class="wizard-actions">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <input type="hidden" name="expectedModAt" value="{{.Item.ModAtValue}}">
-      <a class="link" href="/admin/inventory/{{.Item.ID}}">Cancel</a>
+      <input type="hidden" name="returnTo" value="{{.ReturnTo}}">
+      <a class="link" href="{{if .ReturnTo}}{{.ReturnTo}}{{else}}/admin/inventory/{{.Item.ID}}{{end}}">Cancel</a>
       <button type="submit" class="primary">Remove record</button>
     </form>
   </main>

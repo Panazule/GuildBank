@@ -45,6 +45,10 @@ const (
 const (
 	ItemWarningLocationUnrecognized = "location_unrecognized"
 	ItemWarningDuplicateSpellTarget = "duplicate_spell_target"
+	// ItemWarningNameMismatch is the non-fatal advisory raised when a manual
+	// create supplies a name that differs from the resolved metadata name. The
+	// metadata name is still stored; the warning only explains which name won.
+	ItemWarningNameMismatch = "name_metadata_mismatch"
 )
 
 // AdminAuditEventTypes is the closed event-type allowlist for the audit viewer.
@@ -390,6 +394,19 @@ func (s *AdminInventoryService) prepareCreate(ctx context.Context, in domain.Cre
 	}
 	warnings := make([]ItemWarning, 0, len(meta.Warnings)+1)
 	warnings = append(warnings, meta.Warnings...)
+	// A name that differs from the resolved metadata name is advisory only:
+	// metadata still wins and the stored row is unchanged. The warning lets the
+	// officer see that the metadata name, not the typed name, is what is stored.
+	if !missing {
+		if entered := strings.TrimSpace(in.Name); entered != "" &&
+			!strings.EqualFold(entered, strings.TrimSpace(meta.Name)) {
+			warnings = append(warnings, ItemWarning{
+				Code: ItemWarningNameMismatch, Field: "name",
+				Detail: fmt.Sprintf("the entered name %q differs from the metadata name %q, which is stored",
+					entered, meta.Name),
+			})
+		}
+	}
 
 	now := s.now().UTC()
 	added := utcDate(now)

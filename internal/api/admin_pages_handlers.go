@@ -169,11 +169,20 @@ func (h *adminInventoryHandler) detailPage(c *gin.Context) {
 	for _, entry := range history.Entries {
 		entries = append(entries, auditEntryViewOf(entry))
 	}
+	nameWarning := ""
+	if c.Query("nameWarning") == "1" {
+		// Fixed advisory text: the record always stores the metadata name, so no
+		// user-supplied value is reflected back into the page.
+		nameWarning = "The name you entered differs from this item's metadata name. " +
+			"The record is stored with the metadata name shown above, because item metadata always takes precedence."
+	}
 	h.views.adminInventoryDetail(c, http.StatusOK, adminDetailPageData{
-		pageData: pageData{Title: item.Name, CSRF: CSRF(c), User: currentUserPointer(c)},
-		Item:     adminItemViewOf(item),
-		History:  entries,
-		Notice:   adminNotice(c.Query("notice")),
+		pageData:    pageData{Title: item.Name, CSRF: CSRF(c), User: currentUserPointer(c)},
+		Item:        adminItemViewOf(item),
+		History:     entries,
+		Notice:      adminNotice(c.Query("notice")),
+		ReturnTo:    adminReturnTo(c),
+		NameWarning: nameWarning,
 	})
 }
 
@@ -225,6 +234,7 @@ func (h *adminInventoryHandler) removePage(c *gin.Context) {
 	h.views.adminRemove(c, http.StatusOK, adminRemovePageData{
 		pageData: pageData{Title: "Remove " + item.Name, CSRF: CSRF(c), User: currentUserPointer(c)},
 		Item:     view,
+		ReturnTo: adminReturnTo(c),
 	})
 }
 
@@ -355,8 +365,12 @@ func (h *adminInventoryHandler) createForm(c *gin.Context) {
 		h.renderFormError(c, false, values, domain.AdminInventoryItem{}, err)
 		return
 	}
-	c.Redirect(http.StatusSeeOther,
-		"/admin/inventory/"+strconv.FormatInt(result.Item.ID, 10)+"?notice=created")
+	target := "/admin/inventory/" + strconv.FormatInt(result.Item.ID, 10) + "?notice=created"
+	if adminHasWarning(result.Warnings, service.ItemWarningNameMismatch) {
+		// Non-blocking advisory: the row was created with the metadata name.
+		target += "&nameWarning=1"
+	}
+	c.Redirect(http.StatusSeeOther, target)
 }
 
 func (h *adminInventoryHandler) updateForm(c *gin.Context) {
@@ -454,7 +468,8 @@ func (h *adminInventoryHandler) removeForm(c *gin.Context) {
 		h.views.adminRemove(c, http.StatusUnprocessableEntity, adminRemovePageData{
 			pageData: pageData{Title: "Remove " + item.Name, CSRF: CSRF(c), User: currentUserPointer(c),
 				Error: "The form was missing its version token; reload the page."},
-			Item: adminItemViewOf(item),
+			Item:     adminItemViewOf(item),
+			ReturnTo: adminReturnToForm(c),
 		})
 		return
 	}
@@ -463,14 +478,15 @@ func (h *adminInventoryHandler) removeForm(c *gin.Context) {
 			h.views.adminRemove(c, http.StatusConflict, adminRemovePageData{
 				pageData: pageData{Title: "Remove " + item.Name, CSRF: CSRF(c), User: currentUserPointer(c),
 					Error: "This record changed since the page was loaded. Reload and try again."},
-				Item: adminItemViewOf(item),
+				Item:     adminItemViewOf(item),
+				ReturnTo: adminReturnToForm(c),
 			})
 			return
 		}
 		h.respondAdminPageError(c, err)
 		return
 	}
-	c.Redirect(http.StatusSeeOther, "/admin/inventory/"+strconv.FormatInt(id, 10)+"?notice=removed")
+	adminNoticeRedirect(c, adminReturnToForm(c), "/admin/inventory/"+strconv.FormatInt(id, 10), "removed")
 }
 
 func (h *adminInventoryHandler) restoreForm(c *gin.Context) {
@@ -497,7 +513,7 @@ func (h *adminInventoryHandler) restoreForm(c *gin.Context) {
 		h.respondAdminPageError(c, err)
 		return
 	}
-	c.Redirect(http.StatusSeeOther, "/admin/inventory/"+strconv.FormatInt(id, 10)+"?notice=restored")
+	adminNoticeRedirect(c, adminReturnToForm(c), "/admin/inventory/"+strconv.FormatInt(id, 10), "restored")
 }
 
 // bulkTargetsFrom reads the page-local bulk-removal selection. Each checkbox
@@ -572,6 +588,7 @@ func (h *adminInventoryHandler) bulkRemovePreview(c *gin.Context) {
 	h.views.adminBulkRemove(c, http.StatusOK, adminBulkRemovePageData{
 		pageData: pageData{Title: "Remove records", CSRF: CSRF(c), User: currentUserPointer(c)},
 		Items:    views, Targets: tokens,
+		ReturnTo: adminReturnToForm(c),
 	})
 }
 
@@ -596,6 +613,5 @@ func (h *adminInventoryHandler) bulkRemoveForm(c *gin.Context) {
 	}
 	h.logger.Info("admin inventory bulk removed", "request_id", GetRequestID(c),
 		"user_id", actor.UserID, "removed", result.Removed)
-	c.Redirect(http.StatusSeeOther,
-		"/admin/inventory?notice=bulk-removed&count="+strconv.Itoa(result.Removed))
+	adminBulkRemovedRedirect(c, adminReturnToForm(c), result.Removed)
 }

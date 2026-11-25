@@ -7,7 +7,7 @@
   <main class="card admin-card">
     <p class="eyebrow">Administration</p>
     <h1>Guild inventory</h1>
-    <p class="muted">Every field here is server-owned except the editable values on each record. Removed rows stay visible with <em>status</em> set to <em>removed</em>.</p>
+    <p class="muted">Every field here is server-owned except the editable values on each record. Removed rows stay visible with <em>status</em> set to <em>removed</em>; a removed row that was issued to someone is shown as <em>issued</em>.</p>
     <p><a class="link primary" href="/admin/inventory/new">Add item</a> <a class="link" href="/admin/audit">Audit viewer</a></p>
 
     {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
@@ -80,6 +80,7 @@
     {{else}}
       <form method="post" action="/admin/inventory/bulk-remove" id="bulk-remove">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <input type="hidden" name="returnTo" value="{{.SelfURL}}">
         <div class="table-scroll" role="region" aria-label="Administrative inventory results" tabindex="0">
         <table class="inventory-table admin-table">
           <caption class="sr-only">Administrative guild inventory records</caption>
@@ -105,20 +106,20 @@
               <td class="cell-nowrap">{{if not .Deleted}}<input type="checkbox" name="remove" value="{{.ID}}|{{.ModAtValue}}" aria-label="Select record {{.ID}} {{.Name}} for removal">{{else}}<span class="muted" aria-label="Removed records cannot be selected">—</span>{{end}}</td>
               <td class="cell-nowrap mono">{{.ID}}</td>
               <td class="cell-nowrap mono">{{.EQUID}}</td>
-              <td class="cell-nowrap"><a href="/admin/inventory/{{.ID}}">{{.Name}}</a></td>
+              <td class="cell-nowrap"><a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">{{.Name}}</a></td>
               <td class="cell-nowrap">{{.ItemType}}</td>
               <td class="cell-nowrap">{{.Quantity}}</td>
               <td class="cell-nowrap">{{if .SourceLocation}}{{.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</td>
               <td class="cell-nowrap"><span class="group-badge">{{.LocationGroupLabel}}</span></td>
               <td class="cell-nowrap">{{if .GivenTo}}{{.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</td>
-              <td class="cell-nowrap"><span class="status-badge {{if .Deleted}}status-Failed{{else}}status-Completed{{end}}">{{if .Deleted}}Removed{{else}}Active{{end}}</span></td>
+              <td class="cell-nowrap"><span class="status-badge {{.StatusClass}}">{{.StatusLabel}}</span></td>
               <td class="cell-nowrap">{{.ModAtText}}</td>
               <td class="cell-nowrap actions-cell">
-                <a href="/admin/inventory/{{.ID}}/edit">Edit</a>
-                <a href="/admin/inventory/{{.ID}}">History</a>
+                <a href="/admin/inventory/{{.ID}}/edit?returnTo={{$.SelfURL | urlquery}}">Edit</a>
+                <a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">History</a>
                 <a href="/admin/inventory/{{.ID}}/movements">Movements</a>
-                {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/issue">Issue</a>{{else}}{{if .GivenTo}}<a href="/admin/inventory/{{.ID}}/return">Return</a>{{end}}{{end}}
-                {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/remove">Remove</a>{{end}}
+                {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/issue?returnTo={{$.SelfURL | urlquery}}">Issue</a>{{else}}{{if .GivenTo}}<a href="/admin/inventory/{{.ID}}/return?returnTo={{$.SelfURL | urlquery}}">Return</a>{{end}}{{end}}
+                {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/remove?returnTo={{$.SelfURL | urlquery}}">Remove</a>{{end}}
               </td>
             </tr>
             {{end}}

@@ -53,6 +53,16 @@ func adminClassText(value string) string {
 func adminItemViewOf(item domain.AdminInventoryItem) adminItemView {
 	now := time.Now().UTC()
 	state := service.Availability(now, item.DateOpen, item.DateBazaar)
+	// A removed row that carries a recipient is an issued lot; the persisted
+	// DeletedFg flag is unchanged and no predicate or filter moves. Only the
+	// rendered status label distinguishes it from an administrative removal.
+	statusLabel, statusClass := "Active", "status-Completed"
+	switch {
+	case item.DeletedFg && strings.TrimSpace(item.GivenTo) != "":
+		statusLabel, statusClass = "Issued", "status-Issued"
+	case item.DeletedFg:
+		statusLabel, statusClass = "Removed", "status-Failed"
+	}
 	return adminItemView{
 		ID: item.ID, EQUID: item.EQUID, Name: item.Name, ItemType: string(item.ItemType),
 		Quantity: item.Quantity, ClassText: adminClassText(item.ClassString),
@@ -60,6 +70,7 @@ func adminItemViewOf(item domain.AdminInventoryItem) adminItemView {
 		SourceLocation: item.SourceLocation, LocationGroup: item.LocationGroup,
 		LocationGroupLabel: adminGroupLabel(item.LocationGroup),
 		GivenTo:            item.GivenTo, Deleted: item.DeletedFg,
+		StatusLabel: statusLabel, StatusClass: statusClass,
 		DateAddedISO:   item.DateAdded.Format("2006-01-02"),
 		DateAddedText:  item.DateAdded.Format("Jan 2, 2006"),
 		DateOpenISO:    item.DateOpen.Format("2006-01-02"),
@@ -220,6 +231,7 @@ func adminListPageOf(page domain.AdminInventoryPage, groups []string) adminListP
 		Empty:      page.Total == 0,
 		BeyondLast: page.Total > 0 && page.Page > page.TotalPages,
 		ClearURL:   "/admin/inventory",
+		SelfURL:    adminListURL(filter, page.Page),
 	}
 	selected := filter.LocationGroup
 	data.LocationGroups = []adminLocationOption{{Value: "", Label: "Any location", Selected: selected == ""}}

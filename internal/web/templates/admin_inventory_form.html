@@ -43,9 +43,9 @@
             <span class="help" id="equid-help">The item's EQUID from the game.</span>
             {{with index .ErrorFields "equid"}}<span class="field-error">{{.}}</span>{{end}}
           </label>
-          <label>Fallback name
+          <label>Name
             <input name="name" type="text" maxlength="128" value="{{.Form.Name}}" aria-describedby="name-help">
-            <span class="help" id="name-help">Used only when the EQUID has no item metadata.</span>
+            <span class="help" id="name-help">Used when the EQUID has no item metadata. When item metadata exists, the metadata name takes precedence and is stored instead.</span>
             {{with index .ErrorFields "name"}}<span class="field-error">{{.}}</span>{{end}}
           </label>
         </div>

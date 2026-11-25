@@ -42,8 +42,9 @@
 
     <form method="post" action="/admin/inventory/bulk-remove/apply" class="wizard-actions">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="returnTo" value="{{.ReturnTo}}">
       {{range .Targets}}<input type="hidden" name="remove" value="{{.}}">{{end}}
-      <a class="link" href="/admin/inventory">Cancel</a>
+      <a class="link" href="{{if .ReturnTo}}{{.ReturnTo}}{{else}}/admin/inventory{{end}}">Cancel</a>
       <button type="submit" class="primary">Remove {{len .Items}} record{{if ne (len .Items) 1}}s{{end}}</button>
     </form>
     <p class="help">The whole selection is written in one transaction. If any selected record was changed or already removed since this page was loaded, nothing is removed and you are asked to reload the list.</p>

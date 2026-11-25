@@ -17,7 +17,7 @@
 
     <dl class="detail-list">
       <div><dt>{{if .Item.Deleted}}Issued quantity{{else}}On hand{{end}}</dt><dd>{{.Item.Quantity}}</dd></div>
-      <div><dt>Status</dt><dd><span class="status-badge {{if .Item.Deleted}}status-Failed{{else}}status-Completed{{end}}">{{if .Item.Deleted}}Removed{{else}}Active{{end}}</span></dd></div>
+      <div><dt>Status</dt><dd><span class="status-badge {{.Item.StatusClass}}">{{.Item.StatusLabel}}</span></dd></div>
       <div><dt>Recipient</dt><dd>{{if .Item.GivenTo}}{{.Item.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}</dd></div>
       <div><dt>Location group</dt><dd><span class="group-badge">{{.Item.LocationGroupLabel}}</span></dd></div>
     </dl>
@@ -28,6 +28,7 @@
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <input type="hidden" name="expectedModAt" value="{{.Form.ExpectedModAt}}">
       <input type="hidden" name="idempotencyKey" value="{{.Form.IdempotencyKey}}">
+      <input type="hidden" name="returnTo" value="{{.ReturnTo}}">
 
       <div class="field-row">
         <label>Quantity
@@ -37,7 +38,7 @@
         </label>
         <label>Recipient
           <input name="recipient" type="text" maxlength="128" value="{{.Form.Recipient}}">
-          <span class="help">Recorded on the RETURN movement. Optional.</span>
+          <span class="help">Recorded on the RETURN movement. Pre-filled with the recorded recipient; optional, and you may edit or clear it.</span>
           {{with index .ErrorFields "recipient"}}<span class="field-error">{{.}}</span>{{end}}
         </label>
       </div>
