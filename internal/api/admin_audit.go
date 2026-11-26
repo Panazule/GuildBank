@@ -52,8 +52,19 @@ func auditEntryResponseOf(entry domain.AuditEntry) auditEntryResponse {
 	}
 }
 
+// auditScope returns the event types the signed-in role may read. A nil scope
+// is unrestricted (Administrator); Officers receive the inventory/import list.
+func auditScope(c *gin.Context) []string {
+	session, ok := CurrentSession(c)
+	if !ok {
+		return service.OfficerAuditEventTypes
+	}
+	return service.AuditEventTypesFor(session.User.Role())
+}
+
 // auditFilterFrom parses the documented audit query parameters. Dates are
-// inclusive UTC calendar days.
+// inclusive UTC calendar days. The event scope is set from the caller's role and
+// is never read from the request.
 func auditFilterFrom(c *gin.Context) (domain.AuditFilter, map[string]string) {
 	filter := domain.AuditFilter{
 		EventType:     strings.TrimSpace(c.Query("eventType")),
@@ -62,6 +73,7 @@ func auditFilterFrom(c *gin.Context) (domain.AuditFilter, map[string]string) {
 		RecordID:      strings.TrimSpace(c.Query("recordId")),
 		CorrelationID: strings.TrimSpace(c.Query("correlationId")),
 		Page:          1, PageSize: service.AdminDefaultPageSize,
+		EventTypes: auditScope(c),
 	}
 	fields := make(map[string]string)
 	if raw := strings.TrimSpace(c.Query("from")); raw != "" {
@@ -131,7 +143,7 @@ func (h *adminInventoryHandler) auditEntry(c *gin.Context) {
 	if !ok {
 		return
 	}
-	entry, err := h.admin.GetAudit(c.Request.Context(), id)
+	entry, err := h.admin.GetAuditScoped(c.Request.Context(), id, auditScope(c))
 	if err != nil {
 		h.respondAdminError(c, err)
 		return
@@ -199,7 +211,7 @@ func (h *adminInventoryHandler) auditPage(c *gin.Context) {
 		},
 		Total: page.Total, Page: page.Page, PageSize: page.PageSize,
 		TotalPages: page.TotalPages, Empty: page.Total == 0,
-		EventTypeOpts: auditEventTypeOptions(filter.EventType),
+		EventTypeOpts: auditEventTypeOptions(filter.EventType, filter.EventTypes),
 	}
 	if page.TotalPages > 0 {
 		if page.Page > 1 {
@@ -242,9 +254,13 @@ func auditDateText(value *time.Time) string {
 	return value.Format("2006-01-02")
 }
 
-func auditEventTypeOptions(selected string) []inventorySelectOption {
+func auditEventTypeOptions(selected string, scope []string) []inventorySelectOption {
 	out := []inventorySelectOption{{Value: "", Label: "All events", Selected: selected == ""}}
-	for _, eventType := range service.AdminAuditEventTypes {
+	allowed := service.AdminAuditEventTypes
+	if scope != nil {
+		allowed = scope
+	}
+	for _, eventType := range allowed {
 		out = append(out, inventorySelectOption{Value: eventType, Label: eventType, Selected: eventType == selected})
 	}
 	return out

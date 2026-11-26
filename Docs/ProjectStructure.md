@@ -21,7 +21,8 @@ GuildBank/
 ├── internal/
 │   ├── domain/
 │   │   ├── setup.go              D-02 setup state
-│   │   ├── identity.go           User/session/setting models, sentinel and validation errors
+│   │   ├── identity.go           User/session/setting models, role hierarchy, sentinel and validation errors
+│   │   ├── user_admin.go         Account-administration input models and username rules
 │   │   ├── item.go               Logical Item and ItemReference contracts
 │   │   ├── import.go             Import batch/row/location/warning/commit contracts
 │   │   └── inventory.go          Public inventory sort/filter/projection/page contracts
@@ -32,9 +33,10 @@ GuildBank/
 │   │   ├── race_mask.go          RaceList → RaceString
 │   │   ├── item_metadata.go      EQUID resolution and GuildBankItems metadata generation
 │   │   ├── item_name_resolver.go Name → EQUID resolution (normalize, collation-aware, cached, ambiguity-aware)
-│   │   ├── password.go           bcrypt hashing, policy and timing equalizer
+│   │   ├── password.go           bcrypt hashing, policy, username-aware hashing and timing equalizer
 │   │   ├── auth.go               Login, session issuance/validation, logout, revocation
 │   │   ├── rate_limit.go         D-12 IP+username login lockout
+│   │   ├── user_admin.go         Account create/role/status/reset/delete and own password change
 │   │   ├── setup.go              Wizard validation, DB test and atomic commit
 │   │   ├── settings.go           Typed setting allowlist, validation and session policy
 │   │   ├── import_parser.go      Canonical TSV parser, limits and diagnostics
@@ -87,20 +89,21 @@ GuildBank/
 │   │   ├── admin_movement_pages.go Issue/Return/movement-history pages and forms
 │   │   ├── admin_movements.go    Issue/Return/movement-history JSON handlers
 │   │   ├── admin_audit.go        Audit viewer and per-record history handlers
+│   │   ├── users.go              Account list/create/detail pages, JSON API and own password change
 │   │   ├── admin_navigation.go   returnTo allowlist and navigation-context helpers
 │   │   ├── views.go              Embedded template rendering
 │   │   ├── ui.go                 Shared HTML page helpers
 │   │   ├── csrf.go               Signed double-submit CSRF
 │   │   ├── cookies.go            Session/CSRF cookie flags and redirect safety
 │   │   ├── middleware.go          Request ID, access log, panic recovery
-│   │   ├── middleware_auth.go    Setup gate, default-deny auth, RequireRole hierarchy, headers
+│   │   ├── middleware_auth.go    Setup gate, default-deny auth, RequireRole hierarchy, forced password change, headers
 │   │   ├── errors.go             Domain-error to HTTP status mapping
 │   │   ├── health.go             /healthz and /readyz handlers
 │   │   └── *_test.go
 │   ├── web/
 │   │   ├── embed.go              Embedded template/static filesystems
 │   │   ├── embed_test.go         Import guard + embed checks
-│   │   ├── templates/            setup, login, settings, imports, import_detail, inventory_list, inventory_detail, admin_inventory, admin_inventory_form, admin_inventory_detail, admin_inventory_issue, admin_inventory_return, admin_inventory_history, admin_remove, admin_restore, admin_bulk_remove, admin_audit, error, partials
+│   │   ├── templates/            setup, login, settings, imports, import_detail, inventory_list, inventory_detail, admin_inventory, admin_inventory_form, admin_inventory_detail, admin_inventory_issue, admin_inventory_return, admin_inventory_history, admin_remove, admin_restore, admin_bulk_remove, admin_audit, admin_users, admin_user_new, admin_user_detail, account_password, error, partials
 │   │   └── static/               app.css, setup.js, imports.js and admin_inventory.js
 │   └── platform/
 │       ├── config/
@@ -216,10 +219,15 @@ store errors for the service layer.
 HTTP entry layer. It depends on `service` types and must not import
 `repository` — a rule enforced by `importguard_test.go`. Middleware order is
 recovery → request ID → access log → security headers → setup gate, then
-public CSRF or, for admin routes, session → CSRF → administrator check. JSON
+public CSRF or, for authenticated routes, session → forced password change →
+role gate → CSRF. JSON
 errors use `{"error":{"code","message","fields","request_id"}}`. Setup and
 login HTML forms post to the same REST handlers as JSON clients; POST settings
-is a thin HTML adapter for PUT. Phase 3 adds the admin-only import routes for
+is a thin HTML adapter for PUT. P2 adds the account surface: the `member` group
+owns `GET /account/password` and `POST /api/v1/auth/password`, and the `admin`
+group owns `/admin/users`, `/admin/users/new`, `/admin/users/:id` plus the
+`/api/v1/users` JSON API. `users.go` holds both the pages and the REST handlers,
+so a form and an API client share one service path. Phase 3 adds the admin-only import routes for
 upload, history, detail, locations, rows, row IDs, selection, summary and commit.
 The multipart upload uses the path-aware body limit and multipart CSRF support;
 `imports.go` maps parse, selection, terminal-state, duplicate-commit and

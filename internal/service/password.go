@@ -30,10 +30,25 @@ func init() {
 	}
 }
 
-// HashPassword validates the policy then returns a bcrypt hash.
+// HashPassword validates the policy then returns a bcrypt hash. It is used where
+// no account name is known yet (the setup wizard), so the rule that a password
+// must not equal the username cannot be applied here.
 func HashPassword(password string) (string, error) {
-	if field := passwordPolicyError("", password); field != "" {
-		return "", domain.NewValidationError("Password", field)
+	return hashPassword("", password, "Password")
+}
+
+// HashUserPassword hashes a password for a named account. It applies the full
+// policy, including the rule that a password must not equal its username, which
+// HashPassword cannot enforce without the name.
+func HashUserPassword(username, password string) (string, error) {
+	return hashPassword(domain.NormalizeUserName(username), password, "password")
+}
+
+// hashPassword applies the policy under the supplied field name so each caller
+// reports the failure against the form field it owns.
+func hashPassword(username, password, field string) (string, error) {
+	if problem := passwordPolicyError(username, password); problem != "" {
+		return "", domain.NewValidationError(field, problem)
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {

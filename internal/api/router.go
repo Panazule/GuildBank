@@ -33,6 +33,7 @@ type Deps struct {
 	Imports        *service.ImportService
 	Inventory      *service.InventoryService
 	Admin          *service.AdminInventoryService
+	Users          *service.UserAdminService
 	Version        string
 	TrustedProxies []string
 	StartTime      time.Time
@@ -56,6 +57,11 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 		// Tests and degraded configurations may omit the admin service; a nil
 		// store keeps every admin route responding 503 rather than panicking.
 		deps.Admin = service.NewAdminInventoryService(nil, nil, nil, nil, nil, deps.Logger)
+	}
+	if deps.Users == nil {
+		// Accounts live in SQLite, so this is only reached by a caller that
+		// forgot to wire the service; the routes then answer 503.
+		deps.Users = service.NewUserAdminService(nil, nil, deps.Logger)
 	}
 	if deps.StartTime.IsZero() {
 		deps.StartTime = time.Now()
@@ -96,6 +102,7 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	importHandler := &importsHandler{imports: deps.Imports, views: viewSet, logger: deps.Logger}
 	inventoryHandler := &inventoryHandler{inventory: deps.Inventory, auth: deps.Auth, views: viewSet, logger: deps.Logger}
 	adminHandler := &adminInventoryHandler{admin: deps.Admin, views: viewSet, logger: deps.Logger}
+	usersHandler := &usersHandler{users: deps.Users, views: viewSet, logger: deps.Logger}
 	ui := &uiHandler{views: viewSet}
 
 	// Public forms (login and setup) need a CSRF token even though no session
@@ -121,13 +128,19 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	// without a classification. Order is authentication, then role, then CSRF so
 	// a caller who may not use a route never needs a token for it.
 	member := r.Group("")
-	member.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequireRole(domain.RoleMember), csrf.middleware())
-	// Session inspection and logout are available to every signed-in role.
+	member.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequirePasswordChanged(),
+		RequireRole(domain.RoleMember), csrf.middleware())
+	// Session inspection and logout are available to every signed-in role, and
+	// the forced password change is the only other thing a flagged account may
+	// reach (see RequirePasswordChanged).
 	member.GET("/api/v1/auth/session", authHandler.session)
 	member.POST("/api/v1/auth/logout", authHandler.logout)
+	member.GET("/account/password", usersHandler.passwordPage)
+	member.POST("/api/v1/auth/password", usersHandler.changePassword)
 
 	officer := r.Group("")
-	officer.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequireRole(domain.RoleOfficer), csrf.middleware())
+	officer.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequirePasswordChanged(),
+		RequireRole(domain.RoleOfficer), csrf.middleware())
 	officer.GET("/admin", ui.adminRoot)
 	officer.GET("/admin/imports", importHandler.page)
 	officer.GET("/admin/imports/:batchID", importHandler.detailPage)
@@ -182,15 +195,33 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	officer.GET("/api/v1/audit", adminHandler.auditList)
 	officer.GET("/api/v1/audit/:id", adminHandler.auditEntry)
 
-	// Application configuration is Administrator-only.
+	// Application configuration and account administration are
+	// Administrator-only.
 	admin := r.Group("")
-	admin.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequireRole(domain.RoleAdmin), csrf.middleware())
+	admin.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequirePasswordChanged(),
+		RequireRole(domain.RoleAdmin), csrf.middleware())
 	admin.GET("/admin/settings", settingsHandler.page)
 	admin.GET("/api/v1/settings", settingsHandler.get)
 	admin.PUT("/api/v1/settings", settingsHandler.update)
 	// HTML forms cannot issue PUT; POST is a thin adapter onto the same REST
 	// handler and service, preserving the D-03 single write path.
 	admin.POST("/api/v1/settings", settingsHandler.update)
+
+	// Account administration (P2). The HTML pages and the JSON API share one
+	// service, so a form and an API client cannot diverge.
+	admin.GET("/admin/users", usersHandler.page)
+	admin.GET("/admin/users/new", usersHandler.newPage)
+	admin.GET("/admin/users/:id", usersHandler.detailPage)
+	admin.POST("/admin/users", usersHandler.createForm)
+	admin.POST("/admin/users/:id", usersHandler.updateForm)
+	admin.POST("/admin/users/:id/password", usersHandler.resetForm)
+	admin.POST("/admin/users/:id/delete", usersHandler.deleteForm)
+	admin.GET("/api/v1/users", usersHandler.list)
+	admin.POST("/api/v1/users", usersHandler.create)
+	admin.PUT("/api/v1/users/:id", usersHandler.update)
+	admin.POST("/api/v1/users/:id", usersHandler.update)
+	admin.POST("/api/v1/users/:id/password", usersHandler.resetPassword)
+	admin.DELETE("/api/v1/users/:id", usersHandler.remove)
 
 	r.NoRoute(notFound)
 	r.NoMethod(methodNotAllowed)

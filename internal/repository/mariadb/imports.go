@@ -128,6 +128,16 @@ func insertImportRows(ctx context.Context, tx *sql.Tx, batchID int64, rows []dom
 }
 
 func insertAudit(ctx context.Context, tx *sql.Tx, entries []domain.AuditEntry) error {
+	return insertAuditRows(ctx, tx, entries)
+}
+
+// auditExecer is satisfied by *sql.DB and *sql.Tx, so the same insert serves a
+// write transaction and the standalone user-administration path.
+type auditExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func insertAuditRows(ctx context.Context, exec auditExecer, entries []domain.AuditEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -145,10 +155,17 @@ func insertAudit(ctx context.Context, tx *sql.Tx, entries []domain.AuditEntry) e
 		(EventDate, UserID, UserName, EventType, TableName, RecordID,
 		 OldValues, NewValues, Notes, CorrelationID, SourceIP)
 		VALUES ` + strings.Join(placeholders, ",")
-	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+	if _, err := exec.ExecContext(ctx, query, args...); err != nil {
 		return mapStoreError("insert audit", err)
 	}
 	return nil
+}
+
+// InsertAudit writes one audit row outside a write transaction. Account
+// administration is stored in SQLite, so its audit rows cannot share that
+// transaction; the service treats a failure here as a warning, never a rollback.
+func (s *Store) InsertAudit(ctx context.Context, entry domain.AuditEntry) error {
+	return insertAuditRows(ctx, s.db, []domain.AuditEntry{entry})
 }
 
 // GetBatch reads one batch record.

@@ -428,6 +428,87 @@ type adminAuditPageData struct {
 	PageLinks     []inventoryPageLink
 }
 
+// userRowView is the shared presentation of one account. The list and detail
+// pages use it so the status wording cannot drift between them.
+type userRowView struct {
+	ID                 int64
+	UserName           string
+	Role               domain.Role
+	RoleLabel          string
+	Disabled           bool
+	MustChangePassword bool
+	LastLoginText      string
+	CreatedText        string
+	ModBy              string
+	IsSelf             bool
+	// Locked marks the last enabled Administrator: the UI disables role, status
+	// and delete controls, and the store refuses the same changes.
+	Locked     bool
+	CanDisable bool
+	CanDelete  bool
+}
+
+// roleSelectOption is one entry of the role picker.
+type roleSelectOption struct {
+	Value    string
+	Label    string
+	Selected bool
+}
+
+type userFormValues struct {
+	UserName        string
+	AccessLevel     string
+	Password        string
+	ConfirmPassword string
+	ConfirmUserName string
+}
+
+type usersPageData struct {
+	pageData
+	Users         []userRowView
+	Filter        string
+	Total         int
+	EnabledAdmins int
+}
+
+type userCreatePageData struct {
+	pageData
+	Form  userFormValues
+	Roles []roleSelectOption
+}
+
+type userDetailPageData struct {
+	pageData
+	Row           userRowView
+	Roles         []roleSelectOption
+	EnabledAdmins int
+	Form          userFormValues
+}
+
+type accountPasswordPageData struct {
+	pageData
+	UserName string
+	// Forced reports the MustChangePassword state, so the page can explain why
+	// the account cannot reach anything else yet.
+	Forced bool
+}
+
+func (v *views) adminUsers(c *gin.Context, status int, data usersPageData) {
+	v.render(c, status, "admin_users.html", data)
+}
+
+func (v *views) adminUserCreate(c *gin.Context, status int, data userCreatePageData) {
+	v.render(c, status, "admin_user_new.html", data)
+}
+
+func (v *views) adminUserDetail(c *gin.Context, status int, data userDetailPageData) {
+	v.render(c, status, "admin_user_detail.html", data)
+}
+
+func (v *views) accountPassword(c *gin.Context, status int, data accountPasswordPageData) {
+	v.render(c, status, "account_password.html", data)
+}
+
 type errorPageData struct {
 	pageData
 	Status int

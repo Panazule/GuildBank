@@ -49,6 +49,10 @@ func safeNext(value string) string {
 	return u.RequestURI()
 }
 
+// redirectAfterLogin applies the explicit next destination, else the
+// administration default. Callers must send a flagged account to
+// /account/password first: this helper never has a principal to inspect,
+// because login runs before any session middleware.
 func redirectAfterLogin(c *gin.Context, next string) {
 	if target := safeNext(next); target != "" {
 		c.Redirect(http.StatusSeeOther, target)

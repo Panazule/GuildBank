@@ -1,0 +1,63 @@
+{{define "admin_users.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card">
+    <p class="eyebrow">Administration</p>
+    <h1>Accounts</h1>
+    <p class="muted">{{.Total}} account(s) shown · {{.EnabledAdmins}} enabled administrator(s). Disabling is reversible; deleting is permanent.</p>
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <form method="get" action="/admin/users" class="inline-form" role="search">
+      <label for="user-q" class="sr-only">Filter by username</label>
+      <input id="user-q" type="search" name="q" value="{{.Filter}}" placeholder="Filter by username">
+      <button type="submit" class="secondary">Filter</button>
+    </form>
+
+    <div class="wizard-actions">
+      <a class="link primary" href="/admin/users/new">Create account</a>
+    </div>
+
+    {{if .Users}}
+    <div class="table-scroll" role="region" aria-label="Application accounts" tabindex="0">
+      <table class="audit-table">
+        <caption class="sr-only">Application accounts</caption>
+        <thead>
+          <tr>
+            <th scope="col">User</th>
+            <th scope="col">Role</th>
+            <th scope="col">Status</th>
+            <th scope="col">Last login</th>
+            <th scope="col">Created</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Users}}
+          <tr>
+            <td><a href="/admin/users/{{.ID}}">{{.UserName}}</a>{{if .IsSelf}} <span class="muted">(you)</span>{{end}}</td>
+            <td>{{.RoleLabel}}</td>
+            <td>
+              {{if .Disabled}}Disabled{{else}}Active{{end}}
+              {{if .MustChangePassword}}<span class="muted">· must change password</span>{{end}}
+              {{if .Locked}}<span class="muted">· last administrator</span>{{end}}
+            </td>
+            <td>{{.LastLoginText}}</td>
+            <td>{{.CreatedText}}</td>
+            <td><a href="/admin/users/{{.ID}}">Manage</a></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+      <div class="empty-state"><p>No accounts match that filter.</p></div>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

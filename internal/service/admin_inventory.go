@@ -56,13 +56,32 @@ const (
 	ItemWarningIdentityUnresolved = "item_identity_unresolved"
 )
 
-// AdminAuditEventTypes is the closed event-type allowlist for the audit viewer.
-// The movement event types are additive; the legacy ITEM_* names remain valid
-// for historical rows and for the administrative create/update/remove paths.
-var AdminAuditEventTypes = []string{
+// OfficerAuditEventTypes is the closed allowlist for Officers: inventory,
+// import and request history. User administration events are excluded because
+// account management is Administrator work (P1 Q2 / P2 hard gate).
+var OfficerAuditEventTypes = []string{
 	"ITEM_CREATED", "ITEM_UPDATED", "ITEM_REMOVED", "IMPORT_CREATED", "IMPORT_COMMITTED",
 	"ITEM_ISSUED", "ITEM_RETURNED", "ITEM_RECEIVED", "ITEM_WRITTEN_OFF",
 	"ITEM_MOVED", "ITEM_MERGED",
+}
+
+// UserAuditEventTypes are the account-administration events. They are written
+// best-effort after the SQLite commit and are visible to Administrators only.
+var UserAuditEventTypes = []string{
+	"USER_CREATED", "USER_ROLE_CHANGED", "USER_DISABLED", "USER_ENABLED",
+	"USER_PASSWORD_RESET", "USER_PASSWORD_CHANGED", "USER_DELETED",
+}
+
+// AdminAuditEventTypes is the complete closed allowlist for the audit viewer.
+var AdminAuditEventTypes = append(append([]string{}, OfficerAuditEventTypes...), UserAuditEventTypes...)
+
+// AuditEventTypesFor returns the event scope for a role. A nil scope means
+// unrestricted, which only Administrators receive.
+func AuditEventTypesFor(role domain.Role) []string {
+	if role.AtLeast(domain.RoleAdmin) {
+		return nil
+	}
+	return OfficerAuditEventTypes
 }
 
 // AdminStore is the narrow repository surface used by the administrative
@@ -1359,13 +1378,29 @@ func (s *AdminInventoryService) ListAudit(ctx context.Context, filter domain.Aud
 
 // GetAudit reads one audit entry by ID.
 func (s *AdminInventoryService) GetAudit(ctx context.Context, id int64) (domain.AuditEntry, error) {
+	return s.GetAuditScoped(ctx, id, nil)
+}
+
+// GetAuditScoped reads one audit entry and returns ErrNotFound when its event
+// type is outside the caller's scope. A known ID must not be a way around the
+// list filter: an Officer fetching a USER_* row sees exactly what a missing row
+// looks like.
+func (s *AdminInventoryService) GetAuditScoped(ctx context.Context, id int64,
+	scope []string) (domain.AuditEntry, error) {
 	if err := s.requireReady(); err != nil {
 		return domain.AuditEntry{}, err
 	}
 	if id <= 0 {
 		return domain.AuditEntry{}, domain.ErrNotFound
 	}
-	return s.store.GetAudit(ctx, id)
+	entry, err := s.store.GetAudit(ctx, id)
+	if err != nil {
+		return domain.AuditEntry{}, err
+	}
+	if len(scope) > 0 && !auditEventIn(scope, entry.EventType) {
+		return domain.AuditEntry{}, domain.ErrNotFound
+	}
+	return entry, nil
 }
 
 // NormalizeAuditFilter validates exact-value filters and paging bounds. Date
@@ -1373,8 +1408,15 @@ func (s *AdminInventoryService) GetAudit(ctx context.Context, id int64) (domain.
 // the repository.
 func NormalizeAuditFilter(filter domain.AuditFilter) (domain.AuditFilter, error) {
 	fields := make(map[string]string)
+	// The requested event type is validated against the caller's scope, so an
+	// Officer asking for a USER_* filter receives a validation error rather than
+	// a silently empty page.
+	allowed := AdminAuditEventTypes
+	if len(filter.EventTypes) > 0 {
+		allowed = filter.EventTypes
+	}
 	filter.EventType = strings.TrimSpace(filter.EventType)
-	if filter.EventType != "" && !auditEventAllowed(filter.EventType) {
+	if filter.EventType != "" && !auditEventIn(allowed, filter.EventType) {
 		fields["eventType"] = "eventType must be one of the approved values"
 	}
 	filter.User = strings.TrimSpace(filter.User)
@@ -1408,11 +1450,13 @@ func NormalizeAuditFilter(filter domain.AuditFilter) (domain.AuditFilter, error)
 	return filter, nil
 }
 
-func auditEventAllowed(eventType string) bool {
-	for _, candidate := range AdminAuditEventTypes {
+func auditEventIn(allowed []string, eventType string) bool {
+	for _, candidate := range allowed {
 		if candidate == eventType {
 			return true
 		}
 	}
 	return false
 }
+
+func auditEventAllowed(eventType string) bool { return auditEventIn(AdminAuditEventTypes, eventType) }

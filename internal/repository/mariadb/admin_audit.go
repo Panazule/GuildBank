@@ -93,6 +93,20 @@ func auditWhere(filter domain.AuditFilter) (string, []any) {
 		where = append(where, "CorrelationID = ?")
 		args = append(args, filter.CorrelationID)
 	}
+	if filter.EventTypes != nil {
+		quoted := make([]string, 0, len(filter.EventTypes))
+		for _, eventType := range filter.EventTypes {
+			quoted = append(quoted, "?")
+			args = append(args, eventType)
+		}
+		if len(quoted) > 0 {
+			where = append(where, "EventType IN ("+strings.Join(quoted, ",")+")")
+		} else {
+			// An empty scope matches nothing. The API never sends one, but the
+			// predicate must never silently widen to every event.
+			where = append(where, "1 = 0")
+		}
+	}
 	if filter.From != nil {
 		where = append(where, "EventDate >= ?")
 		args = append(args, *filter.From)

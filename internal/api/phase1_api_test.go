@@ -45,12 +45,14 @@ func newHarness(t *testing.T, secure bool) *harness {
 	settings := service.NewSettingsService(store)
 	setup := service.NewSetupService(store, store, setupDBStub{})
 	auth := service.NewAuthService(store, store, settings)
+	users := service.NewUserAdminService(store, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	router, err := NewRouter(Deps{
 		Logger:        slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		Health:        fakeHealth{result: service.Readiness{Ready: true}},
 		Setup:         setup,
 		Auth:          auth,
 		Settings:      settings,
+		Users:         users,
 		Imports:       service.NewImportService(nil, nil, settings, nil, nil),
 		Inventory:     service.NewInventoryService(nil, settings, nil, nil),
 		Version:       "test",

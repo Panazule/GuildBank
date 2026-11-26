@@ -137,6 +137,13 @@ func Run(ctx context.Context, opts Options) error {
 	settingsService := service.NewSettingsService(appStore)
 	setupService := service.NewSetupService(appStore, appStore, guildConnectionTester{})
 	authService := service.NewAuthService(appStore, appStore, settingsService)
+	// Account audit rows are best-effort: a nil sink is valid when no guild
+	// store is configured, and a failed insert never rolls back an account change.
+	var auditSink service.AuditSink
+	if guildStore != nil {
+		auditSink = guildStore
+	}
+	userAdminService := service.NewUserAdminService(appStore, auditSink, logger)
 
 	var importService *service.ImportService
 	var inventoryService *service.InventoryService
@@ -186,6 +193,7 @@ func Run(ctx context.Context, opts Options) error {
 		Imports:        importService,
 		Inventory:      inventoryService,
 		Admin:          adminService,
+		Users:          userAdminService,
 		Version:        opts.Version,
 		TrustedProxies: cfg.TrustedProxies,
 		SecureCookies:  cfg.SecureCookies,

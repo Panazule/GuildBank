@@ -22,6 +22,9 @@
         <a href="/admin/imports">Imports</a>
         <a href="/admin/audit">Audit</a>
       {{end}}
+      {{if .User.CanManageUsers}}
+        <a href="/admin/users">Accounts</a>
+      {{end}}
       {{if .User.CanManageSettings}}
         <a href="/admin/settings">Settings</a>
       {{end}}

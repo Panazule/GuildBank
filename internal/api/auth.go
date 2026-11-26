@@ -61,7 +61,11 @@ func (h *authHandler) csrf(c *gin.Context) {
 
 func (h *authHandler) loginPage(c *gin.Context) {
 	if token := sessionToken(c); token != "" {
-		if _, err := h.auth.Authenticate(c.Request.Context(), token); err == nil {
+		if session, err := h.auth.Authenticate(c.Request.Context(), token); err == nil {
+			if session.User.MustChangePassword {
+				c.Redirect(http.StatusSeeOther, "/account/password")
+				return
+			}
 			redirectAfterLogin(c, c.Query("next"))
 			return
 		}
@@ -101,6 +105,12 @@ func (h *authHandler) establish(c *gin.Context, result service.LoginResult, next
 	rotateCSRF(c, h.csrfMgr)
 
 	if wantsHTML(c) {
+		// A temporary password must be replaced before anything else is
+		// reachable, so the flag overrides both next and the admin default.
+		if result.User.MustChangePassword {
+			c.Redirect(http.StatusSeeOther, "/account/password")
+			return
+		}
 		redirectAfterLogin(c, next)
 		return
 	}

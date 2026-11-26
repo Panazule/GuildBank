@@ -121,6 +121,47 @@ func RequireRole(min domain.Role) gin.HandlerFunc {
 // RequireAdmin keeps the pre-role call site working; it is RequireRole(Admin).
 func RequireAdmin() gin.HandlerFunc { return RequireRole(domain.RoleAdmin) }
 
+// passwordChangeAllowlist lists everything a flagged account may still reach:
+// the change page and endpoint, logout, session inspection and health. Without
+// logout a user could not abandon a forced change; without session inspection a
+// client could not discover why it is blocked.
+func passwordChangeAllowlist(method, path string) bool {
+	switch method + " " + path {
+	case "GET /account/password",
+		"POST /api/v1/auth/password",
+		"POST /api/v1/auth/logout",
+		"GET /api/v1/auth/session":
+		return true
+	}
+	return false
+}
+
+// RequirePasswordChanged enforces MustChangePassword. A flagged account is
+// confined to the allowlist above; HTML callers are redirected to the account
+// page and API callers receive 403 password_change_required. It never
+// authenticates: RequireAuth must run first.
+func RequirePasswordChanged() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session, ok := CurrentSession(c)
+		if !ok {
+			unauthorized(c)
+			return
+		}
+		if !session.User.MustChangePassword ||
+			passwordChangeAllowlist(c.Request.Method, c.Request.URL.Path) {
+			c.Next()
+			return
+		}
+		if wantsHTML(c) {
+			c.Redirect(http.StatusSeeOther, "/account/password")
+			c.Abort()
+			return
+		}
+		writeError(c, http.StatusForbidden, "password_change_required",
+			"the account must change its password before continuing")
+	}
+}
+
 func unauthorized(c *gin.Context) {
 	if strings.HasPrefix(c.Request.URL.Path, "/api/") {
 		writeError(c, http.StatusUnauthorized, "unauthenticated", "authentication required")

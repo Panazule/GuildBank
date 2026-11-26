@@ -1,0 +1,47 @@
+{{define "admin_user_new.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card">
+    <p class="eyebrow">Administration</p>
+    <h1>Create account</h1>
+    <p class="muted">The temporary password is never displayed again. The new account must change it at the first sign-in.</p>
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+    <form method="post" action="/admin/users" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <label>
+        Username
+        <input name="userName" value="{{.Form.UserName}}" autocomplete="off" required>
+        <span class="help">1–64 characters; compared without regard to case</span>
+      </label>
+      {{with index .ErrorFields "userName"}}<p class="field-error">{{.}}</p>{{end}}
+      <label>
+        Role
+        <select name="accessLevel">
+          {{range .Roles}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      {{with index .ErrorFields "accessLevel"}}<p class="field-error">{{.}}</p>{{end}}
+      <label>
+        Temporary password
+        <input name="password" type="password" autocomplete="new-password" required>
+        <span class="help">12–72 bytes, and not the username</span>
+      </label>
+      {{with index .ErrorFields "password"}}<p class="field-error">{{.}}</p>{{end}}
+      <label>
+        Confirm temporary password
+        <input name="confirmPassword" type="password" autocomplete="new-password" required>
+      </label>
+      {{with index .ErrorFields "confirmPassword"}}<p class="field-error">{{.}}</p>{{end}}
+      <div class="wizard-actions">
+        <button type="submit" class="primary">Create account</button>
+        <a class="link" href="/admin/users">Cancel</a>
+      </div>
+    </form>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

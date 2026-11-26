@@ -682,10 +682,15 @@ Settings are cached in memory; the cache is invalidated inside the same transact
 
 ### 7.7 User create / disable / password change
 
-- Create: validate username (trim, case-insensitive uniqueness), hash with bcrypt, insert, write outbox audit.
-- Disable: set `DisabledFg = 1`, set `ModAt`/`ModBy`, delete all sessions for the user, write outbox audit — all in one SQLite transaction (SR-03).
-- Password change: update `PasswordHash`, set `MustChangePassword = 0`, revoke sessions except the current one, write audit.
-- Never physically delete a user; the last enabled administrator cannot be disabled (MR-11).
+Implemented in P2 (`service/user_admin.go`, `repository/sqlite/users.go`). No schema change was required: `Users` already carried `MustChangePassword`, `ModAt`/`ModBy` and the case-insensitive unique index.
+
+- Create: validate the username (trim, valid UTF-8, ≤64 runes, no control characters, case-insensitive uniqueness), hash with bcrypt using the username-aware policy (12–72 bytes, not equal to the username), insert with `MustChangePassword = 1` — one SQLite statement, so no transaction is needed.
+- Disable: `DisabledFg = 1`, `ModAt`/`ModBy`, delete all sessions for the account — one SQLite transaction (SR-03); refused when it would leave zero enabled Administrators.
+- Administrator password reset: `PasswordHash`, `MustChangePassword = 1`, `ModAt`/`ModBy`, delete **all** sessions for the account — one transaction.
+- Own password change: verify the current password, `PasswordHash`, `MustChangePassword = 0`, delete every session except the caller's — one transaction.
+- Role change: `AccessLevel`, `ModAt`/`ModBy`; refused when it would leave zero enabled Administrators. The session lookup joins `Users`, so the new role applies on the next request.
+- **Delete is permitted** for Administrators (owner decision P2 Q7), guarded by the same enabled-administrator rule and by a typed-name confirmation; `Sessions` cascades. Historical rows keep their `UserName`/`ActorName` snapshots, so audit and movement history stay readable. Disable remains the recommended, reversible action.
+- Audit for these events is written **after** the SQLite commit and is best-effort (a MariaDB failure logs a warning and never rolls back the account change). The `AuditOutbox` design below remains the eventual fix for that cross-store gap; it is not implemented.
 
 ### 7.8 Login, request validation and logout
 

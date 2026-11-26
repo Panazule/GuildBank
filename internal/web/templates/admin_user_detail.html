@@ -1,0 +1,76 @@
+{{define "admin_user_detail.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card">
+    <p class="eyebrow">Administration</p>
+    <h1>{{.Row.UserName}}</h1>
+    <p class="muted">
+      {{.Row.RoleLabel}} ·
+      {{if .Row.Disabled}}Disabled{{else}}Active{{end}} ·
+      last login {{.Row.LastLoginText}} · created {{.Row.CreatedText}}{{if .Row.ModBy}} · last changed by {{.Row.ModBy}}{{end}}
+    </p>
+    {{if .Row.Locked}}<div class="alert alert-warn" role="status">This is the last enabled administrator. The role, status and delete actions are unavailable until another enabled administrator exists.</div>{{end}}
+    {{if .Row.MustChangePassword}}<div class="alert alert-warn" role="status">The account must change its password at the next sign-in.</div>{{end}}
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <h2>Role and status</h2>
+    <form method="post" action="/admin/users/{{.Row.ID}}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <label>
+        Role
+        <select name="accessLevel"{{if .Row.Locked}} disabled{{end}}>
+          {{range .Roles}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      <label>
+        Status
+        <select name="status"{{if .Row.Locked}} disabled{{end}}>
+          <option value="active"{{if not .Row.Disabled}} selected{{end}}>Active</option>
+          <option value="disabled"{{if .Row.Disabled}} selected{{end}}>Disabled</option>
+        </select>
+        <span class="help">Disabling signs the account out everywhere. Re-enabling does not restore a session.</span>
+      </label>
+      <div class="wizard-actions">
+        <button type="submit" class="primary"{{if .Row.Locked}} disabled{{end}}>Save changes</button>
+      </div>
+    </form>
+
+    <h2>Reset password</h2>
+    <p class="muted">Sets a temporary password, requires a change at the next sign-in and signs the account out everywhere.</p>
+    <form method="post" action="/admin/users/{{.Row.ID}}/password" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <label>
+        Temporary password
+        <input name="password" type="password" autocomplete="new-password" required>
+        <span class="help">12–72 bytes, and not the username</span>
+      </label>
+      <label>
+        Confirm temporary password
+        <input name="confirmPassword" type="password" autocomplete="new-password" required>
+      </label>
+      <div class="wizard-actions">
+        <button type="submit" class="secondary">Reset password</button>
+      </div>
+    </form>
+
+    <h2>Delete account</h2>
+    <p class="muted">Deleting is permanent. Disable the account instead when the history should keep a real name. Type the username to confirm.</p>
+    <form method="post" action="/admin/users/{{.Row.ID}}/delete" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <label>
+        Confirm username
+        <input name="confirmUserName" autocomplete="off" placeholder="{{.Row.UserName}}" required{{if not .Row.CanDelete}} disabled{{end}}>
+      </label>
+      <div class="wizard-actions">
+        <button type="submit" class="secondary"{{if not .Row.CanDelete}} disabled{{end}}>Delete account</button>
+      </div>
+    </form>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

@@ -54,10 +54,13 @@ func TestNavigationVisibilityFollowsRole(t *testing.T) {
 	admin := renderNav(t, &domain.User{UserName: "admin", AccessLevel: domain.AccessAdmin})
 	for _, href := range []string{
 		`href="/admin/inventory"`, `href="/admin/imports"`,
-		`href="/admin/audit"`, `href="/admin/settings"`,
+		`href="/admin/audit"`, `href="/admin/users"`, `href="/admin/settings"`,
 	} {
 		if !bytes.Contains([]byte(admin), []byte(href)) {
 			t.Fatalf("administrator navigation missing %s", href)
 		}
+	}
+	if bytes.Contains([]byte(officer), []byte(`href="/admin/users"`)) {
+		t.Fatal("officer navigation exposes account management")
 	}
 }
