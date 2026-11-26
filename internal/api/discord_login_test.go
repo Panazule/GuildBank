@@ -222,11 +222,52 @@ func TestDiscordLoginRefusesDisabledAccount(t *testing.T) {
 
 	state := h.startDiscordLogin(t, "")
 	resp := h.loginCallback(url.Values{"code": {"login-code"}, "state": {state}})
-	if resp.Header.Get("Location") != "/login?notice=discord-unlinked" {
+	if resp.Header.Get("Location") != "/login?notice=discord-disabled" {
 		t.Fatalf("disabled login = %q", resp.Header.Get("Location"))
 	}
 	if _, ok := h.sessionUser(t); ok {
 		t.Fatal("a disabled account received a session")
+	}
+
+	// The page names the suspension instead of claiming nothing is linked.
+	_, body := h.request(http.MethodGet, "/login?notice=discord-disabled", "", nil, "text/html")
+	if !strings.Contains(string(body), "Your GuildBank account is disabled.") {
+		t.Fatalf("disabled notice missing: %s", body)
+	}
+	if strings.Contains(string(body), "No GuildBank account is linked") {
+		t.Fatal("the disabled notice still claims nothing is linked")
+	}
+}
+
+func TestDiscordLoginTellsAPendingAccountItIsPending(t *testing.T) {
+	h := newHarness(t, false)
+	h.completeSetup()
+	h.saveSettings(t, discordSettingsPayload())
+	h.seedUser(t, "member1", domain.RoleMember, false)
+	h.linkDiscordDirect(t, "member1", "123456789012345678")
+	if _, err := h.store.DB().Exec(`UPDATE Users SET AccountStatus = ? WHERE UserName = ?`,
+		string(domain.AccountStatusPendingApproval), "member1"); err != nil {
+		t.Fatalf("pend member1: %v", err)
+	}
+	h.logout(t)
+
+	state := h.startDiscordLogin(t, "/admin/users")
+	resp := h.loginCallback(url.Values{"code": {"login-code"}, "state": {state}})
+	want := "/login?notice=discord-pending&next=%2Fadmin%2Fusers"
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != want {
+		t.Fatalf("pending login = %d %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if _, ok := h.sessionUser(t); ok {
+		t.Fatal("a pending account received a session")
+	}
+
+	// The page names the state instead of claiming nothing is linked.
+	_, body := h.request(http.MethodGet, "/login?notice=discord-pending", "", nil, "text/html")
+	if !strings.Contains(string(body), "waiting for an administrator to approve it") {
+		t.Fatalf("pending notice missing: %s", body)
+	}
+	if strings.Contains(string(body), "No GuildBank account is linked") {
+		t.Fatal("the pending notice still claims nothing is linked")
 	}
 }
 

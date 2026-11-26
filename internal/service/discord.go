@@ -21,15 +21,24 @@ const (
 	// developer portal. Sign-in and linking never share a callback, so a link
 	// state can never be replayed as a sign-in (and vice versa).
 	DiscordLoginCallbackPath = "/auth/discord/callback"
-	DiscordAuthorizeURL      = "https://discord.com/oauth2/authorize"
+	// DiscordRegisterCallbackPath is the third redirect URI. Registration has its
+	// own callback for the same reason: no flow can replay another's state.
+	DiscordRegisterCallbackPath = "/register/discord/callback"
+	DiscordAuthorizeURL         = "https://discord.com/oauth2/authorize"
 	// DiscordScope is the minimum that yields a stable user ID and a display
-	// name. Email is never requested.
+	// name. Email is never requested. It is the scope for linking and sign-in
+	// only (D-SR-13): those flows are never widened.
 	DiscordScope = "identify"
+	// DiscordScopeRegister is the only scope that permits GET /users/@me/guilds.
+	// Exactly one flow, /register/discord, requests it.
+	DiscordScopeRegister = "identify guilds"
 
 	// State scopes. The scope is inside the signed payload, so a value minted
-	// for one flow is rejected by the other.
-	DiscordScopeLink  = "link"
-	DiscordScopeLogin = "login"
+	// for one flow is rejected by the other. DiscordStateRegister is the state
+	// value for registration; DiscordScopeRegister is the OAuth scope string.
+	DiscordScopeLink     = "link"
+	DiscordScopeLogin    = "login"
+	DiscordStateRegister = "register"
 )
 
 // DiscordConfig is the validated Discord subset of Settings.
@@ -56,6 +65,16 @@ func (c DiscordConfig) LoginRedirectURI() string {
 		return ""
 	}
 	return strings.TrimRight(c.PublicBaseURL, "/") + DiscordLoginCallbackPath
+}
+
+// RegisterRedirectURI is the registration callback URL. Registration has a
+// third portal registration, so its consent can never be replayed as a link or
+// a sign-in.
+func (c DiscordConfig) RegisterRedirectURI() string {
+	if strings.TrimSpace(c.PublicBaseURL) == "" {
+		return ""
+	}
+	return strings.TrimRight(c.PublicBaseURL, "/") + DiscordRegisterCallbackPath
 }
 
 // Ready reports whether linking can be attempted. Every value is required: an
@@ -162,23 +181,25 @@ func (s *DiscordService) Config(ctx context.Context) (DiscordConfig, error) {
 }
 
 // AuthorizeURL builds the consent URL for linking. The caller supplies the state
-// value and is responsible for binding it to the session.
+// value and is responsible for binding it to the session. The scope is passed
+// explicitly so no flow can inherit another flow's permissions (D-SR-13).
 func (s *DiscordService) AuthorizeURL(cfg DiscordConfig, state string) string {
-	return authorizeURL(cfg.ClientID, cfg.RedirectURI(), state)
+	return authorizeURL(cfg.ClientID, cfg.RedirectURI(), state, DiscordScope)
 }
 
 // LoginAuthorizeURL builds the consent URL for sign-in. It differs from
-// AuthorizeURL only in the redirect URI, which is a separate portal registration.
+// AuthorizeURL only in the redirect URI, which is a separate portal registration,
+// and shares the same minimum scope.
 func (s *DiscordService) LoginAuthorizeURL(cfg DiscordConfig, state string) string {
-	return authorizeURL(cfg.ClientID, cfg.LoginRedirectURI(), state)
+	return authorizeURL(cfg.ClientID, cfg.LoginRedirectURI(), state, DiscordScope)
 }
 
-func authorizeURL(clientID, redirectURI, state string) string {
+func authorizeURL(clientID, redirectURI, state, scope string) string {
 	query := url.Values{}
 	query.Set("client_id", clientID)
 	query.Set("redirect_uri", redirectURI)
 	query.Set("response_type", "code")
-	query.Set("scope", DiscordScope)
+	query.Set("scope", scope)
 	query.Set("state", state)
 	return DiscordAuthorizeURL + "?" + query.Encode()
 }
@@ -305,8 +326,11 @@ func (s *DiscordService) Unlink(ctx context.Context, user domain.User, correlati
 
 // Login turns a Discord authorization code into an application session for the
 // account that already owns that Discord identity. It never creates or matches
-// an account: an unknown or unlinked Discord user is refused with the same
-// neutral error as a disabled account, and nothing is written.
+// an account, and nothing is written on any refusal. An unknown or unlinked
+// Discord user is refused with the neutral ErrUnauthorized; an account that
+// exists but is not enabled is refused with AccountStateError, which unwraps to
+// the same ErrUnauthorized but lets the sign-in page say whether the account is
+// pending approval or disabled (D-SR-14).
 //
 // Everything the password path enforces still applies, because the session comes
 // from AuthService.IssueSession: DisabledFg is re-checked, the idle/absolute
@@ -354,7 +378,9 @@ func (s *DiscordService) Login(ctx context.Context, code, clientIP, userAgent, c
 		return LoginResult{}, err
 	}
 	if !user.IsEnabled() {
-		return fail(domain.ErrUnauthorized)
+		// The user row is already in hand, so the refusal can name the reason
+		// without a second query. The failure still counts against the limiter.
+		return fail(&domain.AccountStateError{Status: user.Status(), Disabled: user.Disabled})
 	}
 
 	result, err := s.auth.IssueSession(ctx, user, clientIP, userAgent)

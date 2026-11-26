@@ -1,0 +1,33 @@
+{{define "register_complete.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body class="auth-page">
+  {{template "nav" .}}
+  <main class="card narrow">
+    <h1>Choose a username</h1>
+    <p class="muted">
+      Discord account: {{if .DiscordName}}{{.DiscordName}}{{else}}linked{{end}}.
+      {{if .GuildConfigured}}
+        {{if .Member}}Guild membership verified — the account will be approved immediately.{{else}}Guild membership could not be verified — the account will wait for an administrator.{{end}}
+      {{else}}No Discord guild is configured — the account will wait for an administrator.{{end}}
+    </p>
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+    <form method="post" action="/register/complete" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <label>
+        Username
+        <input name="userName" value="{{.Form.UserName}}" autocomplete="username" maxlength="64" required autofocus>
+        <span class="help">Up to 64 characters. This is the name you will sign in with, and names are unique across the guild.</span>
+      </label>
+      {{with index .ErrorFields "userName"}}<p class="field-error">{{.}}</p>{{end}}
+      <div class="wizard-actions">
+        <button type="submit" class="primary">Create account</button>
+      </div>
+    </form>
+    <p class="help">Wrong Discord account? <a class="link" href="/register">Start again</a>.</p>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

@@ -91,6 +91,29 @@ func (f *fakeUserAdminStore) SetUserDisabled(ctx context.Context, id int64, disa
 	return user, nil
 }
 
+func (f *fakeUserAdminStore) SetUserAccountStatus(ctx context.Context, id int64,
+	status domain.AccountStatus, at time.Time, actor domain.Actor) (domain.User, error) {
+	user, ok := f.users[id]
+	if !ok {
+		return domain.User{}, domain.ErrNotFound
+	}
+	user.AccountStatus = string(status)
+	user.ModAt = at
+	user.ModBy = actor.UserName
+	f.users[id] = user
+	return user, nil
+}
+
+func (f *fakeUserAdminStore) CountPending(ctx context.Context) (int, error) {
+	count := 0
+	for _, user := range f.users {
+		if user.IsPending() {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (f *fakeUserAdminStore) ResetUserPassword(ctx context.Context, id int64, hash string,
 	at time.Time, actor domain.Actor) (domain.User, error) {
 	user, ok := f.users[id]

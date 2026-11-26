@@ -29,7 +29,7 @@
           <input name="{{.Key}}" value="{{index $.Form .Key}}" type="number" min="1" max="168">
         {{else if eq .Key "EQResourceBaseUrl"}}
           <input name="{{.Key}}" value="{{index $.Form .Key}}" type="url">
-        {{else if eq .Key "DiscordEnabled"}}
+        {{else if or (eq .Key "DiscordEnabled") (eq .Key "SelfRegistrationEnabled")}}
           <select name="{{.Key}}">
             <option value="false"{{if ne (index $.Form .Key) "true"}} selected{{end}}>Disabled</option>
             <option value="true"{{if eq (index $.Form .Key) "true"}} selected{{end}}>Enabled</option>

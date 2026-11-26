@@ -38,6 +38,14 @@ var routeMatrix = map[string]routeClass{
 	"GET /auth/discord":          classPublic,
 	"GET /auth/discord/callback": classPublic,
 
+	// Self-registration (P4-SR): public by design, creates a Member account and
+	// never signs into an existing one.
+	"GET /register":                  classPublic,
+	"GET /register/discord":          classPublic,
+	"GET /register/discord/callback": classPublic,
+	"GET /register/complete":         classPublic,
+	"POST /register/complete":        classPublic,
+
 	// Public guild inventory.
 	"GET /":                 classPublic,
 	"GET /inventory/:id":    classPublic,
@@ -136,6 +144,12 @@ var routeMatrix = map[string]routeClass{
 	"POST /api/v1/users/:id":          classAdmin,
 	"DELETE /api/v1/users/:id":        classAdmin,
 	"POST /api/v1/users/:id/password": classAdmin,
+
+	// Approval is an explicit action, one request per audit event.
+	"POST /admin/users/:id/approve":            classAdmin,
+	"POST /admin/users/:id/withdraw-approval":  classAdmin,
+	"POST /api/v1/users/:id/approve":           classAdmin,
+	"POST /api/v1/users/:id/withdraw-approval": classAdmin,
 
 	// Administrators may remove a character name from any account (D4).
 	"POST /admin/users/:id/characters/:characterID/delete": classAdmin,

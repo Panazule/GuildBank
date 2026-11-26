@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	// One cookie per flow: a link state and a sign-in state can be in flight at
-	// the same time without overwriting each other.
-	discordLinkStateCookie  = "guildbank_discord_link_state"
-	discordLoginStateCookie = "guildbank_discord_login_state"
+	// One cookie per flow: a link state, a sign-in state and a registration
+	// state can be in flight at the same time without overwriting each other.
+	discordLinkStateCookie     = "guildbank_discord_link_state"
+	discordLoginStateCookie    = "guildbank_discord_login_state"
+	discordRegisterStateCookie = "guildbank_discord_register_state"
 	// discordStateMaxAge bounds how long a started flow may take to come back.
 	discordStateMaxAge = 10 * time.Minute
 )

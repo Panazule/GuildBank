@@ -57,8 +57,31 @@ type loginPageData struct {
 	// Discord shows the alternative sign-in button. It is true only when an
 	// Administrator enabled Discord sign-in with a complete configuration.
 	Discord bool
+	// SelfRegistration shows the Create account link. It is true only when the
+	// settings switch is on and Discord is fully configured.
+	SelfRegistration bool
 	// DiscordNotice is fixed text for a callback outcome, never provider text.
 	DiscordNotice string
+}
+
+// registerPageData backs the public registration landing page. It renders even
+// when the flow is unavailable so the link never 404s.
+type registerPageData struct {
+	pageData
+	Available bool
+	// GuildConfigured states which approval outcome applies before consent:
+	// with no guild ID every registration waits for an officer.
+	GuildConfigured bool
+}
+
+// registerCompletePageData is the username form. The Discord identity comes from
+// the signed ticket, never from a form field.
+type registerCompletePageData struct {
+	pageData
+	Form            registrationForm
+	DiscordName     string
+	Member          bool
+	GuildConfigured bool
 }
 
 type setupPageData struct {
@@ -436,11 +459,18 @@ type adminAuditPageData struct {
 // userRowView is the shared presentation of one account. The list and detail
 // pages use it so the status wording cannot drift between them.
 type userRowView struct {
-	ID                 int64
-	UserName           string
-	Role               domain.Role
-	RoleLabel          string
-	Disabled           bool
+	ID        int64
+	UserName  string
+	Role      domain.Role
+	RoleLabel string
+	Disabled  bool
+	Pending   bool
+	// StatusLabel is the derived status text (D-SR design §2.3). It is never
+	// stored: approval and the administrative penalty stay two axes.
+	StatusLabel        string
+	Origin             string
+	DiscordUserName    string
+	GuildVerifiedText  string
 	MustChangePassword bool
 	LastLoginText      string
 	CreatedText        string
@@ -451,6 +481,12 @@ type userRowView struct {
 	Locked     bool
 	CanDisable bool
 	CanDelete  bool
+	// CanApprove marks a pending account whose approval the detail page may
+	// offer. CanWithdrawApproval marks an approved account whose approval may be
+	// withdrawn: never the operator's own account and never the last enabled
+	// administrator.
+	CanApprove          bool
+	CanWithdrawApproval bool
 }
 
 // roleSelectOption is one entry of the role picker.
@@ -472,8 +508,12 @@ type usersPageData struct {
 	pageData
 	Users         []userRowView
 	Filter        string
+	Status        string
+	StatusOptions []inventorySelectOption
 	Total         int
 	EnabledAdmins int
+	// PendingCount drives the approval queue banner and the "Review" link.
+	PendingCount int
 }
 
 type userCreatePageData struct {
@@ -584,6 +624,14 @@ type importDetailPageData struct {
 
 func (v *views) login(c *gin.Context, status int, data loginPageData) {
 	v.render(c, status, "login.html", data)
+}
+
+func (v *views) register(c *gin.Context, status int, data registerPageData) {
+	v.render(c, status, "register.html", data)
+}
+
+func (v *views) registerComplete(c *gin.Context, status int, data registerCompletePageData) {
+	v.render(c, status, "register_complete.html", data)
 }
 
 func (v *views) setup(c *gin.Context, status int, data setupPageData) {

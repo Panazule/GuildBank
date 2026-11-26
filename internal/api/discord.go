@@ -266,12 +266,24 @@ func (h *discordHandler) loginCallback(c *gin.Context) {
 		c.Request.UserAgent(), GetRequestID(c))
 	if err != nil {
 		var rate *domain.RateLimitError
+		var stateErr *domain.AccountStateError
 		switch {
 		case errors.As(err, &rate):
 			h.logger.Warn("discord login rate limited", "client_ip", c.ClientIP())
 			h.loginNotice(c, "discord-rate", next)
+		case errors.As(err, &stateErr):
+			// The account exists and the identity is linked; only its state
+			// blocks sign-in. This case must come before the ErrUnauthorized
+			// branch, which AccountStateError also satisfies (D-SR-14).
+			h.logger.Warn("discord login refused", "client_ip", c.ClientIP(),
+				"status", stateErr.Status.String(), "disabled", stateErr.Disabled)
+			if stateErr.Disabled {
+				h.loginNotice(c, "discord-disabled", next)
+			} else {
+				h.loginNotice(c, "discord-pending", next)
+			}
 		case errors.Is(err, domain.ErrUnauthorized):
-			// Neutral: unknown, unlinked and disabled accounts are identical to
+			// Neutral: an unknown or unlinked Discord account is identical to
 			// the caller, and nothing was created or changed.
 			h.logger.Warn("discord login rejected", "client_ip", c.ClientIP())
 			h.loginNotice(c, "discord-unlinked", next)
@@ -319,6 +331,10 @@ func discordLoginNotice(code string) string {
 	switch code {
 	case "discord-unlinked":
 		return "No GuildBank account is linked to that Discord account. Sign in with your username and password, then link Discord from your profile."
+	case "discord-pending":
+		return "Your GuildBank account exists but is waiting for an administrator to approve it. You can sign in once it has been approved."
+	case "discord-disabled":
+		return "Your GuildBank account is disabled. Contact an administrator."
 	case "discord-cancelled":
 		return "Discord sign-in was cancelled."
 	case "discord-state":

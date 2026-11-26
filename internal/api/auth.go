@@ -14,12 +14,13 @@ import (
 )
 
 type authHandler struct {
-	auth    *service.AuthService
-	discord *service.DiscordService
-	views   *views
-	logger  *slog.Logger
-	secure  bool
-	csrfMgr *csrfManager
+	auth         *service.AuthService
+	discord      *service.DiscordService
+	registration *service.RegistrationService
+	views        *views
+	logger       *slog.Logger
+	secure       bool
+	csrfMgr      *csrfManager
 }
 
 type loginRequest struct {
@@ -72,12 +73,54 @@ func (h *authHandler) loginPage(c *gin.Context) {
 		}
 		clearSessionCookie(c, h.secure)
 	}
+	notice, discordNotice := loginNotices(c.Query("notice"))
 	h.views.login(c, http.StatusOK, loginPageData{
-		pageData:      pageData{Title: "Sign in", CSRF: CSRF(c)},
-		Next:          safeNext(c.Query("next")),
-		Discord:       h.discordSignInAvailable(c),
-		DiscordNotice: discordLoginNotice(c.Query("notice")),
+		pageData:         pageData{Title: "Sign in", CSRF: CSRF(c), Notice: notice},
+		Next:             safeNext(c.Query("next")),
+		Discord:          h.discordSignInAvailable(c),
+		SelfRegistration: h.selfRegistrationAvailable(c),
+		DiscordNotice:    discordNotice,
 	})
+}
+
+// selfRegistrationAvailable asks the registration service whether the switch is
+// on and Discord is configured. Any error hides the link: the password form
+// always works.
+func (h *authHandler) selfRegistrationAvailable(c *gin.Context) bool {
+	if h.registration == nil {
+		return false
+	}
+	available, err := h.registration.Available(c.Request.Context())
+	if err != nil {
+		return false
+	}
+	return available
+}
+
+// loginNotices maps a notice code onto fixed text. Registration notices split
+// into informational outcomes (a pending account was created) and failures, so
+// the page can style them differently. Nothing from the query string is
+// reflected.
+func loginNotices(code string) (notice, discordNotice string) {
+	switch code {
+	case "registration-pending":
+		return "Your account was created and is waiting for an administrator to approve it. Sign in once it has been approved.", ""
+	case "registration-exists":
+		return "", "An account already exists for that Discord account. Sign in instead. If it is not your account, contact an officer."
+	case "registration-cancelled":
+		return "", "Discord registration was cancelled."
+	case "registration-state":
+		return "", "The Discord registration expired or did not belong to this browser. Start again."
+	case "registration-provider":
+		return "", "Discord could not be reached. Try again shortly."
+	case "registration-unavailable":
+		return "", "Self-registration is not enabled."
+	case "registration-rate":
+		return "", "Too many registration attempts. Wait a few minutes before trying again."
+	case "registration-error":
+		return "", "The registration could not be completed."
+	}
+	return "", discordLoginNotice(code)
 }
 
 // discordSignInAvailable asks the Discord service whether sign-in is fully
@@ -167,9 +210,10 @@ func (h *authHandler) loginFailure(c *gin.Context, req loginRequest, err error) 
 
 func (h *authHandler) renderLoginError(c *gin.Context, status int, next, message string) {
 	h.views.login(c, status, loginPageData{
-		pageData: pageData{Title: "Sign in", CSRF: CSRF(c), Error: message},
-		Next:     safeNext(next),
-		Discord:  h.discordSignInAvailable(c),
+		pageData:         pageData{Title: "Sign in", CSRF: CSRF(c), Error: message},
+		Next:             safeNext(next),
+		Discord:          h.discordSignInAvailable(c),
+		SelfRegistration: h.selfRegistrationAvailable(c),
 	})
 }
 

@@ -20,6 +20,7 @@ import (
 type usersHandler struct {
 	users      *service.UserAdminService
 	characters *service.CharacterService
+	discord    *service.DiscordService
 	views      *views
 	logger     *slog.Logger
 }
@@ -29,6 +30,10 @@ type userResponse struct {
 	UserName           string     `json:"userName"`
 	AccessLevel        string     `json:"accessLevel"`
 	Disabled           bool       `json:"disabled"`
+	AccountStatus      string     `json:"accountStatus"`
+	Pending            bool       `json:"pending"`
+	Origin             string     `json:"origin,omitempty"`
+	GuildVerifiedAt    *time.Time `json:"guildVerifiedAt,omitempty"`
 	MustChangePassword bool       `json:"mustChangePassword"`
 	LastLogin          *time.Time `json:"lastLogin,omitempty"`
 	CreatedAt          time.Time  `json:"createdAt"`
@@ -39,8 +44,10 @@ type userResponse struct {
 func userResponseOf(u domain.User) userResponse {
 	return userResponse{
 		ID: u.ID, UserName: u.UserName, AccessLevel: u.AccessLevel,
-		Disabled: u.Disabled, MustChangePassword: u.MustChangePassword,
-		LastLogin: u.LastLogin, CreatedAt: u.CreatedAt.UTC(), ModAt: u.ModAt.UTC(),
+		Disabled: u.Disabled, AccountStatus: string(u.Status()), Pending: u.IsPending(),
+		Origin: u.Origin, GuildVerifiedAt: u.GuildVerifiedAt,
+		MustChangePassword: u.MustChangePassword,
+		LastLogin:          u.LastLogin, CreatedAt: u.CreatedAt.UTC(), ModAt: u.ModAt.UTC(),
 		ModBy: u.ModBy,
 	}
 }
@@ -98,6 +105,8 @@ type deleteUserRequest struct {
 	ConfirmUserName string `json:"confirmUserName" form:"confirmUserName"`
 }
 
+// userResponse is the account API shape. AccountStatus, Pending, Origin and
+// GuildVerifiedAt are additive, so existing clients keep working.
 type changePasswordRequest struct {
 	CurrentPassword string `json:"currentPassword" form:"currentPassword"`
 	NewPassword     string `json:"newPassword" form:"newPassword"`
@@ -142,7 +151,7 @@ func (h *usersHandler) fail(c *gin.Context, err error) {
 }
 
 func (h *usersHandler) list(c *gin.Context) {
-	users, err := h.users.List(c.Request.Context(), c.Query("q"))
+	users, err := h.users.ListStatus(c.Request.Context(), c.Query("q"), c.Query("status"))
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -264,13 +273,19 @@ func (h *usersHandler) remove(c *gin.Context) {
 
 func (h *usersHandler) page(c *gin.Context) {
 	filter := strings.TrimSpace(c.Query("q"))
+	status := userStatusFilter(c.Query("status"))
 	ctx := c.Request.Context()
-	users, err := h.users.List(ctx, filter)
+	users, err := h.users.ListStatus(ctx, filter, status)
 	if err != nil {
 		h.pageError(c, err)
 		return
 	}
 	enabledAdmins, err := h.users.EnabledAdmins(ctx)
+	if err != nil {
+		h.pageError(c, err)
+		return
+	}
+	pending, err := h.users.PendingCount(ctx)
 	if err != nil {
 		h.pageError(c, err)
 		return
@@ -285,10 +300,36 @@ func (h *usersHandler) page(c *gin.Context) {
 	}
 	data := usersPageData{
 		pageData: pageData{Title: "Accounts", CSRF: CSRF(c), User: currentUserPointer(c)},
-		Users:    rows, Filter: filter, Total: len(rows), EnabledAdmins: enabledAdmins,
+		Users:    rows, Filter: filter, Status: status, Total: len(rows),
+		EnabledAdmins: enabledAdmins, PendingCount: pending,
+		StatusOptions: userStatusOptions(status),
 	}
 	data.Notice = userNotice(c.Query("notice"))
 	h.views.adminUsers(c, http.StatusOK, data)
+}
+
+// userStatusFilter normalizes the accounts-page filter. An unknown value is
+// "all": a hand-edited query string may only widen a read the caller is already
+// authorized to perform.
+func userStatusFilter(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "pending", "approved", "disabled":
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+	return "all"
+}
+
+func userStatusOptions(selected string) []inventorySelectOption {
+	options := []inventorySelectOption{
+		{Value: "all", Label: "All accounts"},
+		{Value: "pending", Label: "Pending approval"},
+		{Value: "approved", Label: "Approved"},
+		{Value: "disabled", Label: "Disabled"},
+	}
+	for i := range options {
+		options[i].Selected = options[i].Value == selected
+	}
+	return options
 }
 
 func (h *usersHandler) newPage(c *gin.Context) {
@@ -389,6 +430,7 @@ func (h *usersHandler) renderDetail(c *gin.Context, status int, user domain.User
 		actorID = session.User.ID
 	}
 	row := userRowViewOf(user, actorID, enabledAdmins)
+	row.DiscordUserName = h.discordName(c, user.ID)
 	data := userDetailPageData{
 		pageData: pageData{
 			Title: user.UserName, CSRF: CSRF(c), User: currentUserPointer(c),
@@ -513,6 +555,89 @@ func accountDetailURL(id int64, notice string) string {
 	return "/admin/users/" + strconv.FormatInt(id, 10) + "?notice=" + notice
 }
 
+// approveForm is the HTML adapter for the explicit approval action.
+func (h *usersHandler) approveForm(c *gin.Context) {
+	id, ok := parseAdminID(c, true)
+	if !ok {
+		return
+	}
+	actor, ok := adminActor(c)
+	if !ok {
+		return
+	}
+	if _, err := h.users.Approve(c.Request.Context(), id, actor, GetRequestID(c), c.ClientIP()); err != nil {
+		h.detailFailure(c, id, err, nil)
+		return
+	}
+	c.Redirect(http.StatusSeeOther, accountDetailURL(id, "approved"))
+}
+
+// withdrawApprovalForm is the HTML adapter for returning an account to pending.
+func (h *usersHandler) withdrawApprovalForm(c *gin.Context) {
+	id, ok := parseAdminID(c, true)
+	if !ok {
+		return
+	}
+	actor, ok := adminActor(c)
+	if !ok {
+		return
+	}
+	if _, err := h.users.WithdrawApproval(c.Request.Context(), id, actor, GetRequestID(c), c.ClientIP()); err != nil {
+		h.detailFailure(c, id, err, nil)
+		return
+	}
+	c.Redirect(http.StatusSeeOther, accountDetailURL(id, "approval-withdrawn"))
+}
+
+func (h *usersHandler) approveAPI(c *gin.Context) {
+	h.respondApproval(c, true)
+}
+
+func (h *usersHandler) withdrawApprovalAPI(c *gin.Context) {
+	h.respondApproval(c, false)
+}
+
+// respondApproval runs one approval change and answers with the updated row.
+func (h *usersHandler) respondApproval(c *gin.Context, approve bool) {
+	id, ok := parseAdminID(c, false)
+	if !ok {
+		return
+	}
+	actor, ok := adminActor(c)
+	if !ok {
+		return
+	}
+	ctx := c.Request.Context()
+	var (
+		updated domain.User
+		err     error
+	)
+	if approve {
+		updated, err = h.users.Approve(ctx, id, actor, GetRequestID(c), c.ClientIP())
+	} else {
+		updated, err = h.users.WithdrawApproval(ctx, id, actor, GetRequestID(c), c.ClientIP())
+	}
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"user": userResponseOf(updated)}})
+}
+
+// discordName reads the linked Discord display name for the detail page. A
+// missing configuration or an unlinked account yields empty text; the page must
+// never fail because of it.
+func (h *usersHandler) discordName(c *gin.Context, userID int64) string {
+	if h.discord == nil {
+		return ""
+	}
+	identity, err := h.discord.Identity(c.Request.Context(), userID)
+	if err != nil {
+		return ""
+	}
+	return identity.DiscordUserName
+}
+
 // pageError renders a page-level failure. A missing row is 404; an unavailable
 // store keeps its documented 503.
 func (h *usersHandler) pageError(c *gin.Context, err error) {
@@ -597,16 +722,37 @@ func (h *usersHandler) passwordFailure(c *gin.Context, user domain.User,
 // disabled in the UI as well as in the store.
 func userRowViewOf(u domain.User, actorID int64, enabledAdmins int) userRowView {
 	locked := u.Role() == domain.RoleAdmin && !u.Disabled && enabledAdmins <= 1
+	isSelf := u.ID == actorID
 	row := userRowView{
 		ID: u.ID, UserName: u.UserName, Role: u.Role(), RoleLabel: userRoleLabel(u.Role()),
-		Disabled: u.Disabled, MustChangePassword: u.MustChangePassword,
-		LastLoginText: userTimeText(u.LastLogin),
-		CreatedText:   u.CreatedAt.UTC().Format("2006-01-02"),
-		ModBy:         u.ModBy, IsSelf: u.ID == actorID, Locked: locked,
+		Disabled: u.Disabled, Pending: u.IsPending(), StatusLabel: userStatusLabel(u),
+		Origin: u.Origin, GuildVerifiedText: userTimeText(u.GuildVerifiedAt),
+		MustChangePassword: u.MustChangePassword,
+		LastLoginText:      userTimeText(u.LastLogin),
+		CreatedText:        u.CreatedAt.UTC().Format("2006-01-02"),
+		ModBy:              u.ModBy, IsSelf: isSelf, Locked: locked,
 	}
 	row.CanDisable = !row.IsSelf && !locked
 	row.CanDelete = !row.IsSelf && !locked
+	row.CanApprove = row.Pending && !locked
+	row.CanWithdrawApproval = !row.Pending && !row.IsSelf && !locked
 	return row
+}
+
+// userStatusLabel derives the display status from the two independent axes. A
+// pending account is never shown as "Active", and a disabled pending account is
+// never shown as merely disabled.
+func userStatusLabel(u domain.User) string {
+	switch {
+	case u.IsPending() && u.Disabled:
+		return "Pending approval · disabled"
+	case u.IsPending():
+		return "Pending approval"
+	case u.Disabled:
+		return "Disabled"
+	default:
+		return "Active"
+	}
 }
 
 func userRoleLabel(role domain.Role) string {
@@ -651,6 +797,10 @@ func userNotice(code string) string {
 		return "The account was deleted."
 	case "character-removed":
 		return "The character name was removed from that account."
+	case "approved":
+		return "The account was approved. The user can now sign in."
+	case "approval-withdrawn":
+		return "Approval was withdrawn. Every session for that account was signed out."
 	}
 	return ""
 }

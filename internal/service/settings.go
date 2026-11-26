@@ -48,7 +48,8 @@ var SettingDefinitions = []SettingDefinition{
 	{Key: "DiscordEnabled", Label: "Discord account linking", Type: domain.SettingBoolean, Default: "false", Help: "true or false; requires the client ID, client secret and public base URL"},
 	{Key: "DiscordClientId", Label: "Discord client ID", Type: domain.SettingString, Default: "", Help: "Application ID from the Discord developer portal"},
 	{Key: "DiscordClientSecret", Label: "Discord client secret", Type: domain.SettingSecret, Secret: true, Default: "", Help: "Stored in SQLite; blank keeps the existing value"},
-	{Key: "DiscordGuildId", Label: "Discord guild ID (optional)", Type: domain.SettingString, Default: "", Help: "When set, guild membership is checked at link time"},
+	{Key: "DiscordGuildId", Label: "Discord guild ID (optional)", Type: domain.SettingString, Default: "", Help: "When set, guild membership is checked at link time and at self-registration"},
+	{Key: "SelfRegistrationEnabled", Label: "Allow self-registration", Type: domain.SettingBoolean, Default: "false", Help: "Lets visitors create a Member account with Discord. An account is approved automatically only when Discord guild membership is verified; otherwise it waits for an administrator."},
 }
 
 var settingByName = func() map[string]SettingDefinition {
@@ -214,6 +215,10 @@ func validateSettingValue(def SettingDefinition, value string) string {
 			return "must be an http or https origin without a path, query or fragment"
 		}
 	case "DiscordEnabled":
+		if _, err := strconv.ParseBool(strings.TrimSpace(value)); err != nil {
+			return "must be true or false"
+		}
+	case "SelfRegistrationEnabled":
 		if _, err := strconv.ParseBool(strings.TrimSpace(value)); err != nil {
 			return "must be true or false"
 		}

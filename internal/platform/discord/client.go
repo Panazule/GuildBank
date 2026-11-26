@@ -98,8 +98,9 @@ func (c *Client) CurrentUser(ctx context.Context, accessToken string) (domain.Di
 }
 
 // GuildMember reports whether the token's user is a member of guildID. It reads
-// GET /users/@me/guilds, which lists guilds without requiring the guilds scope;
-// a 403 or 401 is returned as an error so the caller can record "unverified".
+// GET /users/@me/guilds, which per Discord's documentation "requires the guilds
+// OAuth2 scope": a token minted with identify alone gets a 403, which is returned
+// here as an error so the caller records "unverified" rather than "not a member".
 func (c *Client) GuildMember(ctx context.Context, accessToken, guildID string) (bool, error) {
 	req, err := c.bearerRequest(ctx, http.MethodGet, "/users/@me/guilds", accessToken)
 	if err != nil {

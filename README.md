@@ -111,6 +111,28 @@ credentials in `Settings`, but the running pool still uses this environment
 bootstrap. Phase 3 deliberately did not hot-swap the pool; changing connection
 settings takes effect after a restart (PD-05/PD-18 remain in force).
 
+### Discord and self-registration
+
+Discord is configured in Settings, not with flags: `PublicBaseUrl` (origin
+only), `DiscordEnabled`, `DiscordClientId`, `DiscordClientSecret`, optional
+`DiscordGuildId`, and `SelfRegistrationEnabled` (default `false`).
+
+Register these redirect URIs in the Discord developer portal:
+
+| Flow | Redirect URI | Scope |
+|---|---|---|
+| Account linking | `PublicBaseUrl + /account/discord/callback` | `identify` |
+| Discord sign-in | `PublicBaseUrl + /auth/discord/callback` | `identify` |
+| Self-registration | `PublicBaseUrl + /register/discord/callback` | `identify guilds` |
+
+Only registration requests `guilds`; linking and sign-in are never widened
+(D-SR-13). With `SelfRegistrationEnabled` on and a `DiscordGuildId` set, a
+visitor whose Discord account is a member of that guild is created `Approved`
+and signed in immediately. Every other outcome — not a member, Discord
+unreachable, or no guild ID configured — creates a `PendingApproval` account
+with no session, which an Administrator approves from `/admin/users`
+(`?status=pending`).
+
 ## Endpoints
 
 | Method | Path | Behaviour |
@@ -139,6 +161,13 @@ settings takes effect after a restart (PD-05/PD-18 remain in force).
 | GET | `/account/discord/callback` | OAuth callback; `303 /account/profile?notice=…` on every outcome |
 | GET | `/auth/discord` | Discord sign-in start; `303` to Discord, or `/login?notice=…` when unavailable |
 | GET | `/auth/discord/callback` | Discord sign-in callback; sets a session or redirects to `/login?notice=…` |
+| GET | `/register` | Public self-registration landing page; renders (with "not enabled" copy) even when the switch is off |
+| GET | `/register/discord` | Registration consent start; `303` to Discord with `scope=identify guilds`, or `/login?notice=…` when unavailable |
+| GET | `/register/discord/callback` | Registration callback; exchanges the code, checks guild membership, then `303 /register/complete` or `/login?notice=…` |
+| GET | `/register/complete` | Username form from the signed ticket; without a valid ticket `303 /register?notice=registration-expired` |
+| POST | `/register/complete` | Create the account; `303 /` (approved + signed in) or `303 /login?notice=registration-pending`; `409`/`422` re-render the form |
+| POST | `/admin/users/:id/approve`, `/api/v1/users/:id/approve` | Administrator approval of a pending account; one audit event per call |
+| POST | `/admin/users/:id/withdraw-approval`, `/api/v1/users/:id/withdraw-approval` | Return an approved account to pending; every session is revoked |
 | POST | `/account/discord/unlink` | HTML form adapter that unlinks Discord |
 | GET | `/api/v1/me/discord` | The account's linked Discord identity (`linked`, name, date) |
 | DELETE | `/api/v1/me/discord` | Unlink Discord from the signed-in account |

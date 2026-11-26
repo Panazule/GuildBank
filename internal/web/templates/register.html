@@ -1,0 +1,34 @@
+{{define "register.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body class="auth-page">
+  {{template "nav" .}}
+  <main class="card narrow">
+    <h1>Create account</h1>
+    <p class="muted">GuildBank accounts are created with Discord. There is no email step and no password to choose.</p>
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    {{if .Available}}
+      <ol class="muted">
+        <li>Authorize GuildBank with Discord.</li>
+        <li>Choose the username you will sign in with.</li>
+        <li>Your Discord account is linked to the new account automatically.</li>
+      </ol>
+      {{if .GuildConfigured}}
+        <p class="help">Guild membership is checked. If you are a member of the configured Discord guild the account is approved immediately and you are signed in.</p>
+      {{else}}
+        <p class="help">No Discord guild is configured, so every new account waits in the approval queue until an administrator approves it.</p>
+      {{end}}
+      <p><a class="link primary" href="/register/discord">Continue with Discord</a></p>
+      <p class="help">If Discord is unreachable, or if membership cannot be verified, the account is created and waits for an administrator.</p>
+    {{else}}
+      <div class="alert alert-warn" role="status">Self-registration is not enabled. Ask an officer for an account.</div>
+      <p><a class="link" href="/login">Back to sign in</a></p>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

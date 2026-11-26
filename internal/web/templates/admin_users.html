@@ -8,12 +8,17 @@
     <p class="eyebrow">Administration</p>
     <h1>Accounts</h1>
     <p class="muted">{{.Total}} account(s) shown · {{.EnabledAdmins}} enabled administrator(s). Disabling is reversible; deleting is permanent.</p>
+    {{if .PendingCount}}<div class="alert alert-warn" role="status">{{.PendingCount}} account(s) await approval. <a href="/admin/users?status=pending">Review</a></div>{{end}}
     {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
     {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
 
     <form method="get" action="/admin/users" class="inline-form" role="search">
       <label for="user-q" class="sr-only">Filter by username</label>
       <input id="user-q" type="search" name="q" value="{{.Filter}}" placeholder="Filter by username">
+      <label for="user-status" class="sr-only">Filter by status</label>
+      <select id="user-status" name="status">
+        {{range .StatusOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
       <button type="submit" class="secondary">Filter</button>
     </form>
 
@@ -38,10 +43,11 @@
         <tbody>
           {{range .Users}}
           <tr>
-            <td><a href="/admin/users/{{.ID}}">{{.UserName}}</a>{{if .IsSelf}} <span class="muted">(you)</span>{{end}}</td>
+            <td><a href="/admin/users/{{.ID}}">{{.UserName}}</a>{{if .IsSelf}} <span class="muted">(you)</span>{{end}}
+              {{if eq .Origin "SelfRegistration"}}<br><span class="muted">Self-registered{{if .DiscordUserName}} as {{.DiscordUserName}}{{end}}</span>{{end}}</td>
             <td>{{.RoleLabel}}</td>
             <td>
-              {{if .Disabled}}Disabled{{else}}Active{{end}}
+              {{.StatusLabel}}
               {{if .MustChangePassword}}<span class="muted">· must change password</span>{{end}}
               {{if .Locked}}<span class="muted">· last administrator</span>{{end}}
             </td>

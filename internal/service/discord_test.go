@@ -408,11 +408,57 @@ func TestLoginRefusesDisabledAccount(t *testing.T) {
 	disabled.Disabled = true
 	svc, _, _, sink, issuer := newDiscordLoginFixture(enabledDiscordSettings(), disabled)
 
-	if _, err := svc.Login(context.Background(), "the-code", "203.0.113.9", "", ""); !errors.Is(err, domain.ErrUnauthorized) {
-		t.Fatalf("Login = %v, want ErrUnauthorized", err)
+	_, err := svc.Login(context.Background(), "the-code", "203.0.113.9", "", "")
+	var state *domain.AccountStateError
+	if !errors.As(err, &state) {
+		t.Fatalf("Login = %v, want AccountStateError", err)
+	}
+	// The reason travels with a typed error, but callers that only know
+	// "not allowed" must keep working unchanged.
+	if !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("Login = %v, want it to wrap ErrUnauthorized", err)
+	}
+	if !state.Disabled || state.Status != domain.AccountStatusApproved {
+		t.Fatalf("state = %+v, want disabled/approved", state)
 	}
 	if len(issuer.issued) != 0 || len(sink.entries) != 0 {
 		t.Fatal("a disabled account received a session or an audit row")
+	}
+}
+
+func TestLoginRefusesPendingAccount(t *testing.T) {
+	pending := discordUser()
+	pending.AccountStatus = string(domain.AccountStatusPendingApproval)
+	svc, _, _, sink, issuer := newDiscordLoginFixture(enabledDiscordSettings(), pending)
+
+	_, err := svc.Login(context.Background(), "the-code", "203.0.113.9", "", "")
+	var state *domain.AccountStateError
+	if !errors.As(err, &state) {
+		t.Fatalf("Login = %v, want AccountStateError", err)
+	}
+	if !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("Login = %v, want it to wrap ErrUnauthorized", err)
+	}
+	if state.Disabled || state.Status != domain.AccountStatusPendingApproval {
+		t.Fatalf("state = %+v, want pending/approved", state)
+	}
+	if len(issuer.issued) != 0 || len(sink.entries) != 0 {
+		t.Fatal("a pending account received a session or an audit row")
+	}
+
+	// The refusal is still a failure for the limiter, so a pending account
+	// cannot drive unbounded provider calls.
+	fresh, _, _, _, _ := newDiscordLoginFixture(enabledDiscordSettings(), pending)
+	var lastErr error
+	for i := 0; i < 10; i++ {
+		if _, lastErr = fresh.Login(context.Background(), "the-code", "203.0.113.9", "", ""); !errors.Is(lastErr, domain.ErrUnauthorized) {
+			t.Fatalf("attempt %d = %v, want ErrUnauthorized", i, lastErr)
+		}
+	}
+	_, err = fresh.Login(context.Background(), "the-code", "203.0.113.9", "", "")
+	var rate *domain.RateLimitError
+	if !errors.As(err, &rate) {
+		t.Fatalf("login past the limit = %v, want RateLimitError", err)
 	}
 }
 

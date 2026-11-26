@@ -9,22 +9,47 @@
     <h1>{{.Row.UserName}}</h1>
     <p class="muted">
       {{.Row.RoleLabel}} ·
-      {{if .Row.Disabled}}Disabled{{else}}Active{{end}} ·
+      {{.Row.StatusLabel}} ·
       last login {{.Row.LastLoginText}} · created {{.Row.CreatedText}}{{if .Row.ModBy}} · last changed by {{.Row.ModBy}}{{end}}
     </p>
     {{if .Row.Locked}}<div class="alert alert-warn" role="status">This is the last enabled administrator. The role, status and delete actions are unavailable until another enabled administrator exists.</div>{{end}}
+    {{if .Row.Pending}}<div class="alert alert-warn" role="status">This account is waiting for approval. It cannot sign in and cannot use character names yet.</div>{{end}}
     {{if .Row.MustChangePassword}}<div class="alert alert-warn" role="status">The account must change its password at the next sign-in.</div>{{end}}
     {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
     {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    {{if .Row.Pending}}
+    <h2>Approval</h2>
+    <p class="muted">
+      {{if eq .Row.Origin "SelfRegistration"}}Self-registered{{else}}Created by an officer{{end}} {{.Row.CreatedText}}.
+      {{if .Row.DiscordUserName}}Discord: {{.Row.DiscordUserName}}.{{end}}
+      {{if .Row.GuildVerifiedText}}Guild membership verified {{.Row.GuildVerifiedText}}.
+      {{else}}Guild membership was not verified at registration.{{end}}
+    </p>
+    {{if .Row.CanApprove}}
+    <form method="post" action="/admin/users/{{.Row.ID}}/approve" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button type="submit" class="primary">Approve account</button>
+    </form>
+    {{end}}
+    {{else if .Row.CanWithdrawApproval}}
+    <h2>Approval</h2>
+    <p class="muted">Approval can be withdrawn without disabling the account. Withdrawing signs the account out everywhere.</p>
+    <form method="post" action="/admin/users/{{.Row.ID}}/withdraw-approval" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button type="submit" class="secondary">Withdraw approval</button>
+    </form>
+    {{end}}
 
     <h2>Role and status</h2>
     <form method="post" action="/admin/users/{{.Row.ID}}" class="stack">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <label>
         Role
-        <select name="accessLevel"{{if .Row.Locked}} disabled{{end}}>
+        <select name="accessLevel"{{if or .Row.Locked .Row.Pending}} disabled{{end}}>
           {{range .Roles}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
         </select>
+        {{if .Row.Pending}}<span class="help">Approve the account before assigning a role.</span>{{end}}
       </label>
       <label>
         Status

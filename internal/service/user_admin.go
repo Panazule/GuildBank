@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ type UserAdminStore interface {
 	CreateUser(ctx context.Context, u domain.User) (domain.User, error)
 	SetUserAccessLevel(ctx context.Context, id int64, role domain.Role, at time.Time, actor domain.Actor) (domain.User, error)
 	SetUserDisabled(ctx context.Context, id int64, disabled bool, at time.Time, actor domain.Actor) (domain.User, error)
+	SetUserAccountStatus(ctx context.Context, id int64, status domain.AccountStatus, at time.Time, actor domain.Actor) (domain.User, error)
+	CountPending(ctx context.Context) (int, error)
 	ResetUserPassword(ctx context.Context, id int64, passwordHash string, at time.Time, actor domain.Actor) (domain.User, error)
 	SetOwnPassword(ctx context.Context, id int64, passwordHash string, at time.Time, keepSessionID string) (domain.User, error)
 	DeleteUser(ctx context.Context, id int64, actor domain.Actor) error
@@ -62,6 +65,15 @@ func (s *UserAdminService) requireReady() error {
 // List returns the accounts whose username contains filter, ordered by username.
 // Password hashes are cleared before the rows leave the service.
 func (s *UserAdminService) List(ctx context.Context, filter string) ([]domain.User, error) {
+	return s.ListStatus(ctx, filter, "")
+}
+
+// ListStatus returns the accounts whose username contains filter and whose
+// approval state matches status. Status values are the ones the accounts page
+// and the API accept: "" or "all" (every account), "pending", "approved" and
+// "disabled". An unknown value is treated as "all" so a hand-edited query string
+// can only ever widen a read that the caller is already authorized to perform.
+func (s *UserAdminService) ListStatus(ctx context.Context, filter, status string) ([]domain.User, error) {
 	if err := s.requireReady(); err != nil {
 		return nil, err
 	}
@@ -70,15 +82,50 @@ func (s *UserAdminService) List(ctx context.Context, filter string) ([]domain.Us
 		return nil, err
 	}
 	needle := strings.ToLower(strings.TrimSpace(filter))
+	want := strings.ToLower(strings.TrimSpace(status))
 	out := make([]domain.User, 0, len(users))
 	for _, user := range users {
 		if needle != "" && !strings.Contains(strings.ToLower(user.UserName), needle) {
 			continue
 		}
+		switch want {
+		case "", "all":
+		case "pending":
+			if !user.IsPending() {
+				continue
+			}
+		case "approved":
+			if !user.IsApproved() {
+				continue
+			}
+		case "disabled":
+			if !user.Disabled {
+				continue
+			}
+		}
 		user.PasswordHash = ""
 		out = append(out, user)
 	}
+	// The approval queue is a queue: the oldest request must be first. Every
+	// other view keeps the store's case-insensitive username order.
+	if want == "pending" {
+		sort.SliceStable(out, func(i, j int) bool {
+			if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+				return out[i].ID < out[j].ID
+			}
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		})
+	}
 	return out, nil
+}
+
+// PendingCount returns how many accounts wait for approval. The accounts page
+// and the navigation badge use it.
+func (s *UserAdminService) PendingCount(ctx context.Context) (int, error) {
+	if err := s.requireReady(); err != nil {
+		return 0, err
+	}
+	return s.store.CountPending(ctx)
 }
 
 // Get returns one account without its password hash.
@@ -130,8 +177,67 @@ func (s *UserAdminService) Create(ctx context.Context, in domain.CreateUserInput
 	return created, nil
 }
 
+// Approve admits a pending account. It never assigns a role and never creates a
+// session: the user signs in through the normal login or Discord sign-in path, so
+// the login limiter stays authoritative. Approving an already-approved account is
+// idempotent and writes no second audit row.
+func (s *UserAdminService) Approve(ctx context.Context, id int64, actor domain.Actor,
+	correlationID, sourceIP string) (domain.User, error) {
+	return s.setAccountStatus(ctx, id, domain.AccountStatusApproved, actor, correlationID, sourceIP)
+}
+
+// WithdrawApproval returns an approved account to pending. Every session for the
+// account is deleted in the same transaction, exactly as disabling does.
+func (s *UserAdminService) WithdrawApproval(ctx context.Context, id int64, actor domain.Actor,
+	correlationID, sourceIP string) (domain.User, error) {
+	return s.setAccountStatus(ctx, id, domain.AccountStatusPendingApproval, actor, correlationID, sourceIP)
+}
+
+func (s *UserAdminService) setAccountStatus(ctx context.Context, id int64, status domain.AccountStatus,
+	actor domain.Actor, correlationID, sourceIP string) (domain.User, error) {
+	if err := s.requireReady(); err != nil {
+		return domain.User{}, err
+	}
+	if !actor.IsAdmin {
+		return domain.User{}, domain.ErrForbidden
+	}
+	current, err := s.store.GetUserByID(ctx, id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	// Withdrawing an operator's own approval would end their own session
+	// mid-request, exactly like disabling their own account.
+	if status == domain.AccountStatusPendingApproval && current.ID == actor.UserID {
+		return domain.User{}, fmt.Errorf("%w: you cannot withdraw approval from your own account", domain.ErrConflict)
+	}
+	if current.Status() == status {
+		current.PasswordHash = ""
+		return current, nil
+	}
+	updated, err := s.store.SetUserAccountStatus(ctx, id, status, s.now().UTC(), actor)
+	if err != nil {
+		return domain.User{}, err
+	}
+	event := "USER_APPROVED"
+	newValues := map[string]string{
+		"accountStatus": string(updated.Status()),
+		"origin":        updated.Origin,
+	}
+	if status == domain.AccountStatusPendingApproval {
+		event = "USER_APPROVAL_WITHDRAWN"
+		// The store deletes every session for the account in the same
+		// transaction, so "all" is the exact scope of the revocation.
+		newValues["sessionsRevoked"] = "all"
+	}
+	s.record(ctx, event, updated,
+		map[string]string{"accountStatus": string(current.Status())}, newValues,
+		actor, correlationID, sourceIP)
+	updated.PasswordHash = ""
+	return updated, nil
+}
+
 // SetRole changes one account's role. The store refuses to remove the last
-// enabled Administrator.
+// enabled Administrator and refuses a role change while the account is pending.
 func (s *UserAdminService) SetRole(ctx context.Context, id int64, roleValue string,
 	actor domain.Actor, correlationID, sourceIP string) (domain.User, error) {
 	if err := s.requireReady(); err != nil {

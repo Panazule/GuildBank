@@ -8,6 +8,7 @@
     <h1>Sign in</h1>
     <p class="muted">Administrator access is required to manage settings.</p>
     {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
     {{if .DiscordNotice}}<div class="alert alert-error" role="alert">{{.DiscordNotice}}</div>{{end}}
     <form method="post" action="/api/v1/auth/login" class="stack">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
@@ -26,6 +27,11 @@
     <p class="muted">or</p>
     <p><a class="link primary" href="/auth/discord{{if .Next}}?next={{urlquery .Next}}{{end}}">Sign in with Discord</a></p>
     <p class="help">Discord sign-in only works for accounts that have already linked Discord from their profile.</p>
+    {{end}}
+    {{if .SelfRegistration}}
+    <p class="muted">or</p>
+    <p><a class="link" href="/register">Create account</a></p>
+    <p class="help">Self-registration uses your Discord account. Guild membership is verified; an officer approves the account when it cannot be.</p>
     {{end}}
   </main>
   {{template "footer" .}}

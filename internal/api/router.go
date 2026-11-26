@@ -36,6 +36,7 @@ type Deps struct {
 	Users          *service.UserAdminService
 	Characters     *service.CharacterService
 	Discord        *service.DiscordService
+	Registration   *service.RegistrationService
 	Version        string
 	TrustedProxies []string
 	StartTime      time.Time
@@ -71,6 +72,11 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	if deps.Discord == nil {
 		deps.Discord = service.NewDiscordService(nil, nil, nil, nil, nil, deps.Logger)
 	}
+	if deps.Registration == nil {
+		// Self-registration degrades to "unavailable" when it is not wired; the
+		// public routes still render, they just never offer the consent anchor.
+		deps.Registration = service.NewRegistrationService(nil, nil, nil, nil, deps.Logger)
+	}
 	if deps.StartTime.IsZero() {
 		deps.StartTime = time.Now()
 	}
@@ -80,6 +86,10 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 		return nil, err
 	}
 	discordState, err := newDiscordStateManager(deps.SecureCookies)
+	if err != nil {
+		return nil, err
+	}
+	ticketSigner, err := newRegistrationTicketSigner(deps.SecureCookies)
 	if err != nil {
 		return nil, err
 	}
@@ -108,16 +118,21 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 
 	r.Use(SecurityHeaders(), SetupGate(deps.Setup, deps.Logger))
 
-	authHandler := &authHandler{auth: deps.Auth, discord: deps.Discord, views: viewSet, logger: deps.Logger, secure: deps.SecureCookies, csrfMgr: csrf}
+	authHandler := &authHandler{auth: deps.Auth, discord: deps.Discord, registration: deps.Registration,
+		views: viewSet, logger: deps.Logger, secure: deps.SecureCookies, csrfMgr: csrf}
 	setupHandler := &setupHandler{setup: deps.Setup, auth: authHandler, views: viewSet, logger: deps.Logger}
 	settingsHandler := &settingsHandler{settings: deps.Settings, views: viewSet, logger: deps.Logger}
 	importHandler := &importsHandler{imports: deps.Imports, views: viewSet, logger: deps.Logger}
 	inventoryHandler := &inventoryHandler{inventory: deps.Inventory, auth: deps.Auth, views: viewSet, logger: deps.Logger}
 	adminHandler := &adminInventoryHandler{admin: deps.Admin, views: viewSet, logger: deps.Logger}
-	usersHandler := &usersHandler{users: deps.Users, characters: deps.Characters, views: viewSet, logger: deps.Logger}
+	usersHandler := &usersHandler{users: deps.Users, characters: deps.Characters, discord: deps.Discord,
+		views: viewSet, logger: deps.Logger}
 	profileHandler := &profileHandler{characters: deps.Characters, discord: deps.Discord, views: viewSet, logger: deps.Logger}
 	discordHandler := &discordHandler{discord: deps.Discord, auth: deps.Auth, state: discordState,
 		csrfMgr: csrf, views: viewSet, logger: deps.Logger, secure: deps.SecureCookies}
+	registrationHandler := &registrationHandler{registration: deps.Registration, auth: deps.Auth,
+		state: discordState, ticketSigner: ticketSigner, csrfMgr: csrf, views: viewSet,
+		logger: deps.Logger, secure: deps.SecureCookies}
 	ui := &uiHandler{views: viewSet}
 
 	// Public forms (login and setup) need a CSRF token even though no session
@@ -132,6 +147,14 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	// never registers anyone; an unlinked Discord user is refused neutrally.
 	public.GET("/auth/discord", discordHandler.loginStart)
 	public.GET("/auth/discord/callback", discordHandler.loginCallback)
+	// Self-registration (P4-SR). Public by design: it creates a Member account
+	// and never signs into an existing one. Every OAuth start is a GET
+	// navigation so CSP form-action 'self' cannot cancel the cross-origin hop.
+	public.GET("/register", registrationHandler.page)
+	public.GET("/register/discord", registrationHandler.start)
+	public.GET("/register/discord/callback", registrationHandler.callback)
+	public.GET("/register/complete", registrationHandler.form)
+	public.POST("/register/complete", registrationHandler.complete)
 	public.GET("/setup", setupHandler.page)
 	public.POST("/setup/admin", setupHandler.validateAdmin)
 	public.POST("/setup/guild", setupHandler.validateGuild)
@@ -252,11 +275,17 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	admin.POST("/admin/users/:id", usersHandler.updateForm)
 	admin.POST("/admin/users/:id/password", usersHandler.resetForm)
 	admin.POST("/admin/users/:id/delete", usersHandler.deleteForm)
+	// Approval is an explicit action rather than a third value in the status
+	// select, so each call maps to exactly one audit event (D-SR §8.2).
+	admin.POST("/admin/users/:id/approve", usersHandler.approveForm)
+	admin.POST("/admin/users/:id/withdraw-approval", usersHandler.withdrawApprovalForm)
 	admin.GET("/api/v1/users", usersHandler.list)
 	admin.POST("/api/v1/users", usersHandler.create)
 	admin.PUT("/api/v1/users/:id", usersHandler.update)
 	admin.POST("/api/v1/users/:id", usersHandler.update)
 	admin.POST("/api/v1/users/:id/password", usersHandler.resetPassword)
+	admin.POST("/api/v1/users/:id/approve", usersHandler.approveAPI)
+	admin.POST("/api/v1/users/:id/withdraw-approval", usersHandler.withdrawApprovalAPI)
 	admin.DELETE("/api/v1/users/:id", usersHandler.remove)
 	// Administrators may remove a character name from any account but cannot
 	// move it to another account (owner decision D4).

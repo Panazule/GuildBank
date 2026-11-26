@@ -146,7 +146,11 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	userAdminService := service.NewUserAdminService(appStore, auditSink, logger)
 	characterService := service.NewCharacterService(appStore, auditSink, logger)
-	discordService := service.NewDiscordService(settingsService, discord.NewClient(nil), appStore, authService, auditSink, logger)
+	discordClient := discord.NewClient(nil)
+	discordService := service.NewDiscordService(settingsService, discordClient, appStore, authService, auditSink, logger)
+	// Self-registration shares the provider client but owns its own flow: it is
+	// the only caller that requests the `guilds` scope (D-SR-13).
+	registrationService := service.NewRegistrationService(settingsService, discordClient, appStore, auditSink, logger)
 
 	var importService *service.ImportService
 	var inventoryService *service.InventoryService
@@ -199,6 +203,7 @@ func Run(ctx context.Context, opts Options) error {
 		Users:          userAdminService,
 		Characters:     characterService,
 		Discord:        discordService,
+		Registration:   registrationService,
 		Version:        opts.Version,
 		TrustedProxies: cfg.TrustedProxies,
 		SecureCookies:  cfg.SecureCookies,

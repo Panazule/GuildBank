@@ -51,17 +51,21 @@ func boolInt(v bool) int {
 
 func scanUser(scanner interface{ Scan(...any) error }) (domain.User, error) {
 	var (
-		u         domain.User
-		lastLogin sql.NullString
-		disabled  int
-		modBy     sql.NullString
-		must      int
-		modAt     string
-		createdAt string
+		u             domain.User
+		lastLogin     sql.NullString
+		disabled      int
+		modBy         sql.NullString
+		must          int
+		modAt         string
+		createdAt     string
+		accountStatus string
+		origin        sql.NullString
+		guildVerified sql.NullString
 	)
 	if err := scanner.Scan(
 		&u.ID, &u.UserName, &u.PasswordHash, &u.AccessLevel, &lastLogin,
 		&disabled, &modAt, &createdAt, &modBy, &must,
+		&accountStatus, &origin, &guildVerified,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.User{}, domain.ErrNotFound
@@ -78,15 +82,22 @@ func scanUser(scanner interface{ Scan(...any) error }) (domain.User, error) {
 	if u.CreatedAt, err = parseTime(createdAt); err != nil {
 		return domain.User{}, err
 	}
+	if u.GuildVerifiedAt, err = nullableTime(guildVerified); err != nil {
+		return domain.User{}, err
+	}
 	u.Disabled = disabled == 1
 	u.MustChangePassword = must == 1
+	u.AccountStatus = accountStatus
 	if modBy.Valid {
 		u.ModBy = modBy.String
+	}
+	if origin.Valid {
+		u.Origin = origin.String
 	}
 	return u, nil
 }
 
-const userColumns = `UserID, UserName, PasswordHash, AccessLevel, LastLogin, DisabledFg, ModAt, CreatedAt, ModBy, MustChangePassword`
+const userColumns = `UserID, UserName, PasswordHash, AccessLevel, LastLogin, DisabledFg, ModAt, CreatedAt, ModBy, MustChangePassword, AccountStatus, Origin, GuildVerifiedAt`
 
 // GetUserByName returns the account with the supplied case-insensitive name.
 func (s *Store) GetUserByName(ctx context.Context, name string) (domain.User, error) {
@@ -132,13 +143,31 @@ type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-func insertUser(ctx context.Context, e execer, u domain.User) (int64, error) {
+// insertUser writes one account row. identity is optional: the administrator
+// path passes nil and the registration path supplies the Discord identity so the
+// identity is written by the same statement as the account. Writing one
+// statement is the atomicity guarantee: there is no window in which an account
+// exists without the identity that justified it.
+func insertUser(ctx context.Context, e execer, u domain.User, identity *domain.DiscordIdentity) (int64, error) {
+	status := domain.ParseAccountStatus(u.AccountStatus)
+	var discordID, discordName, discordAt any
+	if identity != nil && strings.TrimSpace(identity.DiscordUserID) != "" {
+		discordID = identity.DiscordUserID
+		discordName = nullString(identity.DiscordUserName)
+		if identity.LinkedAt != nil {
+			discordAt = formatTime(*identity.LinkedAt)
+		} else {
+			discordAt = formatTime(u.CreatedAt)
+		}
+	}
 	res, err := e.ExecContext(ctx, `
-		INSERT INTO Users (UserName, PasswordHash, AccessLevel, LastLogin, DisabledFg, ModAt, CreatedAt, ModBy, MustChangePassword)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO Users (UserName, PasswordHash, AccessLevel, LastLogin, DisabledFg, ModAt, CreatedAt, ModBy, MustChangePassword,
+		                   DiscordUserID, DiscordUserName, DiscordLinkedAt, AccountStatus, Origin, GuildVerifiedAt)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.UserName, u.PasswordHash, u.AccessLevel, nullableString(u.LastLogin),
 		boolInt(u.Disabled), formatTime(u.ModAt), formatTime(u.CreatedAt), nullString(u.ModBy),
-		boolInt(u.MustChangePassword))
+		boolInt(u.MustChangePassword), discordID, discordName, discordAt,
+		string(status), nullString(u.Origin), nullableString(u.GuildVerifiedAt))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, domain.ErrAlreadyExists
@@ -153,7 +182,7 @@ func insertUser(ctx context.Context, e execer, u domain.User) (int64, error) {
 }
 
 func insertUserTx(ctx context.Context, tx *sql.Tx, u domain.User) (int64, error) {
-	return insertUser(ctx, tx, u)
+	return insertUser(ctx, tx, u, nil)
 }
 
 // CreateUser inserts one account and returns the stored row. The caller supplies
@@ -181,12 +210,124 @@ func (s *Store) CreateUser(ctx context.Context, u domain.User) (domain.User, err
 	}
 	u.AccessLevel = string(role)
 	u.LastLogin = nil
+	// Administrator-created accounts are approved and carry no origin. The two
+	// values are set explicitly rather than left to the column defaults, so the
+	// two creation paths differ only where they are meant to.
+	u.AccountStatus = string(domain.AccountStatusApproved)
+	u.Origin = ""
+	u.GuildVerifiedAt = nil
 
-	id, err := insertUser(ctx, s.db, u)
+	id, err := insertUser(ctx, s.db, u, nil)
 	if err != nil {
 		return domain.User{}, err
 	}
 	return s.GetUserByID(ctx, id)
+}
+
+// CreateRegisteredUser inserts a self-registered account together with its
+// Discord identity, which is written by the same INSERT. ux_users_username and
+// ux_users_discord are the authorities: a duplicate is reported as
+// ErrAlreadyExists, so two concurrent registrations cannot both win.
+func (s *Store) CreateRegisteredUser(ctx context.Context, u domain.User,
+	identity domain.DiscordIdentity) (domain.User, error) {
+	u.UserName = domain.NormalizeUserName(u.UserName)
+	if err := domain.ValidateUserName(u.UserName); err != nil {
+		return domain.User{}, err
+	}
+	role := domain.Role(u.AccessLevel)
+	if !role.Valid() {
+		return domain.User{}, domain.NewValidationError("accessLevel", "must be Member, Officer or Admin")
+	}
+	if strings.TrimSpace(u.PasswordHash) == "" {
+		return domain.User{}, domain.NewValidationError("password", "must not be blank")
+	}
+	if strings.TrimSpace(identity.DiscordUserID) == "" {
+		return domain.User{}, domain.NewValidationError("discordUserID", "must not be blank")
+	}
+	status := domain.AccountStatus(u.AccountStatus)
+	if u.AccountStatus == "" {
+		status = domain.AccountStatusPendingApproval
+	}
+	if !status.Valid() {
+		return domain.User{}, domain.NewValidationError("accountStatus", "must be Approved or PendingApproval")
+	}
+	if u.ModAt.IsZero() {
+		u.ModAt = time.Now().UTC()
+	}
+	if u.CreatedAt.IsZero() {
+		u.CreatedAt = u.ModAt
+	}
+	u.AccessLevel = string(role)
+	u.AccountStatus = string(status)
+	u.LastLogin = nil
+	if identity.LinkedAt == nil {
+		linkedAt := u.CreatedAt
+		identity.LinkedAt = &linkedAt
+	}
+
+	id, err := insertUser(ctx, s.db, u, &identity)
+	if err != nil {
+		return domain.User{}, err
+	}
+	return s.GetUserByID(ctx, id)
+}
+
+// SetUserAccountStatus approves or withdraws approval of one account. Moving an
+// account out of Approved deletes every session for it in the same transaction,
+// mirroring disabling, so a withdrawn approval cannot keep an authenticated
+// browser. The actor must be an Administrator.
+func (s *Store) SetUserAccountStatus(ctx context.Context, userID int64, status domain.AccountStatus,
+	at time.Time, actor domain.Actor) (domain.User, error) {
+	if !actor.IsAdmin {
+		return domain.User{}, domain.ErrForbidden
+	}
+	if !status.Valid() {
+		return domain.User{}, domain.NewValidationError("accountStatus", "must be Approved or PendingApproval")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.User{}, fmt.Errorf("sqlite: begin approval change: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	current, err := getUserByID(ctx, tx, userID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if current.Status() == status {
+		return current, nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE Users SET AccountStatus = ?, ModAt = ?, ModBy = ? WHERE UserID = ?`,
+		string(status), formatTime(at), nullString(actor.UserName), userID); err != nil {
+		return domain.User{}, fmt.Errorf("sqlite: update account status: %w", err)
+	}
+	if status == domain.AccountStatusPendingApproval {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM Sessions WHERE UserID = ?`, userID); err != nil {
+			return domain.User{}, fmt.Errorf("sqlite: revoke sessions: %w", err)
+		}
+	}
+	updated, err := getUserByID(ctx, tx, userID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.User{}, fmt.Errorf("sqlite: commit approval change: %w", err)
+	}
+	return updated, nil
+}
+
+// CountPending counts accounts waiting for approval. It backs the queue banner
+// and uses the ix_users_status index.
+func (s *Store) CountPending(ctx context.Context) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM Users WHERE AccountStatus = ?`,
+		string(domain.AccountStatusPendingApproval)).Scan(&n); err != nil {
+		return 0, fmt.Errorf("sqlite: count pending accounts: %w", err)
+	}
+	return n, nil
 }
 
 // ListUsers returns every account, ordered case-insensitively by username. The
@@ -265,6 +406,11 @@ func (s *Store) SetUserAccessLevel(ctx context.Context, userID int64, role domai
 	current, err := getUserByID(ctx, tx, userID)
 	if err != nil {
 		return domain.User{}, err
+	}
+	// Approval and promotion stay two separately audited acts: a pending account
+	// may not be handed a role by the same submit that admits it.
+	if current.IsPending() {
+		return domain.User{}, fmt.Errorf("%w: approve the account before assigning a role", domain.ErrConflict)
 	}
 	if current.Role() == domain.RoleAdmin && !current.Disabled && role != domain.RoleAdmin {
 		remaining, err := countEnabledAdmins(ctx, tx, userID)

@@ -62,6 +62,11 @@ func (s *CharacterService) Add(ctx context.Context, user domain.User, in domain.
 	if err := s.requireReady(); err != nil {
 		return domain.Character{}, err
 	}
+	// A pending account holds no session, so this is defence in depth: the name
+	// space is globally unique and only an approved account may claim a name.
+	if !user.IsEnabled() {
+		return domain.Character{}, domain.ErrUnauthorized
+	}
 	if err := in.Validate(); err != nil {
 		return domain.Character{}, err
 	}

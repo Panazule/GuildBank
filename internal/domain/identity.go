@@ -121,6 +121,60 @@ func (e *RateLimitError) Error() string { return ErrRateLimited.Error() }
 // Unwrap allows errors.Is(err, ErrRateLimited).
 func (e *RateLimitError) Unwrap() error { return ErrRateLimited }
 
+// AccountStateError reports why an existing, linked account cannot sign in. It
+// deliberately unwraps to ErrUnauthorized so every caller that only knows "not
+// allowed" keeps working unchanged; only the Discord sign-in surface inspects
+// Status to choose a specific, fixed message (D-SR-14).
+type AccountStateError struct {
+	Status   AccountStatus
+	Disabled bool
+}
+
+func (e *AccountStateError) Error() string {
+	if e.Disabled {
+		return "account is disabled"
+	}
+	return "account is not approved"
+}
+
+// Unwrap allows errors.Is(err, ErrUnauthorized).
+func (e *AccountStateError) Unwrap() error { return ErrUnauthorized }
+
+// AccountStatus is the approval axis of an account (D-SR self-registration
+// design §2). It is deliberately separate from DisabledFg: approval answers
+// "has an officer admitted this account?", DisabledFg answers "is this account
+// administratively suspended?".
+type AccountStatus string
+
+const (
+	AccountStatusApproved        AccountStatus = "Approved"
+	AccountStatusPendingApproval AccountStatus = "PendingApproval"
+)
+
+// Valid reports whether the status is one of the approved stored values.
+func (s AccountStatus) Valid() bool {
+	return s == AccountStatusApproved || s == AccountStatusPendingApproval
+}
+
+// String returns the stored value.
+func (s AccountStatus) String() string { return string(s) }
+
+// ParseAccountStatus maps a stored value onto the model. Blank means Approved,
+// because migration 0004 backfills every existing row and a zero-value
+// domain.User in a test or a partial read must not be treated as unapproved.
+// Any other unrecognized value fails closed to PendingApproval, so a corrupt
+// row can never authenticate.
+func ParseAccountStatus(value string) AccountStatus {
+	switch AccountStatus(strings.TrimSpace(value)) {
+	case AccountStatusApproved:
+		return AccountStatusApproved
+	case "":
+		return AccountStatusApproved
+	default:
+		return AccountStatusPendingApproval
+	}
+}
+
 // User is an application account. PasswordHash is never serialized.
 type User struct {
 	ID                 int64
@@ -133,11 +187,31 @@ type User struct {
 	CreatedAt          time.Time
 	ModBy              string
 	MustChangePassword bool
+	// AccountStatus is the raw stored approval value. Use Status() so a corrupt
+	// value is quarantined rather than trusted.
+	AccountStatus string
+	// Origin is "SelfRegistration" for a self-created account and empty for an
+	// administrator-created one. It answers "why is this pending?" without
+	// overloading the ModBy username snapshot.
+	Origin string
+	// GuildVerifiedAt records the last successful Discord guild check. It is set
+	// only on a definitive "member" result.
+	GuildVerifiedAt *time.Time
 }
 
 // Role reports the account's authorization role. An unrecognized AccessLevel
 // fails closed to Member.
 func (u User) Role() Role { return ParseRole(u.AccessLevel) }
+
+// Status reports the account's approval state. An unrecognized stored value
+// fails closed to PendingApproval.
+func (u User) Status() AccountStatus { return ParseAccountStatus(u.AccountStatus) }
+
+// IsApproved reports whether an officer has admitted the account.
+func (u User) IsApproved() bool { return u.Status() == AccountStatusApproved }
+
+// IsPending reports whether the account is waiting for approval.
+func (u User) IsPending() bool { return u.Status() == AccountStatusPendingApproval }
 
 // IsAdmin reports whether the account has administrative access.
 func (u User) IsAdmin() bool { return u.Role() == RoleAdmin }
@@ -162,8 +236,11 @@ func (u User) CanManageUsers() bool { return u.IsAdmin() }
 // configuration.
 func (u User) CanManageSettings() bool { return u.IsAdmin() }
 
-// IsEnabled reports whether the account may authenticate.
-func (u User) IsEnabled() bool { return !u.Disabled }
+// IsEnabled reports whether the account may authenticate. Approval is part of
+// the predicate: every existing authentication gate (login, session
+// validation, Discord sign-in, session issuance) already calls it, so a pending
+// account is refused by code that never had to change.
+func (u User) IsEnabled() bool { return u.IsApproved() && !u.Disabled }
 
 // Session is a server-side authentication session. ID is an opaque identifier;
 // the raw bearer token is never stored (D-09).
