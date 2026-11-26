@@ -40,7 +40,7 @@ GuildBank/
 │   │   ├── rate_limit.go         D-12 IP+username login lockout
 │   │   ├── user_admin.go         Account create/role/status/reset/delete and own password change
 │   │   ├── characters.go         Profile character list for the account owner and administrative removal
-│   │   ├── discord.go            Discord configuration, link/unlink workflow and best-effort audit
+│   │   ├── discord.go            Discord configuration, link/unlink workflow, sign-in session issuance and audit
 │   │   ├── setup.go              Wizard validation, DB test and atomic commit
 │   │   ├── settings.go           Typed setting allowlist, validation and session policy
 │   │   ├── import_parser.go      Canonical TSV parser, limits and diagnostics
@@ -97,8 +97,8 @@ GuildBank/
 │   │   ├── admin_audit.go        Audit viewer and per-record history handlers
 │   │   ├── users.go              Account list/create/detail pages, JSON API and own password change
 │   │   ├── profile.go            Profile page and /api/v1/me/characters (owner-scoped)
-│   │   ├── discord.go            Discord link start, callback, unlink and identity API
-│   │   ├── discord_state.go      Signed, session-bound OAuth state in a SameSite cookie
+│   │   ├── discord.go            Discord link start (GET navigation + POST JSON), callback, unlink, identity API, sign-in start/callback
+│   │   ├── discord_state.go      Signed OAuth state bound to flow, account, session and destination
 │   │   ├── admin_navigation.go   returnTo allowlist and navigation-context helpers
 │   │   ├── views.go              Embedded template rendering
 │   │   ├── ui.go                 Shared HTML page helpers

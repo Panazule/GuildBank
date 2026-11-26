@@ -66,10 +66,9 @@
       </form>
     {{else}}
       <p class="muted">Linking records your Discord name on this profile. It does not change how you sign in.</p>
-      <form method="post" action="/account/discord/link">
-        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-        <button type="submit" class="primary">Link Discord account</button>
-      </form>
+      {{/* A plain navigation, not a form POST: the 303 to discord.com would be
+           cancelled by the page's Content-Security-Policy form-action 'self'. */}}
+      <p><a class="link primary" href="/account/discord/link">Link Discord account</a></p>
     {{end}}
   </main>
   {{template "footer" .}}

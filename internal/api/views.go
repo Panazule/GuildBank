@@ -54,6 +54,11 @@ type pageData struct {
 type loginPageData struct {
 	pageData
 	Next string
+	// Discord shows the alternative sign-in button. It is true only when an
+	// Administrator enabled Discord sign-in with a complete configuration.
+	Discord bool
+	// DiscordNotice is fixed text for a callback outcome, never provider text.
+	DiscordNotice string
 }
 
 type setupPageData struct {

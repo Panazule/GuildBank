@@ -21,6 +21,7 @@ func (f fakeDiscordSettings) Values(ctx context.Context) (map[string]string, err
 
 type fakeDiscordStore struct {
 	identities map[int64]domain.DiscordIdentity
+	users      map[int64]domain.User
 	setErr     error
 	setCalls   int
 	clearCalls int
@@ -28,7 +29,38 @@ type fakeDiscordStore struct {
 }
 
 func newFakeDiscordStore() *fakeDiscordStore {
-	return &fakeDiscordStore{identities: map[int64]domain.DiscordIdentity{}}
+	return &fakeDiscordStore{identities: map[int64]domain.DiscordIdentity{},
+		users: map[int64]domain.User{}}
+}
+
+func (f *fakeDiscordStore) UserByDiscordID(ctx context.Context, discordUserID string) (domain.User, error) {
+	for userID, identity := range f.identities {
+		if identity.DiscordUserID != discordUserID {
+			continue
+		}
+		if user, ok := f.users[userID]; ok {
+			return user, nil
+		}
+		return domain.User{ID: userID, UserName: "Keeper", AccessLevel: string(domain.RoleMember)}, nil
+	}
+	return domain.User{}, domain.ErrNotFound
+}
+
+// fakeSessionIssuer records the accounts that were granted a session and can be
+// told to fail, so the sign-in service is tested without real persistence.
+type fakeSessionIssuer struct {
+	issued []domain.User
+	err    error
+}
+
+func (f *fakeSessionIssuer) IssueSession(ctx context.Context, user domain.User, clientIP, userAgent string) (LoginResult, error) {
+	if f.err != nil {
+		return LoginResult{}, f.err
+	}
+	f.issued = append(f.issued, user)
+	now := time.Now().UTC()
+	return LoginResult{User: user, Token: "session-token",
+		ExpiresAt: now.Add(30 * time.Minute), AbsoluteExpiresAt: now.Add(8 * time.Hour)}, nil
 }
 
 func (f *fakeDiscordStore) DiscordIdentity(ctx context.Context, userID int64) (domain.DiscordIdentity, error) {
@@ -300,9 +332,138 @@ func TestIdentityReportsLinkedState(t *testing.T) {
 	if _, err := svc.Identity(context.Background(), 0); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Fatalf("Identity(0) = %v, want ErrUnauthorized", err)
 	}
-	unready := NewDiscordService(nil, nil, nil, nil, nil)
+	unready := NewDiscordService(nil, nil, nil, nil, nil, nil)
 	if _, err := unready.Identity(context.Background(), 2); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf("unready Identity = %v, want ErrUnavailable", err)
+	}
+}
+
+func newDiscordLoginFixture(values map[string]string, user domain.User) (*DiscordService, *fakeDiscordStore,
+	*stubDiscordAPI, *fakeAuditSink, *fakeSessionIssuer) {
+	store := newFakeDiscordStore()
+	store.identities[user.ID] = domain.DiscordIdentity{UserID: user.ID,
+		DiscordUserID: "123456789012345678", DiscordUserName: "Keldor"}
+	store.users[user.ID] = user
+	api := &stubDiscordAPI{
+		profile: domain.DiscordProfile{ID: "123456789012345678", UserName: "keldor", GlobalName: "Keldor"},
+		token:   domain.DiscordToken{AccessToken: "access-token", TokenType: "Bearer", ExpiresIn: 3600},
+	}
+	sink := &fakeAuditSink{}
+	issuer := &fakeSessionIssuer{}
+	svc := NewDiscordService(fakeDiscordSettings{values: values}, api, store, issuer, sink, nil)
+	return svc, store, api, sink, issuer
+}
+
+func TestLoginIssuesSessionForLinkedAccount(t *testing.T) {
+	svc, _, api, sink, issuer := newDiscordLoginFixture(enabledDiscordSettings(), discordUser())
+	result, err := svc.Login(context.Background(), "the-code", "203.0.113.9", "test-agent", "req-9")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if result.User.ID != 2 || result.Token == "" {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(issuer.issued) != 1 || issuer.issued[0].ID != 2 {
+		t.Fatalf("issued = %+v", issuer.issued)
+	}
+	if len(api.exchangeArgs) != 4 || api.exchangeArgs[2] !=
+		"https://guildbank.example.com/auth/discord/callback" {
+		t.Fatalf("redirect URI used = %+v", api.exchangeArgs)
+	}
+	if len(sink.entries) != 1 {
+		t.Fatalf("audit entries = %d, want 1", len(sink.entries))
+	}
+	entry := sink.entries[0]
+	if entry.EventType != "DISCORD_LOGIN" || entry.TableName != "Users" ||
+		entry.UserName != "Keeper" || entry.SourceIP != "203.0.113.9" {
+		t.Fatalf("audit = %+v", entry)
+	}
+	values := string(entry.NewValues)
+	if !strings.Contains(values, `"method":"discord"`) || !strings.Contains(values, "123456789012345678") {
+		t.Fatalf("audit values = %s", values)
+	}
+	if strings.Contains(values, "access-token") || strings.Contains(values, "the-code") {
+		t.Fatalf("audit leaked a credential: %s", values)
+	}
+}
+
+func TestLoginRefusesUnlinkedDiscordUser(t *testing.T) {
+	svc, store, _, sink, issuer := newDiscordLoginFixture(enabledDiscordSettings(), discordUser())
+	store.identities = map[int64]domain.DiscordIdentity{}
+
+	if _, err := svc.Login(context.Background(), "the-code", "203.0.113.9", "", ""); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("Login = %v, want ErrUnauthorized", err)
+	}
+	if len(issuer.issued) != 0 || len(sink.entries) != 0 {
+		t.Fatalf("an unlinked sign-in issued %d sessions and %d audit rows",
+			len(issuer.issued), len(sink.entries))
+	}
+	if len(store.identities) != 0 || store.setCalls != 0 || store.clearCalls != 0 {
+		t.Fatal("an unlinked sign-in modified identity state")
+	}
+}
+
+func TestLoginRefusesDisabledAccount(t *testing.T) {
+	disabled := discordUser()
+	disabled.Disabled = true
+	svc, _, _, sink, issuer := newDiscordLoginFixture(enabledDiscordSettings(), disabled)
+
+	if _, err := svc.Login(context.Background(), "the-code", "203.0.113.9", "", ""); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("Login = %v, want ErrUnauthorized", err)
+	}
+	if len(issuer.issued) != 0 || len(sink.entries) != 0 {
+		t.Fatal("a disabled account received a session or an audit row")
+	}
+}
+
+func TestLoginRequiresEnabledConfigurationAndIssuer(t *testing.T) {
+	svc, _, api, _, _ := newDiscordLoginFixture(map[string]string{"DiscordEnabled": "false"}, discordUser())
+	if _, err := svc.Login(context.Background(), "code", "ip", "", ""); !errors.Is(err, domain.ErrUnavailable) {
+		t.Fatalf("disabled Login = %v, want ErrUnavailable", err)
+	}
+	if len(api.exchangeArgs) != 0 {
+		t.Fatal("a disabled configuration called the provider")
+	}
+
+	noIssuer := NewDiscordService(fakeDiscordSettings{values: enabledDiscordSettings()},
+		&stubDiscordAPI{}, newFakeDiscordStore(), nil, nil, nil)
+	if _, err := noIssuer.Login(context.Background(), "code", "ip", "", ""); !errors.Is(err, domain.ErrUnavailable) {
+		t.Fatalf("Login without an issuer = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestLoginProviderFailureWritesNothing(t *testing.T) {
+	svc, _, api, sink, issuer := newDiscordLoginFixture(enabledDiscordSettings(), discordUser())
+	api.exchangeErr = errors.New("boom")
+
+	if _, err := svc.Login(context.Background(), "code", "ip", "", ""); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("Login = %v, want ErrUpstream", err)
+	}
+	if len(issuer.issued) != 0 || len(sink.entries) != 0 {
+		t.Fatal("a provider failure issued a session or an audit row")
+	}
+}
+
+func TestLoginRateLimitsRepeatedFailures(t *testing.T) {
+	svc, store, _, _, _ := newDiscordLoginFixture(enabledDiscordSettings(), discordUser())
+	store.identities = map[int64]domain.DiscordIdentity{}
+
+	var lastErr error
+	for i := 0; i < 10; i++ {
+		_, lastErr = svc.Login(context.Background(), "code", "203.0.113.9", "", "")
+	}
+	if !errors.Is(lastErr, domain.ErrUnauthorized) {
+		t.Fatalf("tenth failure = %v, want ErrUnauthorized", lastErr)
+	}
+	_, err := svc.Login(context.Background(), "code", "203.0.113.9", "", "")
+	var rate *domain.RateLimitError
+	if !errors.As(err, &rate) {
+		t.Fatalf("eleventh attempt = %v, want RateLimitError", err)
+	}
+
+	// A different client address is unaffected.
+	if _, err := svc.Login(context.Background(), "code", "198.51.100.4", "", ""); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("other address = %v, want ErrUnauthorized", err)
 	}
 }
 
@@ -313,6 +474,6 @@ func newDiscordFixture(values map[string]string) (*DiscordService, *fakeDiscordS
 		token:   domain.DiscordToken{AccessToken: "access-token", TokenType: "Bearer", ExpiresIn: 3600},
 	}
 	sink := &fakeAuditSink{}
-	svc := NewDiscordService(fakeDiscordSettings{values: values}, api, store, sink, nil)
+	svc := NewDiscordService(fakeDiscordSettings{values: values}, api, store, nil, sink, nil)
 	return svc, store, api, sink
 }

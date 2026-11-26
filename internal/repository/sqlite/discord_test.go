@@ -81,6 +81,40 @@ func TestDiscordIdentityCannotBeShared(t *testing.T) {
 	}
 }
 
+func TestUserByDiscordIDResolvesLinkedAccount(t *testing.T) {
+	store := migratedStore(t)
+	ctx := context.Background()
+	userID := insertUserForTest(t, store, "Keeper", domain.RoleMember, false)
+	other := insertUserForTest(t, store, "Other", domain.RoleOfficer, false)
+	at := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	if err := store.SetDiscordIdentity(ctx, userID, "123456789012345678", "Keldor", at, "Keeper"); err != nil {
+		t.Fatalf("SetDiscordIdentity: %v", err)
+	}
+
+	user, err := store.UserByDiscordID(ctx, "123456789012345678")
+	if err != nil {
+		t.Fatalf("UserByDiscordID: %v", err)
+	}
+	if user.ID != userID || user.UserName != "Keeper" {
+		t.Fatalf("user = %+v", user)
+	}
+	if _, err := store.UserByDiscordID(ctx, "999999999999999999"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("unknown id = %v, want ErrNotFound", err)
+	}
+	if _, err := store.UserByDiscordID(ctx, ""); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("empty id = %v, want ErrNotFound", err)
+	}
+
+	// A second account is only reachable through its own identity.
+	if err := store.SetDiscordIdentity(ctx, other, "987654321098765432", "Other", at, "Other"); err != nil {
+		t.Fatalf("second link: %v", err)
+	}
+	second, err := store.UserByDiscordID(ctx, "987654321098765432")
+	if err != nil || second.ID != other {
+		t.Fatalf("second user = %+v, %v", second, err)
+	}
+}
+
 func TestDiscordIdentityUnknownAccount(t *testing.T) {
 	store := migratedStore(t)
 	ctx := context.Background()

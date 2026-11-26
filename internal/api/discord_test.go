@@ -34,13 +34,12 @@ func (h *harness) saveSettings(t *testing.T, values map[string]string) {
 	}
 }
 
-// startDiscordLink posts the link form and returns the state carried in the
-// authorization redirect.
+// startDiscordLink follows the profile page's navigation link and returns the
+// state carried in the authorization redirect. It sends no CSRF token: the
+// browser path is a plain GET navigation, not a form submission.
 func (h *harness) startDiscordLink(t *testing.T) string {
 	t.Helper()
-	csrf := h.csrf()
-	form := url.Values{"csrf_token": {csrf}}
-	resp, body := h.requestForm(http.MethodPost, "/account/discord/link", csrf, form, "text/html")
+	resp, body := h.request(http.MethodGet, "/account/discord/link", "", nil, "text/html")
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("start link = %d: %s", resp.StatusCode, body)
 	}
@@ -100,8 +99,13 @@ func TestProfileDiscordSectionFollowsSettings(t *testing.T) {
 
 	h.saveSettings(t, discordSettingsPayload())
 	_, body = h.request(http.MethodGet, "/account/profile", "", nil, "text/html")
-	if !strings.Contains(string(body), `action="/account/discord/link"`) {
-		t.Fatalf("enabled profile has no link form: %s", body)
+	if !strings.Contains(string(body), `href="/account/discord/link"`) {
+		t.Fatalf("enabled profile has no link anchor: %s", body)
+	}
+	// The link must not be a form: a cross-origin 303 after a form submission is
+	// cancelled by the page's Content-Security-Policy form-action 'self'.
+	if strings.Contains(string(body), `action="/account/discord/link"`) {
+		t.Fatalf("profile still submits the Discord link as a form: %s", body)
 	}
 	if strings.Contains(string(body), "/account/discord/unlink") {
 		t.Fatal("an unlinked account rendered an unlink form")
@@ -255,6 +259,46 @@ func TestDiscordUnlink(t *testing.T) {
 	}
 }
 
+func TestDiscordLinkStartJsonContract(t *testing.T) {
+	h := newHarness(t, false)
+	h.completeSetup()
+	h.saveSettings(t, discordSettingsPayload())
+
+	csrf := h.csrf()
+	resp, data := h.request(http.MethodPost, "/account/discord/link", csrf, nil, "application/json")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("json start = %d: %s", resp.StatusCode, data)
+	}
+	var payload struct {
+		Data struct {
+			AuthorizeURL string `json:"authorizeUrl"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("json start body: %v", err)
+	}
+	target, err := url.Parse(payload.Data.AuthorizeURL)
+	if err != nil {
+		t.Fatalf("authorizeUrl: %v", err)
+	}
+	if target.Host != "discord.com" || target.Path != "/oauth2/authorize" {
+		t.Fatalf("authorizeUrl = %s", payload.Data.AuthorizeURL)
+	}
+	if target.Query().Get("state") == "" {
+		t.Fatal("authorizeUrl carried no state")
+	}
+	// The JSON path also issues the state cookie, so the same browser could
+	// finish the flow after following the returned URL.
+	origin, _ := url.Parse(h.server.URL)
+	if len(h.client.Jar.Cookies(origin)) == 0 {
+		t.Fatal("json start issued no cookies")
+	}
+	resp, _ = h.request(http.MethodGet, "/account/profile", "", nil, "text/html")
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		t.Fatalf("json start broke the session: %d", resp.StatusCode)
+	}
+}
+
 func TestDiscordRoutesRequireEnabledConfiguration(t *testing.T) {
 	h := newHarness(t, false)
 	h.completeSetup()
@@ -262,8 +306,13 @@ func TestDiscordRoutesRequireEnabledConfiguration(t *testing.T) {
 	h.loginAs(t, "member1")
 
 	csrf := h.csrf()
+	resp, _ := h.request(http.MethodGet, "/account/discord/link", "", nil, "text/html")
+	if resp.StatusCode != http.StatusSeeOther ||
+		resp.Header.Get("Location") != "/account/profile?notice=discord-unavailable" {
+		t.Fatalf("disabled link navigation = %d %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
 	form := url.Values{"csrf_token": {csrf}}
-	resp, _ := h.requestForm(http.MethodPost, "/account/discord/link", csrf, form, "text/html")
+	resp, _ = h.requestForm(http.MethodPost, "/account/discord/link", csrf, form, "text/html")
 	if resp.StatusCode != http.StatusSeeOther ||
 		resp.Header.Get("Location") != "/account/profile?notice=discord-unavailable" {
 		t.Fatalf("disabled link form = %d %q", resp.StatusCode, resp.Header.Get("Location"))

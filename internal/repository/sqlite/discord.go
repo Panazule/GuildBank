@@ -61,6 +61,18 @@ func (s *Store) DiscordUserIDOwner(ctx context.Context, discordUserID string) (i
 	return userID, nil
 }
 
+// UserByDiscordID resolves the account linked to a Discord identity. Sign-in
+// uses it; an unlinked Discord user yields ErrNotFound so the caller can answer
+// neutrally without creating anything.
+func (s *Store) UserByDiscordID(ctx context.Context, discordUserID string) (domain.User, error) {
+	if discordUserID == "" {
+		return domain.User{}, domain.ErrNotFound
+	}
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+userColumns+` FROM Users WHERE DiscordUserID = ?`, discordUserID)
+	return scanUser(row)
+}
+
 // SetDiscordIdentity links an account to a Discord identity. The partial unique
 // index ux_users_discord is the authority: a second account claiming the same
 // Discord user is reported as ErrAlreadyExists even if a concurrent link won the

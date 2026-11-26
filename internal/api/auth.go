@@ -15,6 +15,7 @@ import (
 
 type authHandler struct {
 	auth    *service.AuthService
+	discord *service.DiscordService
 	views   *views
 	logger  *slog.Logger
 	secure  bool
@@ -72,9 +73,24 @@ func (h *authHandler) loginPage(c *gin.Context) {
 		clearSessionCookie(c, h.secure)
 	}
 	h.views.login(c, http.StatusOK, loginPageData{
-		pageData: pageData{Title: "Sign in", CSRF: CSRF(c)},
-		Next:     safeNext(c.Query("next")),
+		pageData:      pageData{Title: "Sign in", CSRF: CSRF(c)},
+		Next:          safeNext(c.Query("next")),
+		Discord:       h.discordSignInAvailable(c),
+		DiscordNotice: discordLoginNotice(c.Query("notice")),
 	})
+}
+
+// discordSignInAvailable asks the Discord service whether sign-in is fully
+// configured. Any error hides the button: the password form always works.
+func (h *authHandler) discordSignInAvailable(c *gin.Context) bool {
+	if h.discord == nil {
+		return false
+	}
+	cfg, err := h.discord.Config(c.Request.Context())
+	if err != nil {
+		return false
+	}
+	return cfg.Ready()
 }
 
 func (h *authHandler) login(c *gin.Context) {
@@ -153,6 +169,7 @@ func (h *authHandler) renderLoginError(c *gin.Context, status int, next, message
 	h.views.login(c, status, loginPageData{
 		pageData: pageData{Title: "Sign in", CSRF: CSRF(c), Error: message},
 		Next:     safeNext(next),
+		Discord:  h.discordSignInAvailable(c),
 	})
 }
 

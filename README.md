@@ -134,8 +134,11 @@ settings takes effect after a restart (PD-05/PD-18 remain in force).
 | POST | `/api/v1/me/characters` | Add a character name; JSON or `303` for HTML |
 | DELETE | `/api/v1/me/characters/:id` | Remove one of the account's own names; another account's ID is `404` |
 | POST | `/api/v1/me/characters/:id/delete` | HTML form adapter for DELETE |
-| POST | `/account/discord/link` | Start Discord account linking; `303` to Discord's consent screen (or `authorizeUrl` JSON) |
+| GET | `/account/discord/link` | Start Discord account linking (browser navigation); `303` to Discord's consent screen |
+| POST | `/account/discord/link` | Same start for API clients; returns `{"authorizeUrl": …}` |
 | GET | `/account/discord/callback` | OAuth callback; `303 /account/profile?notice=…` on every outcome |
+| GET | `/auth/discord` | Discord sign-in start; `303` to Discord, or `/login?notice=…` when unavailable |
+| GET | `/auth/discord/callback` | Discord sign-in callback; sets a session or redirects to `/login?notice=…` |
 | POST | `/account/discord/unlink` | HTML form adapter that unlinks Discord |
 | GET | `/api/v1/me/discord` | The account's linked Discord identity (`linked`, name, date) |
 | DELETE | `/api/v1/me/discord` | Unlink Discord from the signed-in account |

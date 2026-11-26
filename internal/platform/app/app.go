@@ -146,7 +146,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	userAdminService := service.NewUserAdminService(appStore, auditSink, logger)
 	characterService := service.NewCharacterService(appStore, auditSink, logger)
-	discordService := service.NewDiscordService(settingsService, discord.NewClient(nil), appStore, auditSink, logger)
+	discordService := service.NewDiscordService(settingsService, discord.NewClient(nil), appStore, authService, auditSink, logger)
 
 	var importService *service.ImportService
 	var inventoryService *service.InventoryService

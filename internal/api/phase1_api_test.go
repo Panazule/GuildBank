@@ -90,7 +90,7 @@ func newHarness(t *testing.T, secure bool) *harness {
 		profile: domain.DiscordProfile{ID: "123456789012345678", UserName: "keldor", GlobalName: "Keldor"},
 		token:   domain.DiscordToken{AccessToken: "access-token", TokenType: "Bearer", ExpiresIn: 3600},
 	}
-	discordSvc := service.NewDiscordService(settings, discordAPI, store, nil,
+	discordSvc := service.NewDiscordService(settings, discordAPI, store, auth, nil,
 		slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	router, err := NewRouter(Deps{
 		Logger:        slog.New(slog.NewJSONHandler(io.Discard, nil)),

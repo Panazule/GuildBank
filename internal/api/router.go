@@ -69,7 +69,7 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 		deps.Characters = service.NewCharacterService(nil, nil, deps.Logger)
 	}
 	if deps.Discord == nil {
-		deps.Discord = service.NewDiscordService(nil, nil, nil, nil, deps.Logger)
+		deps.Discord = service.NewDiscordService(nil, nil, nil, nil, nil, deps.Logger)
 	}
 	if deps.StartTime.IsZero() {
 		deps.StartTime = time.Now()
@@ -108,7 +108,7 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 
 	r.Use(SecurityHeaders(), SetupGate(deps.Setup, deps.Logger))
 
-	authHandler := &authHandler{auth: deps.Auth, views: viewSet, logger: deps.Logger, secure: deps.SecureCookies, csrfMgr: csrf}
+	authHandler := &authHandler{auth: deps.Auth, discord: deps.Discord, views: viewSet, logger: deps.Logger, secure: deps.SecureCookies, csrfMgr: csrf}
 	setupHandler := &setupHandler{setup: deps.Setup, auth: authHandler, views: viewSet, logger: deps.Logger}
 	settingsHandler := &settingsHandler{settings: deps.Settings, views: viewSet, logger: deps.Logger}
 	importHandler := &importsHandler{imports: deps.Imports, views: viewSet, logger: deps.Logger}
@@ -116,7 +116,8 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	adminHandler := &adminInventoryHandler{admin: deps.Admin, views: viewSet, logger: deps.Logger}
 	usersHandler := &usersHandler{users: deps.Users, characters: deps.Characters, views: viewSet, logger: deps.Logger}
 	profileHandler := &profileHandler{characters: deps.Characters, discord: deps.Discord, views: viewSet, logger: deps.Logger}
-	discordHandler := &discordHandler{discord: deps.Discord, state: discordState, views: viewSet, logger: deps.Logger}
+	discordHandler := &discordHandler{discord: deps.Discord, auth: deps.Auth, state: discordState,
+		csrfMgr: csrf, views: viewSet, logger: deps.Logger, secure: deps.SecureCookies}
 	ui := &uiHandler{views: viewSet}
 
 	// Public forms (login and setup) need a CSRF token even though no session
@@ -127,6 +128,10 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	public.GET("/api/v1/auth/csrf", authHandler.csrf)
 	public.GET("/login", authHandler.loginPage)
 	public.POST("/api/v1/auth/login", authHandler.login)
+	// Discord sign-in is an alternative credential for an existing account. It
+	// never registers anyone; an unlinked Discord user is refused neutrally.
+	public.GET("/auth/discord", discordHandler.loginStart)
+	public.GET("/auth/discord/callback", discordHandler.loginCallback)
 	public.GET("/setup", setupHandler.page)
 	public.POST("/setup/admin", setupHandler.validateAdmin)
 	public.POST("/setup/guild", setupHandler.validateGuild)
@@ -160,6 +165,9 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	member.POST("/api/v1/me/characters/:id/delete", profileHandler.removeForm)
 	// Discord account linking (P3 Phase B). There is no Discord login route: the
 	// callback only attaches an identity to this existing session.
+	// The browser starts the flow with a GET navigation (like sign-in) because a
+	// form submission's cross-origin 303 would be cancelled by form-action 'self'.
+	member.GET("/account/discord/link", discordHandler.start)
 	member.POST("/account/discord/link", discordHandler.start)
 	member.GET("/account/discord/callback", discordHandler.callback)
 	member.POST("/account/discord/unlink", discordHandler.unlinkForm)

@@ -34,6 +34,10 @@ var routeMatrix = map[string]routeClass{
 	"POST /setup/database/test": classPublic,
 	"POST /setup/complete":      classPublic,
 
+	// Discord sign-in: public by design, creates no account.
+	"GET /auth/discord":          classPublic,
+	"GET /auth/discord/callback": classPublic,
+
 	// Public guild inventory.
 	"GET /":                 classPublic,
 	"GET /inventory/:id":    classPublic,
@@ -51,7 +55,11 @@ var routeMatrix = map[string]routeClass{
 	"DELETE /api/v1/me/characters/:id":      classMember,
 	"POST /api/v1/me/characters/:id/delete": classMember,
 
-	// Discord account linking (Phase B). There is no Discord login route.
+	// Discord account linking (Phase B). The browser uses GET for the start so the
+	// cross-origin redirect is a navigation, not a form submission (CSP
+	// form-action 'self' cancels form redirects to discord.com). POST stays for
+	// non-browser clients that want the authorizeUrl JSON.
+	"GET /account/discord/link":     classMember,
 	"POST /account/discord/link":    classMember,
 	"GET /account/discord/callback": classMember,
 	"POST /account/discord/unlink":  classMember,
