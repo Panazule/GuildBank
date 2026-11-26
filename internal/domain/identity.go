@@ -77,6 +77,9 @@ var (
 	ErrValidation    = errors.New("validation failed")
 	ErrRateLimited   = errors.New("too many authentication attempts")
 	ErrAlreadyExists = errors.New("already exists")
+	// ErrUpstream reports a failed call to an external provider (Discord). It is
+	// mapped to 502 and never exposes the provider's response body.
+	ErrUpstream = errors.New("upstream failure")
 )
 
 // ValidationError carries per-field validation messages for a 422 response.

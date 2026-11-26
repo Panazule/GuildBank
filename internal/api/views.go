@@ -525,6 +525,18 @@ type profilePageData struct {
 	RoleLabel     string
 	Characters    []characterView
 	MaxCharacters int
+	Discord       discordSectionView
+}
+
+// discordSectionView is the profile-page state of the Discord card. Available is
+// false whenever an administrator has not enabled linking, and the card then
+// only explains that.
+type discordSectionView struct {
+	Available  bool
+	Linked     bool
+	UserName   string
+	LinkedText string
+	GuildID    string
 }
 
 func (v *views) accountProfile(c *gin.Context, status int, data profilePageData) {

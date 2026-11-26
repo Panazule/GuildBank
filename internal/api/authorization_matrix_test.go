@@ -51,6 +51,13 @@ var routeMatrix = map[string]routeClass{
 	"DELETE /api/v1/me/characters/:id":      classMember,
 	"POST /api/v1/me/characters/:id/delete": classMember,
 
+	// Discord account linking (Phase B). There is no Discord login route.
+	"POST /account/discord/link":    classMember,
+	"GET /account/discord/callback": classMember,
+	"POST /account/discord/unlink":  classMember,
+	"GET /api/v1/me/discord":        classMember,
+	"DELETE /api/v1/me/discord":     classMember,
+
 	// Officer: imports, inventory administration and history.
 	"GET /admin":                                     classOfficer,
 	"GET /admin/imports":                             classOfficer,

@@ -44,6 +44,11 @@ var SettingDefinitions = []SettingDefinition{
 	{Key: "MariaDbPassword", Label: "MariaDB password", Type: domain.SettingSecret, Secret: true, Default: "", Help: "Stored in SQLite; blank keeps the existing value"},
 	{Key: "SessionIdleMinutes", Label: "Session idle timeout", Type: domain.SettingInteger, Default: "30", Help: "5–1440 minutes"},
 	{Key: "SessionAbsoluteHours", Label: "Session absolute lifetime", Type: domain.SettingInteger, Default: "8", Help: "1–168 hours"},
+	{Key: "PublicBaseUrl", Label: "Public base URL", Type: domain.SettingURL, Default: "", Help: "Public origin used to build the Discord redirect URI, e.g. https://guildbank.example.com"},
+	{Key: "DiscordEnabled", Label: "Discord account linking", Type: domain.SettingBoolean, Default: "false", Help: "true or false; requires the client ID, client secret and public base URL"},
+	{Key: "DiscordClientId", Label: "Discord client ID", Type: domain.SettingString, Default: "", Help: "Application ID from the Discord developer portal"},
+	{Key: "DiscordClientSecret", Label: "Discord client secret", Type: domain.SettingSecret, Secret: true, Default: "", Help: "Stored in SQLite; blank keeps the existing value"},
+	{Key: "DiscordGuildId", Label: "Discord guild ID (optional)", Type: domain.SettingString, Default: "", Help: "When set, guild membership is checked at link time"},
 }
 
 var settingByName = func() map[string]SettingDefinition {
@@ -57,6 +62,8 @@ var settingByName = func() map[string]SettingDefinition {
 var (
 	identifierPattern = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 	usernamePattern   = regexp.MustCompile(`^[A-Za-z0-9._-]{3,64}$`)
+	// discordSnowflakePattern matches Discord's numeric identifiers.
+	discordSnowflakePattern = regexp.MustCompile(`^[0-9]{15,25}$`)
 )
 
 // SettingsService owns typed reads, validation and persistence.
@@ -199,6 +206,38 @@ func validateSettingValue(def SettingDefinition, value string) string {
 		if err != nil || n < 1 || n > 168 {
 			return "must be a whole number from 1 to 168"
 		}
+	case "PublicBaseUrl":
+		if value == "" {
+			return ""
+		}
+		if !validPublicBaseURL(value) {
+			return "must be an http or https origin without a path, query or fragment"
+		}
+	case "DiscordEnabled":
+		if _, err := strconv.ParseBool(strings.TrimSpace(value)); err != nil {
+			return "must be true or false"
+		}
+	case "DiscordClientId":
+		if value == "" {
+			return ""
+		}
+		if !discordSnowflakePattern.MatchString(value) {
+			return "must be the 15–25 digit Discord application ID"
+		}
+	case "DiscordClientSecret":
+		if value == "" {
+			return "must not be blank"
+		}
+		if len(value) > 200 {
+			return "must be at most 200 bytes"
+		}
+	case "DiscordGuildId":
+		if value == "" {
+			return ""
+		}
+		if !discordSnowflakePattern.MatchString(value) {
+			return "must be a 15–25 digit Discord guild ID, or blank"
+		}
 	default:
 		return "unknown setting"
 	}
@@ -217,6 +256,22 @@ func validEQResourceURL(value string) bool {
 		strings.EqualFold(u.Host, "items.eqresource.com") &&
 		u.Path == "/items.php" &&
 		u.RawQuery == "id="
+}
+
+// validPublicBaseURL accepts an http(s) origin only: no path, query or
+// fragment, because it is concatenated with a fixed callback path.
+func validPublicBaseURL(value string) bool {
+	u, err := url.Parse(strings.TrimSpace(value))
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return false
+	}
+	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	return u.Path == "" || u.Path == "/"
 }
 
 func validHostname(value string) bool {

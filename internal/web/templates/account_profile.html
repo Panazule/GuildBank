@@ -53,6 +53,24 @@
         <a class="link" href="/account/password">Change password</a>
       </div>
     </form>
+
+    <h2>Discord</h2>
+    {{if not .Discord.Available}}
+      <p class="muted">Discord linking is not enabled. An administrator can enable it in the application settings.</p>
+    {{else if .Discord.Linked}}
+      <p>Linked to <strong>{{.Discord.UserName}}</strong>{{if .Discord.LinkedText}} since {{.Discord.LinkedText}}{{end}}.</p>
+      {{if .Discord.GuildID}}<p class="muted">Guild membership was checked when the account was linked.</p>{{end}}
+      <form method="post" action="/account/discord/unlink" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <button type="submit" class="link-button">Unlink Discord account</button>
+      </form>
+    {{else}}
+      <p class="muted">Linking records your Discord name on this profile. It does not change how you sign in.</p>
+      <form method="post" action="/account/discord/link">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <button type="submit" class="primary">Link Discord account</button>
+      </form>
+    {{end}}
   </main>
   {{template "footer" .}}
 </body>

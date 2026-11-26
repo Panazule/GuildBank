@@ -35,6 +35,7 @@ type Deps struct {
 	Admin          *service.AdminInventoryService
 	Users          *service.UserAdminService
 	Characters     *service.CharacterService
+	Discord        *service.DiscordService
 	Version        string
 	TrustedProxies []string
 	StartTime      time.Time
@@ -67,11 +68,18 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	if deps.Characters == nil {
 		deps.Characters = service.NewCharacterService(nil, nil, deps.Logger)
 	}
+	if deps.Discord == nil {
+		deps.Discord = service.NewDiscordService(nil, nil, nil, nil, deps.Logger)
+	}
 	if deps.StartTime.IsZero() {
 		deps.StartTime = time.Now()
 	}
 
 	csrf, err := newCSRFManager(deps.SecureCookies)
+	if err != nil {
+		return nil, err
+	}
+	discordState, err := newDiscordStateManager(deps.SecureCookies)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +115,8 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	inventoryHandler := &inventoryHandler{inventory: deps.Inventory, auth: deps.Auth, views: viewSet, logger: deps.Logger}
 	adminHandler := &adminInventoryHandler{admin: deps.Admin, views: viewSet, logger: deps.Logger}
 	usersHandler := &usersHandler{users: deps.Users, characters: deps.Characters, views: viewSet, logger: deps.Logger}
-	profileHandler := &profileHandler{characters: deps.Characters, views: viewSet, logger: deps.Logger}
+	profileHandler := &profileHandler{characters: deps.Characters, discord: deps.Discord, views: viewSet, logger: deps.Logger}
+	discordHandler := &discordHandler{discord: deps.Discord, state: discordState, views: viewSet, logger: deps.Logger}
 	ui := &uiHandler{views: viewSet}
 
 	// Public forms (login and setup) need a CSRF token even though no session
@@ -149,6 +158,13 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	member.DELETE("/api/v1/me/characters/:id", profileHandler.remove)
 	// HTML forms cannot issue DELETE; this is a thin adapter onto the same service.
 	member.POST("/api/v1/me/characters/:id/delete", profileHandler.removeForm)
+	// Discord account linking (P3 Phase B). There is no Discord login route: the
+	// callback only attaches an identity to this existing session.
+	member.POST("/account/discord/link", discordHandler.start)
+	member.GET("/account/discord/callback", discordHandler.callback)
+	member.POST("/account/discord/unlink", discordHandler.unlinkForm)
+	member.GET("/api/v1/me/discord", discordHandler.identity)
+	member.DELETE("/api/v1/me/discord", discordHandler.unlink)
 
 	officer := r.Group("")
 	officer.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequirePasswordChanged(),

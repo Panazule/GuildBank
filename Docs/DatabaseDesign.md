@@ -88,7 +88,8 @@ CREATE UNIQUE INDEX ux_users_discord  ON Users (DiscordUserID)
 - Uniqueness and `NOT NULL` are refinements; the spec lists fields but not constraints (MR-11). Case-insensitive uniqueness prevents `Admin`/`admin` confusion.
 - `AccessLevel` now stores the approved flat hierarchy `Member < Officer < Admin` (owner decision 2026-11-26): Member is the least-privileged default, Officer may administer inventory/imports and read history, Admin adds application configuration and user administration. An unrecognized value fails closed to Member in the service layer.
 - `0002_user_roles.sql` widens the CHECK by rebuilding the table (SQLite cannot alter a constraint in place). The rebuild copies every column verbatim, recreates `ux_users_username`, and normalises `sqlite_sequence`. Because `Sessions.UserID` references `Users ON DELETE CASCADE` and connections run `PRAGMA foreign_keys=ON`, the rebuild drops all sessions: every account signs in again after the upgrade. That is approved and expected.
-- `0003_user_profiles.sql` adds the three Discord columns with `ALTER TABLE ADD COLUMN`, which SQLite treats as a metadata-only change: no rebuild, no session cascade, nobody is signed out. The columns stay `NULL` and unused until the Discord linking phase ships.
+- `0003_user_profiles.sql` adds the three Discord columns with `ALTER TABLE ADD COLUMN`, which SQLite treats as a metadata-only change: no rebuild, no session cascade, nobody is signed out. The columns stay `NULL` until an account links; unlinking returns them to `NULL`, so the row (and the account) is never deleted.
+- `ux_users_discord` is a partial unique index, so any number of accounts can be unlinked while one Discord identity maps to at most one account. The service also checks ownership before writing, so a shared identity is refused before the index is hit.
 - `DisabledFg` is the intended deactivation mechanism (DC-11); disabling revokes that account's sessions in the same transaction, and the last enabled Administrator cannot be disabled or demoted (`CountEnabledAdmins` guard).
 - bcrypt hashes are ~60 characters; do not apply a short `VARCHAR` limit.
 
@@ -153,6 +154,13 @@ Seed rows (idempotent `INSERT ... ON CONFLICT(SettingKey) DO NOTHING`):
 | `SetupComplete` | `0` | boolean | no | must be `1` before setup routes close |
 | `SessionIdleMinutes` | `30` | integer | no | `5–1440` (APPROVED PD-15) |
 | `SessionAbsoluteHours` | `8` | integer | no | `1–168` (APPROVED PD-15) |
+| `PublicBaseUrl` | *(empty)* | url | no | http(s) origin only; no path, query or fragment. Used to build the Discord redirect URI (P3 Phase B) |
+| `DiscordEnabled` | `false` | boolean | no | `true`/`false`; linking also requires the client ID, secret and public base URL |
+| `DiscordClientId` | *(empty)* | string | no | 15–25 digits (Discord snowflake) |
+| `DiscordClientSecret` | *(empty)* | secret | **yes** | 1–200 bytes; blank keeps the stored value |
+| `DiscordGuildId` | *(empty)* | string | no | optional 15–25 digits; when set, membership is checked at link time |
+
+**Discord linking settings (P3 Phase B).** Linking is off until an Administrator enables it and supplies all four values; an incomplete configuration renders as "not available" rather than failing requests. The client secret follows the same blank-means-keep rule as `MariaDbPassword`, so the settings form never round-trips it. `PublicBaseUrl` is deliberately origin-only because the callback path is fixed (`/account/discord/callback`) and is registered in the Discord developer portal.
 
 **Secret storage limitation.** SQLite offers no native secret protection. Options: (a) rely on `/config` volume permissions and document the trust boundary; (b) encrypt `SettingValue` with a key injected via environment or stored outside the volume. Encryption with a key stored beside the ciphertext adds little. The chosen approach must be recorded in the specification (SR-02, E-11). Regardless, `GET /api/settings` must never return `IsSecret = 1` values (MR-09).
 

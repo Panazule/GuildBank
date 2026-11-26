@@ -18,6 +18,7 @@ import (
 // scoped to the session user; no handler accepts a user ID.
 type profileHandler struct {
 	characters *service.CharacterService
+	discord    *service.DiscordService
 	views      *views
 	logger     *slog.Logger
 }
@@ -66,9 +67,38 @@ func (h *profileHandler) page(c *gin.Context) {
 		RoleLabel:     userRoleLabel(session.User.Role()),
 		Characters:    characterViews(characters),
 		MaxCharacters: domain.CharacterMaxPerUser,
+		Discord:       h.discordSection(c, session.User.ID),
 	}
 	data.Notice = profileNotice(c.Query("notice"))
 	h.views.accountProfile(c, http.StatusOK, data)
+}
+
+// discordSection reads the linking state for the profile card. Every failure is
+// logged and rendered as "not available": the page must never break because the
+// provider or its configuration is missing.
+func (h *profileHandler) discordSection(c *gin.Context, userID int64) discordSectionView {
+	cfg, err := h.discord.Config(c.Request.Context())
+	if err != nil {
+		h.logger.Error("discord configuration read failed", "request_id", GetRequestID(c), "error", err)
+		return discordSectionView{}
+	}
+	section := discordSectionView{Available: cfg.Ready(), GuildID: cfg.GuildID}
+	if !section.Available {
+		return section
+	}
+	identity, err := h.discord.Identity(c.Request.Context(), userID)
+	if err != nil {
+		h.logger.Error("discord identity read failed", "request_id", GetRequestID(c), "error", err)
+		return section
+	}
+	if identity.Linked() {
+		section.Linked = true
+		section.UserName = identity.DiscordUserName
+		if identity.LinkedAt != nil {
+			section.LinkedText = identity.LinkedAt.UTC().Format("2006-01-02")
+		}
+	}
+	return section
 }
 
 func (h *profileHandler) list(c *gin.Context) {
@@ -231,6 +261,7 @@ func (h *profileHandler) renderFormError(c *gin.Context, err error, message stri
 		RoleLabel:     userRoleLabel(session.User.Role()),
 		Characters:    characterViews(characters),
 		MaxCharacters: domain.CharacterMaxPerUser,
+		Discord:       h.discordSection(c, session.User.ID),
 	})
 }
 
@@ -247,13 +278,32 @@ func (h *profileHandler) pageError(c *gin.Context, err error) {
 	}
 }
 
-// profileNotice maps a machine-written query code onto fixed text.
+// profileNotice maps a machine-written query code onto fixed text. Discord
+// notices are fixed strings so no provider message is reflected into the page.
 func profileNotice(code string) string {
 	switch code {
 	case "character-added":
 		return "Character added."
 	case "character-removed":
 		return "Character removed."
+	case "discord-linked":
+		return "Discord account linked."
+	case "discord-unlinked":
+		return "Discord account unlinked."
+	case "discord-taken":
+		return "That Discord account is already linked to a different account."
+	case "discord-state":
+		return "The Discord authorization expired or did not belong to this browser. Start the link again."
+	case "discord-denied":
+		return "Discord authorization was cancelled."
+	case "discord-provider":
+		return "Discord could not be reached. Try again shortly."
+	case "discord-unavailable":
+		return "Discord linking is not enabled."
+	case "discord-not-linked":
+		return "No Discord account is linked."
+	case "discord-error":
+		return "The Discord link could not be completed."
 	}
 	return ""
 }

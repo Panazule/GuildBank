@@ -17,6 +17,7 @@ import (
 	"github.com/Panazule/guildbank/internal/api"
 	"github.com/Panazule/guildbank/internal/domain"
 	"github.com/Panazule/guildbank/internal/platform/config"
+	"github.com/Panazule/guildbank/internal/platform/discord"
 	"github.com/Panazule/guildbank/internal/repository/mariadb"
 	"github.com/Panazule/guildbank/internal/repository/sqlite"
 	"github.com/Panazule/guildbank/internal/service"
@@ -145,6 +146,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	userAdminService := service.NewUserAdminService(appStore, auditSink, logger)
 	characterService := service.NewCharacterService(appStore, auditSink, logger)
+	discordService := service.NewDiscordService(settingsService, discord.NewClient(nil), appStore, auditSink, logger)
 
 	var importService *service.ImportService
 	var inventoryService *service.InventoryService
@@ -196,6 +198,7 @@ func Run(ctx context.Context, opts Options) error {
 		Admin:          adminService,
 		Users:          userAdminService,
 		Characters:     characterService,
+		Discord:        discordService,
 		Version:        opts.Version,
 		TrustedProxies: cfg.TrustedProxies,
 		SecureCookies:  cfg.SecureCookies,

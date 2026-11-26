@@ -72,6 +72,7 @@ var UserAuditEventTypes = []string{
 	"USER_CREATED", "USER_ROLE_CHANGED", "USER_DISABLED", "USER_ENABLED",
 	"USER_PASSWORD_RESET", "USER_PASSWORD_CHANGED", "USER_DELETED",
 	"CHARACTER_ADDED", "CHARACTER_REMOVED",
+	"DISCORD_LINKED", "DISCORD_UNLINKED",
 }
 
 // AdminAuditEventTypes is the complete closed allowlist for the audit viewer.

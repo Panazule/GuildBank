@@ -26,11 +26,50 @@ type setupDBStub struct{ err error }
 func (s setupDBStub) TestDatabase(context.Context, service.DatabaseConfig) error { return s.err }
 
 type harness struct {
-	t      *testing.T
-	server *httptest.Server
-	client *http.Client
-	store  *sqlite.Store
-	router *gin.Engine
+	t          *testing.T
+	server     *httptest.Server
+	client     *http.Client
+	store      *sqlite.Store
+	router     *gin.Engine
+	discordAPI *fakeDiscordAPI
+}
+
+// fakeDiscordAPI stands in for the Discord provider so the linking flow is
+// exercised end to end without network access.
+type fakeDiscordAPI struct {
+	profile      domain.DiscordProfile
+	token        domain.DiscordToken
+	exchangeErr  error
+	profileErr   error
+	guildErr     error
+	guildMember  bool
+	codes        []string
+	redirectURIs []string
+	guildChecks  int
+}
+
+func (f *fakeDiscordAPI) ExchangeCode(ctx context.Context, clientID, clientSecret, redirectURI, code string) (domain.DiscordToken, error) {
+	f.codes = append(f.codes, code)
+	f.redirectURIs = append(f.redirectURIs, redirectURI)
+	if f.exchangeErr != nil {
+		return domain.DiscordToken{}, f.exchangeErr
+	}
+	return f.token, nil
+}
+
+func (f *fakeDiscordAPI) CurrentUser(ctx context.Context, accessToken string) (domain.DiscordProfile, error) {
+	if f.profileErr != nil {
+		return domain.DiscordProfile{}, f.profileErr
+	}
+	return f.profile, nil
+}
+
+func (f *fakeDiscordAPI) GuildMember(ctx context.Context, accessToken, guildID string) (bool, error) {
+	f.guildChecks++
+	if f.guildErr != nil {
+		return false, f.guildErr
+	}
+	return f.guildMember, nil
 }
 
 func newHarness(t *testing.T, secure bool) *harness {
@@ -47,6 +86,12 @@ func newHarness(t *testing.T, secure bool) *harness {
 	auth := service.NewAuthService(store, store, settings)
 	users := service.NewUserAdminService(store, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	characters := service.NewCharacterService(store, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	discordAPI := &fakeDiscordAPI{
+		profile: domain.DiscordProfile{ID: "123456789012345678", UserName: "keldor", GlobalName: "Keldor"},
+		token:   domain.DiscordToken{AccessToken: "access-token", TokenType: "Bearer", ExpiresIn: 3600},
+	}
+	discordSvc := service.NewDiscordService(settings, discordAPI, store, nil,
+		slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	router, err := NewRouter(Deps{
 		Logger:        slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		Health:        fakeHealth{result: service.Readiness{Ready: true}},
@@ -55,6 +100,7 @@ func newHarness(t *testing.T, secure bool) *harness {
 		Settings:      settings,
 		Users:         users,
 		Characters:    characters,
+		Discord:       discordSvc,
 		Imports:       service.NewImportService(nil, nil, settings, nil, nil),
 		Inventory:     service.NewInventoryService(nil, settings, nil, nil),
 		Version:       "test",
@@ -76,7 +122,8 @@ func newHarness(t *testing.T, secure bool) *harness {
 		server.Close()
 		_ = store.Close()
 	})
-	return &harness{t: t, server: server, client: client, store: store, router: router}
+	return &harness{t: t, server: server, client: client, store: store, router: router,
+		discordAPI: discordAPI}
 }
 
 func (h *harness) request(method, path, csrf string, body []byte, accept string) (*http.Response, []byte) {
