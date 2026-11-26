@@ -1,0 +1,60 @@
+{{define "account_profile.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card">
+    <p class="eyebrow">Your account</p>
+    <h1>Profile</h1>
+    <p class="muted">Signed in as {{.UserName}} · {{.RoleLabel}}</p>
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <h2>Characters</h2>
+    <p class="muted">These names identify you on guild requests. Add the characters you play or bank with; {{.MaxCharacters}} names per account.</p>
+    {{if .Characters}}
+    <div class="table-scroll" role="region" aria-label="Your characters" tabindex="0">
+      <table class="audit-table">
+        <caption class="sr-only">Character names on this account</caption>
+        <thead>
+          <tr><th scope="col">Character</th><th scope="col">Added</th><th scope="col">Action</th></tr>
+        </thead>
+        <tbody>
+          {{range .Characters}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td>{{.CreatedText}}</td>
+            <td>
+              <form method="post" action="/api/v1/me/characters/{{.ID}}/delete" class="inline-form">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <button type="submit" class="link-button">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+      <div class="empty-state"><p>No characters yet. Add one so you can choose a requester name when you ask for an item.</p></div>
+    {{end}}
+
+    <form method="post" action="/api/v1/me/characters" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <label>
+        Character name
+        <input name="characterName" value="" maxlength="15" autocomplete="off" required>
+        <span class="help">3–15 letters, exactly as it appears in game</span>
+      </label>
+      {{with index .ErrorFields "characterName"}}<p class="field-error">{{.}}</p>{{end}}
+      <div class="wizard-actions">
+        <button type="submit" class="primary">Add character</button>
+        <a class="link" href="/account/password">Change password</a>
+      </div>
+    </form>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

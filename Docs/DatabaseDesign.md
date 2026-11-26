@@ -73,18 +73,50 @@ CREATE TABLE Users (
     CreatedAt     TEXT    NOT NULL,                  -- IMPLEMENTED (Phase 1)
     ModBy         TEXT    NULL,                      -- IMPLEMENTED: username snapshot
     MustChangePassword INTEGER NOT NULL DEFAULT 0    -- IMPLEMENTED
-                          CHECK (MustChangePassword IN (0,1))
+                          CHECK (MustChangePassword IN (0,1)),
+    DiscordUserID   TEXT NULL,                       -- IMPLEMENTED (0003): Discord snowflake
+    DiscordUserName TEXT NULL,                       -- IMPLEMENTED (0003): display snapshot
+    DiscordLinkedAt TEXT NULL                        -- IMPLEMENTED (0003): UTC ISO-8601
 );
 
 CREATE UNIQUE INDEX ux_users_username ON Users (UserName COLLATE NOCASE);
+CREATE UNIQUE INDEX ux_users_discord  ON Users (DiscordUserID)
+    WHERE DiscordUserID IS NOT NULL;                 -- unlinked accounts do not collide
 ```
 
 **Notes**
 - Uniqueness and `NOT NULL` are refinements; the spec lists fields but not constraints (MR-11). Case-insensitive uniqueness prevents `Admin`/`admin` confusion.
 - `AccessLevel` now stores the approved flat hierarchy `Member < Officer < Admin` (owner decision 2026-11-26): Member is the least-privileged default, Officer may administer inventory/imports and read history, Admin adds application configuration and user administration. An unrecognized value fails closed to Member in the service layer.
 - `0002_user_roles.sql` widens the CHECK by rebuilding the table (SQLite cannot alter a constraint in place). The rebuild copies every column verbatim, recreates `ux_users_username`, and normalises `sqlite_sequence`. Because `Sessions.UserID` references `Users ON DELETE CASCADE` and connections run `PRAGMA foreign_keys=ON`, the rebuild drops all sessions: every account signs in again after the upgrade. That is approved and expected.
+- `0003_user_profiles.sql` adds the three Discord columns with `ALTER TABLE ADD COLUMN`, which SQLite treats as a metadata-only change: no rebuild, no session cascade, nobody is signed out. The columns stay `NULL` and unused until the Discord linking phase ships.
 - `DisabledFg` is the intended deactivation mechanism (DC-11); disabling revokes that account's sessions in the same transaction, and the last enabled Administrator cannot be disabled or demoted (`CountEnabledAdmins` guard).
 - bcrypt hashes are ~60 characters; do not apply a short `VARCHAR` limit.
+
+### 3.1.1 `UserCharacters`
+
+Approved in the P3 profile design (owner decisions D1–D3): a character name is globally unique and identifies exactly one account, because the request workflow will treat it as a requester identity.
+
+```sql
+CREATE TABLE UserCharacters (
+    CharacterID   INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserID        INTEGER NOT NULL
+                  REFERENCES Users(UserID) ON DELETE CASCADE,
+    CharacterName TEXT    NOT NULL,                  -- stored exactly as typed
+    CreatedAt     TEXT    NOT NULL,
+    CreatedBy     TEXT    NULL                       -- username snapshot
+);
+
+CREATE UNIQUE INDEX ux_user_characters_name
+    ON UserCharacters (CharacterName COLLATE NOCASE);
+CREATE INDEX ix_user_characters_user ON UserCharacters (UserID);
+```
+
+**Notes**
+- Names are 3–15 ASCII letters (`domain.ValidateCharacterName`); the cap is 10 per account.
+- `COLLATE NOCASE` matches the ASCII name alphabet, so `Icefear` and `icefear` collide.
+- The unique index is the authority on duplicates; the add is rejected with `409` and a `characterName` field message.
+- Deleting an account cascades its names. Requests will keep their own `RequesterName` snapshot, so history survives a removal.
+- Administrators may remove a name from any account (D4) but can never transfer ownership.
 
 ### 3.2 `Settings`
 

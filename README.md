@@ -127,8 +127,13 @@ settings takes effect after a restart (PD-05/PD-18 remain in force).
 | GET | `/login` | Login page (redirects to setup while setup is pending) |
 | POST | `/api/v1/auth/login` | Verify credentials, set the session cookie, return JSON or, for HTML, redirect to the requested page or the inventory page (`/`) |
 | POST | `/api/v1/auth/logout` | Revoke the session; requires authentication and CSRF |
-| GET | `/api/v1/auth/session` | Current administrator and expiry; admin-only |
+| GET | `/api/v1/auth/session` | Current account, role and expiry; any signed-in role |
 | GET | `/api/v1/auth/csrf` | Issue a signed CSRF token for API clients |
+| GET | `/account/profile` | Profile page: the account's character names with add and remove |
+| GET | `/api/v1/me/characters` | The signed-in account's character names (future requester dropdown) |
+| POST | `/api/v1/me/characters` | Add a character name; JSON or `303` for HTML |
+| DELETE | `/api/v1/me/characters/:id` | Remove one of the account's own names; another account's ID is `404` |
+| POST | `/api/v1/me/characters/:id/delete` | HTML form adapter for DELETE |
 | GET | `/admin/settings` | Administrator settings screen |
 | GET | `/api/v1/settings` | Redacted settings JSON; secrets never returned |
 | PUT/POST | `/api/v1/settings` | Validate and persist settings; POST is the HTML form adapter for PUT |

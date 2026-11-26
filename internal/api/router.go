@@ -34,6 +34,7 @@ type Deps struct {
 	Inventory      *service.InventoryService
 	Admin          *service.AdminInventoryService
 	Users          *service.UserAdminService
+	Characters     *service.CharacterService
 	Version        string
 	TrustedProxies []string
 	StartTime      time.Time
@@ -62,6 +63,9 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 		// Accounts live in SQLite, so this is only reached by a caller that
 		// forgot to wire the service; the routes then answer 503.
 		deps.Users = service.NewUserAdminService(nil, nil, deps.Logger)
+	}
+	if deps.Characters == nil {
+		deps.Characters = service.NewCharacterService(nil, nil, deps.Logger)
 	}
 	if deps.StartTime.IsZero() {
 		deps.StartTime = time.Now()
@@ -102,7 +106,8 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	importHandler := &importsHandler{imports: deps.Imports, views: viewSet, logger: deps.Logger}
 	inventoryHandler := &inventoryHandler{inventory: deps.Inventory, auth: deps.Auth, views: viewSet, logger: deps.Logger}
 	adminHandler := &adminInventoryHandler{admin: deps.Admin, views: viewSet, logger: deps.Logger}
-	usersHandler := &usersHandler{users: deps.Users, views: viewSet, logger: deps.Logger}
+	usersHandler := &usersHandler{users: deps.Users, characters: deps.Characters, views: viewSet, logger: deps.Logger}
+	profileHandler := &profileHandler{characters: deps.Characters, views: viewSet, logger: deps.Logger}
 	ui := &uiHandler{views: viewSet}
 
 	// Public forms (login and setup) need a CSRF token even though no session
@@ -137,6 +142,13 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	member.POST("/api/v1/auth/logout", authHandler.logout)
 	member.GET("/account/password", usersHandler.passwordPage)
 	member.POST("/api/v1/auth/password", usersHandler.changePassword)
+	// The profile is the account owner's own character list (P3 Phase A).
+	member.GET("/account/profile", profileHandler.page)
+	member.GET("/api/v1/me/characters", profileHandler.list)
+	member.POST("/api/v1/me/characters", profileHandler.add)
+	member.DELETE("/api/v1/me/characters/:id", profileHandler.remove)
+	// HTML forms cannot issue DELETE; this is a thin adapter onto the same service.
+	member.POST("/api/v1/me/characters/:id/delete", profileHandler.removeForm)
 
 	officer := r.Group("")
 	officer.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequirePasswordChanged(),
@@ -222,6 +234,10 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	admin.POST("/api/v1/users/:id", usersHandler.update)
 	admin.POST("/api/v1/users/:id/password", usersHandler.resetPassword)
 	admin.DELETE("/api/v1/users/:id", usersHandler.remove)
+	// Administrators may remove a character name from any account but cannot
+	// move it to another account (owner decision D4).
+	admin.POST("/admin/users/:id/characters/:characterID/delete", usersHandler.removeCharacterForm)
+	admin.DELETE("/api/v1/users/:id/characters/:characterID", usersHandler.removeCharacter)
 
 	r.NoRoute(notFound)
 	r.NoMethod(methodNotAllowed)

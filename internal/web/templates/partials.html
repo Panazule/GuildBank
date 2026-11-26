@@ -17,6 +17,7 @@
       <a href="/login">Login</a>
     {{end}}
     {{if .User}}
+      <a href="/account/profile">Profile</a>
       {{if .User.CanAdministerInventory}}
         <a href="/admin/inventory">Admin inventory</a>
         <a href="/admin/imports">Imports</a>

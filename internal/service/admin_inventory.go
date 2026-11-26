@@ -65,11 +65,13 @@ var OfficerAuditEventTypes = []string{
 	"ITEM_MOVED", "ITEM_MERGED",
 }
 
-// UserAuditEventTypes are the account-administration events. They are written
-// best-effort after the SQLite commit and are visible to Administrators only.
+// UserAuditEventTypes are the account-administration and profile events. They
+// are written best-effort after the SQLite commit and are visible to
+// Administrators only.
 var UserAuditEventTypes = []string{
 	"USER_CREATED", "USER_ROLE_CHANGED", "USER_DISABLED", "USER_ENABLED",
 	"USER_PASSWORD_RESET", "USER_PASSWORD_CHANGED", "USER_DELETED",
+	"CHARACTER_ADDED", "CHARACTER_REMOVED",
 }
 
 // AdminAuditEventTypes is the complete closed allowlist for the audit viewer.

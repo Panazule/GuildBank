@@ -483,6 +483,9 @@ type userDetailPageData struct {
 	Roles         []roleSelectOption
 	EnabledAdmins int
 	Form          userFormValues
+	// Characters is the account's profile list. Administrators may remove a
+	// name here (D4) but can never move it to another account.
+	Characters []characterView
 }
 
 type accountPasswordPageData struct {
@@ -507,6 +510,25 @@ func (v *views) adminUserDetail(c *gin.Context, status int, data userDetailPageD
 
 func (v *views) accountPassword(c *gin.Context, status int, data accountPasswordPageData) {
 	v.render(c, status, "account_password.html", data)
+}
+
+// characterView is the shared presentation of one profile character name.
+type characterView struct {
+	ID          int64
+	Name        string
+	CreatedText string
+}
+
+type profilePageData struct {
+	pageData
+	UserName      string
+	RoleLabel     string
+	Characters    []characterView
+	MaxCharacters int
+}
+
+func (v *views) accountProfile(c *gin.Context, status int, data profilePageData) {
+	v.render(c, status, "account_profile.html", data)
 }
 
 type errorPageData struct {

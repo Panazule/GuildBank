@@ -320,24 +320,32 @@ func (s *UserAdminService) EnabledAdmins(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// record writes the best-effort audit row. A failure is logged and never changes
-// the outcome of an account change that has already been committed.
+// record writes the best-effort audit row for an account change.
 func (s *UserAdminService) record(ctx context.Context, eventType string, target domain.User,
 	oldValues, newValues map[string]string, actor domain.Actor, correlationID, sourceIP string) {
-	if s.audit == nil {
+	writeAudit(ctx, s.audit, s.logger, s.now().UTC(), eventType, "Users",
+		strconv.FormatInt(target.ID, 10), actor, oldValues, newValues, correlationID, sourceIP)
+}
+
+// writeAudit is the shared best-effort audit writer for account and profile
+// changes. A failure is logged and never changes the outcome of a change that has
+// already been committed to SQLite.
+func writeAudit(ctx context.Context, sink AuditSink, logger *slog.Logger, at time.Time,
+	eventType, tableName, recordID string, actor domain.Actor,
+	oldValues, newValues map[string]string, correlationID, sourceIP string) {
+	if sink == nil {
 		return
 	}
 	entry := domain.AuditEntry{
-		EventDate: s.now().UTC(), UserID: actor.UserID, UserName: actor.UserName,
-		EventType: eventType, TableName: "Users",
-		RecordID:  strconv.FormatInt(target.ID, 10),
+		EventDate: at, UserID: actor.UserID, UserName: actor.UserName,
+		EventType: eventType, TableName: tableName, RecordID: recordID,
 		OldValues: auditValuesJSON(oldValues), NewValues: auditValuesJSON(newValues),
 		CorrelationID: correlationID, SourceIP: sourceIP,
 	}
-	if err := s.audit.InsertAudit(ctx, entry); err != nil {
-		if s.logger != nil {
-			s.logger.Warn("user audit write failed",
-				"event", eventType, "user_id", target.ID,
+	if err := sink.InsertAudit(ctx, entry); err != nil {
+		if logger != nil {
+			logger.Warn("audit write failed",
+				"event", eventType, "table", tableName, "record_id", recordID,
 				"request_id", correlationID, "error", err)
 		}
 	}

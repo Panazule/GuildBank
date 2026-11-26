@@ -23,6 +23,7 @@ GuildBank/
 │   │   ├── setup.go              D-02 setup state
 │   │   ├── identity.go           User/session/setting models, role hierarchy, sentinel and validation errors
 │   │   ├── user_admin.go         Account-administration input models and username rules
+│   │   ├── character.go          Profile character name rules and the per-account cap
 │   │   ├── item.go               Logical Item and ItemReference contracts
 │   │   ├── import.go             Import batch/row/location/warning/commit contracts
 │   │   └── inventory.go          Public inventory sort/filter/projection/page contracts
@@ -37,6 +38,7 @@ GuildBank/
 │   │   ├── auth.go               Login, session issuance/validation, logout, revocation
 │   │   ├── rate_limit.go         D-12 IP+username login lockout
 │   │   ├── user_admin.go         Account create/role/status/reset/delete and own password change
+│   │   ├── characters.go         Profile character list for the account owner and administrative removal
 │   │   ├── setup.go              Wizard validation, DB test and atomic commit
 │   │   ├── settings.go           Typed setting allowlist, validation and session policy
 │   │   ├── import_parser.go      Canonical TSV parser, limits and diagnostics
@@ -55,8 +57,9 @@ GuildBank/
 │   │   ├── sqlite/
 │   │   │   ├── store.go          Open/pragmas/setup probe/checkpoint
 │   │   │   ├── migrate.go        Forward-only PRAGMA user_version runner
-│   │   │   ├── migrations/       0001_phase1.sql (Users, Settings, Sessions) and 0002_user_roles.sql (Member/Officer/Admin)
+│   │   │   ├── migrations/       0001_phase1.sql (Users, Settings, Sessions), 0002_user_roles.sql (Member/Officer/Admin) and 0003_user_profiles.sql (Discord columns, UserCharacters)
 │   │   │   ├── users.go          Account lookup, LastLogin, admin count, role/disable guards
+│   │   │   ├── characters.go     Profile character list, cap, global uniqueness and ownership-scoped delete
 │   │   │   ├── sessions.go       Hashed-token CRUD, touch, expiry purge
 │   │   │   ├── settings.go       Typed settings list/upsert
 │   │   │   ├── setup.go          Atomic administrator + settings transaction
@@ -90,6 +93,7 @@ GuildBank/
 │   │   ├── admin_movements.go    Issue/Return/movement-history JSON handlers
 │   │   ├── admin_audit.go        Audit viewer and per-record history handlers
 │   │   ├── users.go              Account list/create/detail pages, JSON API and own password change
+│   │   ├── profile.go            Profile page and /api/v1/me/characters (owner-scoped)
 │   │   ├── admin_navigation.go   returnTo allowlist and navigation-context helpers
 │   │   ├── views.go              Embedded template rendering
 │   │   ├── ui.go                 Shared HTML page helpers
@@ -103,7 +107,7 @@ GuildBank/
 │   ├── web/
 │   │   ├── embed.go              Embedded template/static filesystems
 │   │   ├── embed_test.go         Import guard + embed checks
-│   │   ├── templates/            setup, login, settings, imports, import_detail, inventory_list, inventory_detail, admin_inventory, admin_inventory_form, admin_inventory_detail, admin_inventory_issue, admin_inventory_return, admin_inventory_history, admin_remove, admin_restore, admin_bulk_remove, admin_audit, admin_users, admin_user_new, admin_user_detail, account_password, error, partials
+│   │   ├── templates/            setup, login, settings, imports, import_detail, inventory_list, inventory_detail, admin_inventory, admin_inventory_form, admin_inventory_detail, admin_inventory_issue, admin_inventory_return, admin_inventory_history, admin_remove, admin_restore, admin_bulk_remove, admin_audit, admin_users, admin_user_new, admin_user_detail, account_password, account_profile, error, partials
 │   │   └── static/               app.css, setup.js, imports.js and admin_inventory.js
 │   └── platform/
 │       ├── config/

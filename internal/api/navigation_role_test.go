@@ -32,10 +32,16 @@ func TestNavigationVisibilityFollowsRole(t *testing.T) {
 	if bytes.Contains([]byte(anonymous), []byte(`href="/admin/`)) {
 		t.Fatal("anonymous navigation exposes administration links")
 	}
+	if bytes.Contains([]byte(anonymous), []byte(`href="/account/profile"`)) {
+		t.Fatal("anonymous navigation exposes the profile link")
+	}
 
 	member := renderNav(t, &domain.User{UserName: "member1", AccessLevel: "Member"})
 	if bytes.Contains([]byte(member), []byte(`href="/admin/`)) {
 		t.Fatal("member navigation exposes administration links")
+	}
+	if !bytes.Contains([]byte(member), []byte(`href="/account/profile"`)) {
+		t.Fatal("member navigation is missing the profile link")
 	}
 	if !bytes.Contains([]byte(member), []byte("Sign out")) {
 		t.Fatal("member navigation is missing sign out")

@@ -18,9 +18,10 @@ import (
 // account owner's own password change. Every route is classified in
 // authorization_matrix_test.go.
 type usersHandler struct {
-	users  *service.UserAdminService
-	views  *views
-	logger *slog.Logger
+	users      *service.UserAdminService
+	characters *service.CharacterService
+	views      *views
+	logger     *slog.Logger
 }
 
 type userResponse struct {
@@ -363,11 +364,26 @@ func (h *usersHandler) detailPage(c *gin.Context) {
 		h.pageError(c, err)
 		return
 	}
-	h.renderDetail(c, http.StatusOK, user, enabledAdmins, "", nil)
+	characters, ok := h.loadCharacters(c, id)
+	if !ok {
+		return
+	}
+	h.renderDetail(c, http.StatusOK, user, enabledAdmins, characters, "", nil)
+}
+
+// loadCharacters fetches an account's profile list for the administrator's
+// detail page. It renders the failure and reports false so the caller stops.
+func (h *usersHandler) loadCharacters(c *gin.Context, userID int64) ([]characterView, bool) {
+	characters, err := h.characters.List(c.Request.Context(), userID)
+	if err != nil {
+		h.pageError(c, err)
+		return nil, false
+	}
+	return characterViews(characters), true
 }
 
 func (h *usersHandler) renderDetail(c *gin.Context, status int, user domain.User,
-	enabledAdmins int, message string, fields map[string]string) {
+	enabledAdmins int, characters []characterView, message string, fields map[string]string) {
 	actorID := int64(0)
 	if session, ok := CurrentSession(c); ok {
 		actorID = session.User.ID
@@ -379,7 +395,8 @@ func (h *usersHandler) renderDetail(c *gin.Context, status int, user domain.User
 			Error: message, ErrorFields: fields,
 		},
 		Row: row, Roles: userRoleOptions(row.Role), EnabledAdmins: enabledAdmins,
-		Form: userFormValues{UserName: user.UserName, AccessLevel: user.AccessLevel},
+		Form:       userFormValues{UserName: user.UserName, AccessLevel: user.AccessLevel},
+		Characters: characters,
 	}
 	data.Notice = userNotice(c.Query("notice"))
 	h.views.adminUserDetail(c, status, data)
@@ -400,12 +417,16 @@ func (h *usersHandler) detailFailure(c *gin.Context, id int64, err error, fields
 		h.pageError(c, getErr)
 		return
 	}
+	characters, ok := h.loadCharacters(c, id)
+	if !ok {
+		return
+	}
 	status, validationFields, message := userFormFailure(err)
 	if len(fields) > 0 {
 		status, validationFields = http.StatusUnprocessableEntity, fields
 		message = "Check the highlighted fields."
 	}
-	h.renderDetail(c, status, user, enabledAdmins, message, validationFields)
+	h.renderDetail(c, status, user, enabledAdmins, characters, message, validationFields)
 }
 
 func (h *usersHandler) updateForm(c *gin.Context) {
@@ -628,6 +649,65 @@ func userNotice(code string) string {
 		return "The temporary password was set. Every session for that account was signed out."
 	case "deleted":
 		return "The account was deleted."
+	case "character-removed":
+		return "The character name was removed from that account."
 	}
 	return ""
+}
+
+// removeCharacterForm lets an Administrator remove a name from another account
+// (owner decision D4). Ownership itself can never be transferred.
+func (h *usersHandler) removeCharacterForm(c *gin.Context) {
+	userID, ok := parseAdminID(c, true)
+	if !ok {
+		return
+	}
+	characterID, ok := adminCharacterID(c)
+	if !ok {
+		return
+	}
+	actor, ok := adminActor(c)
+	if !ok {
+		return
+	}
+	if err := h.characters.RemoveForUser(c.Request.Context(), actor, userID, characterID,
+		GetRequestID(c), c.ClientIP()); err != nil {
+		h.detailFailure(c, userID, err, nil)
+		return
+	}
+	c.Redirect(http.StatusSeeOther, accountDetailURL(userID, "character-removed"))
+}
+
+func (h *usersHandler) removeCharacter(c *gin.Context) {
+	userID, ok := parseAdminID(c, false)
+	if !ok {
+		return
+	}
+	characterID, ok := adminCharacterID(c)
+	if !ok {
+		return
+	}
+	actor, ok := adminActor(c)
+	if !ok {
+		return
+	}
+	if err := h.characters.RemoveForUser(c.Request.Context(), actor, userID, characterID,
+		GetRequestID(c), c.ClientIP()); err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func adminCharacterID(c *gin.Context) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("characterID"), 10, 64)
+	if err != nil || id <= 0 {
+		if wantsHTML(c) {
+			c.AbortWithStatus(http.StatusNotFound)
+			return 0, false
+		}
+		writeError(c, http.StatusNotFound, "not_found", "resource not found")
+		return 0, false
+	}
+	return id, true
 }

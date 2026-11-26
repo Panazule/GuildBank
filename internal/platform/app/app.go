@@ -144,6 +144,7 @@ func Run(ctx context.Context, opts Options) error {
 		auditSink = guildStore
 	}
 	userAdminService := service.NewUserAdminService(appStore, auditSink, logger)
+	characterService := service.NewCharacterService(appStore, auditSink, logger)
 
 	var importService *service.ImportService
 	var inventoryService *service.InventoryService
@@ -194,6 +195,7 @@ func Run(ctx context.Context, opts Options) error {
 		Inventory:      inventoryService,
 		Admin:          adminService,
 		Users:          userAdminService,
+		Characters:     characterService,
 		Version:        opts.Version,
 		TrustedProxies: cfg.TrustedProxies,
 		SecureCookies:  cfg.SecureCookies,

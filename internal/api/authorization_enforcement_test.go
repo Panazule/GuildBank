@@ -51,7 +51,7 @@ func (h *harness) logout(t *testing.T) {
 // can be probed without depending on stored data.
 func concretePath(path string) string {
 	replacer := strings.NewReplacer(
-		":batchID", "1", ":movementID", "1", ":id", "1", "*filepath", "app.css")
+		":characterID", "1", ":batchID", "1", ":movementID", "1", ":id", "1", "*filepath", "app.css")
 	return replacer.Replace(path)
 }
 

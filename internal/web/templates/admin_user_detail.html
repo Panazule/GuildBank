@@ -57,6 +57,33 @@
       </div>
     </form>
 
+    <h2>Characters</h2>
+    <p class="muted">Profile names this account can use as a requester. Administrators may remove a name but cannot move it to another account.</p>
+    {{if .Characters}}
+    <div class="table-scroll" role="region" aria-label="Character names" tabindex="0">
+      <table class="audit-table">
+        <caption class="sr-only">Character names on this account</caption>
+        <thead><tr><th scope="col">Character</th><th scope="col">Added</th><th scope="col">Action</th></tr></thead>
+        <tbody>
+          {{range .Characters}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td>{{.CreatedText}}</td>
+            <td>
+              <form method="post" action="/admin/users/{{$.Row.ID}}/characters/{{.ID}}/delete" class="inline-form">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <button type="submit" class="link-button">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+      <div class="empty-state"><p>This account has no character names.</p></div>
+    {{end}}
+
     <h2>Delete account</h2>
     <p class="muted">Deleting is permanent. Disable the account instead when the history should keep a real name. Type the username to confirm.</p>
     <form method="post" action="/admin/users/{{.Row.ID}}/delete" class="stack">

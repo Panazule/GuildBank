@@ -41,10 +41,15 @@ var routeMatrix = map[string]routeClass{
 	"GET /api/v1/items/:id": classPublic,
 
 	// Any authenticated role.
-	"GET /api/v1/auth/session":   classMember,
-	"POST /api/v1/auth/logout":   classMember,
-	"GET /account/password":      classMember,
-	"POST /api/v1/auth/password": classMember,
+	"GET /api/v1/auth/session":              classMember,
+	"POST /api/v1/auth/logout":              classMember,
+	"GET /account/password":                 classMember,
+	"POST /api/v1/auth/password":            classMember,
+	"GET /account/profile":                  classMember,
+	"GET /api/v1/me/characters":             classMember,
+	"POST /api/v1/me/characters":            classMember,
+	"DELETE /api/v1/me/characters/:id":      classMember,
+	"POST /api/v1/me/characters/:id/delete": classMember,
 
 	// Officer: imports, inventory administration and history.
 	"GET /admin":                                     classOfficer,
@@ -116,6 +121,10 @@ var routeMatrix = map[string]routeClass{
 	"POST /api/v1/users/:id":          classAdmin,
 	"DELETE /api/v1/users/:id":        classAdmin,
 	"POST /api/v1/users/:id/password": classAdmin,
+
+	// Administrators may remove a character name from any account (D4).
+	"POST /admin/users/:id/characters/:characterID/delete": classAdmin,
+	"DELETE /api/v1/users/:id/characters/:characterID":     classAdmin,
 }
 
 func TestRouteMatrixCoversEveryRoute(t *testing.T) {
