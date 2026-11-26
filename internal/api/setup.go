@@ -82,7 +82,7 @@ func (h *setupHandler) complete(c *gin.Context) {
 		return
 	}
 	h.logger.Info("setup completed", "user_id", user.ID, "user_name", user.UserName, "request_id", GetRequestID(c))
-	h.auth.establish(c, result, "/admin/settings")
+	h.auth.establish(c, result, "/")
 }
 
 func (h *setupHandler) completeFailure(c *gin.Context, form service.SetupInput, err error) {

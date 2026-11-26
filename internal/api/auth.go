@@ -66,7 +66,7 @@ func (h *authHandler) loginPage(c *gin.Context) {
 				c.Redirect(http.StatusSeeOther, "/account/password")
 				return
 			}
-			redirectAfterLogin(c, c.Query("next"))
+			redirectAfterLogin(c, session.User, c.Query("next"))
 			return
 		}
 		clearSessionCookie(c, h.secure)
@@ -111,7 +111,7 @@ func (h *authHandler) establish(c *gin.Context, result service.LoginResult, next
 			c.Redirect(http.StatusSeeOther, "/account/password")
 			return
 		}
-		redirectAfterLogin(c, next)
+		redirectAfterLogin(c, result.User, next)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": sessionResponse{

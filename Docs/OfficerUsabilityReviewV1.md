@@ -118,6 +118,11 @@ or full form submissions, not individual keystrokes.
 (`internal/api/ui.go`). Settings is the least frequent daily destination and
 includes database and session configuration.
 
+*Status (2026-11-26): the login half is fixed.* Login now lands on the inventory
+page for every role; a saved `next` destination is honoured only when the
+signed-in role may use it and otherwise falls back to inventory. `/admin` is
+unchanged: it is an explicitly typed URL, never a post-login destination.
+
 **F-02 — The header has no current-section state and prioritizes Settings.**
 The visible admin order is Settings, Admin inventory, Imports, Audit
 (`internal/web/templates/partials.html`). No link carries `aria-current`. On

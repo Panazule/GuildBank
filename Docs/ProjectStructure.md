@@ -94,7 +94,7 @@ GuildBank/
 │   │   ├── views.go              Embedded template rendering
 │   │   ├── ui.go                 Shared HTML page helpers
 │   │   ├── csrf.go               Signed double-submit CSRF
-│   │   ├── cookies.go            Session/CSRF cookie flags and redirect safety
+│   │   ├── cookies.go            Session/CSRF cookie flags, safe `next` and role-aware post-login redirect
 │   │   ├── middleware.go          Request ID, access log, panic recovery
 │   │   ├── middleware_auth.go    Setup gate, default-deny auth, RequireRole hierarchy, forced password change, headers
 │   │   ├── errors.go             Domain-error to HTTP status mapping

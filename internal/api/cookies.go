@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/Panazule/guildbank/internal/domain"
 )
 
 const (
@@ -49,16 +51,55 @@ func safeNext(value string) string {
 	return u.RequestURI()
 }
 
-// redirectAfterLogin applies the explicit next destination, else the
-// administration default. Callers must send a flagged account to
-// /account/password first: this helper never has a principal to inspect,
-// because login runs before any session middleware.
-func redirectAfterLogin(c *gin.Context, next string) {
-	if target := safeNext(next); target != "" {
+// redirectAfterLogin sends the account to the page it asked for, or to the
+// inventory landing page. Inventory is the application's home for every role;
+// no administration page is ever the default. Callers must send a flagged
+// account to /account/password first: this helper never inspects a session,
+// because login runs before the session middleware.
+func redirectAfterLogin(c *gin.Context, user domain.User, next string) {
+	if target := authorizedNext(user, next); target != "" {
 		c.Redirect(http.StatusSeeOther, target)
 		return
 	}
-	c.Redirect(http.StatusSeeOther, "/admin/settings")
+	c.Redirect(http.StatusSeeOther, "/")
+}
+
+// authorizedNext returns the stored destination when it is safe and available to
+// this role, and "" otherwise. A destination that the role cannot use therefore
+// lands on the inventory page rather than on a Forbidden page.
+func authorizedNext(user domain.User, next string) string {
+	target := safeNext(next)
+	if target == "" {
+		return ""
+	}
+	if required, restricted := minimumRoleForPage(target); restricted && !user.Role().AtLeast(required) {
+		return ""
+	}
+	return target
+}
+
+// minimumRoleForPage mirrors the route groups for the destinations a login can
+// carry. Only page prefixes are listed: an unauthenticated API call answers 401
+// without a `next` value.
+func minimumRoleForPage(target string) (domain.Role, bool) {
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return "", false
+	}
+	path := parsed.Path
+	switch {
+	case pageWithin(path, "/admin/settings"), pageWithin(path, "/admin/users"):
+		return domain.RoleAdmin, true
+	case path == "/admin", pageWithin(path, "/admin/inventory"),
+		pageWithin(path, "/admin/imports"), pageWithin(path, "/admin/audit"):
+		return domain.RoleOfficer, true
+	}
+	return "", false
+}
+
+// pageWithin reports whether path is root or one of its descendants.
+func pageWithin(path, root string) bool {
+	return path == root || strings.HasPrefix(path, root+"/")
 }
 
 func writeHTMLStatus(c *gin.Context, status int, title, message string) {

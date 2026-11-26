@@ -125,7 +125,7 @@ settings takes effect after a restart (PD-05/PD-18 remain in force).
 | GET | `/api/v1/items` | Public paginated inventory JSON with the same filters and sort contract |
 | GET | `/api/v1/items/:id` | Public item-detail JSON; absent/deleted `404` |
 | GET | `/login` | Login page (redirects to setup while setup is pending) |
-| POST | `/api/v1/auth/login` | Verify credentials, set the session cookie, return JSON or redirect for HTML |
+| POST | `/api/v1/auth/login` | Verify credentials, set the session cookie, return JSON or, for HTML, redirect to the requested page or the inventory page (`/`) |
 | POST | `/api/v1/auth/logout` | Revoke the session; requires authentication and CSRF |
 | GET | `/api/v1/auth/session` | Current administrator and expiry; admin-only |
 | GET | `/api/v1/auth/csrf` | Issue a signed CSRF token for API clients |
