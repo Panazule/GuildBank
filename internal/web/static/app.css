@@ -383,3 +383,28 @@ main.card.admin-card {
 @media (max-width: 900px) {
   .admin-table, .audit-table { min-width: 44rem; }
 }
+
+/* P0 name-first identity: unresolved-identity badge and ambiguity picker. */
+.identity-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--danger);
+  border-radius: 999px;
+  color: var(--danger);
+  font-size: 0.72rem;
+  vertical-align: middle;
+}
+.candidate-list {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px dashed var(--muted);
+  border-radius: 6px;
+}
+.candidate-list legend {
+  padding: 0 0.35rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.candidate { display: block; margin: 0.25rem 0; }
+.candidate input[type="radio"] { margin-right: 0.4rem; }

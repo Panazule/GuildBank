@@ -30,6 +30,7 @@ type harness struct {
 	server *httptest.Server
 	client *http.Client
 	store  *sqlite.Store
+	router *gin.Engine
 }
 
 func newHarness(t *testing.T, secure bool) *harness {
@@ -71,7 +72,7 @@ func newHarness(t *testing.T, secure bool) *harness {
 		server.Close()
 		_ = store.Close()
 	})
-	return &harness{t: t, server: server, client: client, store: store}
+	return &harness{t: t, server: server, client: client, store: store, router: router}
 }
 
 func (h *harness) request(method, path, csrf string, body []byte, accept string) (*http.Response, []byte) {

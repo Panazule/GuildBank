@@ -39,7 +39,7 @@ func TestEmbeddedAssetsExist(t *testing.T) {
 			t.Fatalf("template %s not embedded: %v", name, err)
 		}
 	}
-	for _, name := range []string{"static/app.css", "static/setup.js"} {
+	for _, name := range []string{"static/app.css", "static/setup.js", "static/admin_inventory.js"} {
 		if _, err := Static.ReadFile(name); err != nil {
 			t.Fatalf("asset %s not embedded: %v", name, err)
 		}

@@ -17,11 +17,13 @@
       <a href="/login">Login</a>
     {{end}}
     {{if .User}}
-      <a href="/admin/settings">Settings</a>
-      {{if .User.IsAdmin}}
+      {{if .User.CanAdministerInventory}}
         <a href="/admin/inventory">Admin inventory</a>
         <a href="/admin/imports">Imports</a>
         <a href="/admin/audit">Audit</a>
+      {{end}}
+      {{if .User.CanManageSettings}}
+        <a href="/admin/settings">Settings</a>
       {{end}}
       <form method="post" action="/api/v1/auth/logout" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">

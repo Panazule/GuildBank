@@ -23,6 +23,9 @@ const (
 	ItemsPageSize = 500
 	// MaxItemsPageSize bounds a single read so callers cannot exhaust memory.
 	MaxItemsPageSize = 5000
+	// ItemNameMaxCandidates bounds one exact-name lookup. Two rows already prove
+	// ambiguity; the larger bound only feeds the officer's candidate picker.
+	ItemNameMaxCandidates = 6
 )
 
 // GetItemByEQUID reads one item by its EQUID. The source table is read-only
@@ -77,6 +80,42 @@ func (s *Store) readItemBatch(ctx context.Context, ids []uint64, result map[uint
 		return fmt.Errorf("mariadb: read item rows: %w", err)
 	}
 	return nil
+}
+
+// FindItemsByName reads the metadata rows whose name equals the supplied value.
+// Names are not unique in the source (144,712 rows carry 139,190 distinct
+// names), so callers must treat more than one row as ambiguity rather than
+// picking one. The comparison uses the column collation, which the operator's
+// Items export defines; callers that need a case-insensitive guarantee run the
+// exact read first and fall back only when it returns nothing. The physical
+// table remains read-only.
+func (s *Store) FindItemsByName(ctx context.Context, name string, limit int) ([]domain.Item, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return []domain.Item{}, nil
+	}
+	if limit < 1 || limit > ItemNameMaxCandidates {
+		return nil, fmt.Errorf("mariadb: item name lookup limit %d is outside 1-%d", limit, ItemNameMaxCandidates)
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+itemColumns+` FROM items WHERE name = ? ORDER BY id LIMIT ?`, name, limit)
+	if err != nil {
+		return nil, fmt.Errorf("mariadb: find items by name: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]domain.Item, 0, limit)
+	for rows.Next() {
+		item, err := scanItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("mariadb: read item name matches: %w", err)
+	}
+	return items, nil
 }
 
 // CountItems returns the number of source metadata rows. It exists for

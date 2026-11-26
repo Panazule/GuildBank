@@ -38,17 +38,32 @@
               <option value="Spell"{{if eq .Form.ItemType "Spell"}} selected{{end}}>Spell (merged quantity)</option>
             </select>
           </label>
-          <label>EQUID
-            <input name="equid" type="text" inputmode="numeric" required value="{{.Form.EQUID}}" aria-describedby="equid-help">
-            <span class="help" id="equid-help">The item's EQUID from the game.</span>
-            {{with index .ErrorFields "equid"}}<span class="field-error">{{.}}</span>{{end}}
-          </label>
-          <label>Name
-            <input name="name" type="text" maxlength="128" value="{{.Form.Name}}" aria-describedby="name-help">
-            <span class="help" id="name-help">Used when the EQUID has no item metadata. When item metadata exists, the metadata name takes precedence and is stored instead.</span>
+          <label>Item name
+            <input id="item-name" name="name" type="text" maxlength="128" value="{{.Form.Name}}" aria-describedby="name-help" autocomplete="off">
+            <span class="help" id="name-help">A unique match fills the EQUID automatically. A name with no metadata is still accepted: the row stores the unresolved-identity placeholder and this name stays authoritative.</span>
             {{with index .ErrorFields "name"}}<span class="field-error">{{.}}</span>{{end}}
           </label>
+          {{if not .Candidates}}
+            <label>EQUID (optional)
+              <input id="item-equid" name="equid" type="text" inputmode="numeric" value="{{.Form.EQUID}}" aria-describedby="equid-help" autocomplete="off">
+              <span class="help" id="equid-help">Leave blank to resolve from the name. A supplied EQUID is authoritative.</span>
+              {{with index .ErrorFields "equid"}}<span class="field-error">{{.}}</span>{{end}}
+            </label>
+          {{end}}
         </div>
+        <p id="name-lookup-result" class="help" role="status" aria-live="polite"></p>
+        {{if .Candidates}}
+          <fieldset class="candidate-list">
+            <legend>This name matches more than one item — choose one</legend>
+            {{range .Candidates}}
+              <label class="candidate">
+                <input type="radio" name="equid" value="{{.EQUID}}" required>
+                <span class="mono">{{.EQUID}}</span> — {{.Name}}
+              </label>
+            {{end}}
+          </fieldset>
+          {{with index .ErrorFields "equid"}}<span class="field-error">{{.}}</span>{{end}}
+        {{end}}
       {{end}}
 
       <div class="field-row">
@@ -92,6 +107,7 @@
     </form>
   </main>
   {{template "footer" .}}
+  <script src="/static/admin_inventory.js" defer></script>
 </body>
 </html>
 {{end}}

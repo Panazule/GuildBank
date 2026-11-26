@@ -15,12 +15,25 @@ const (
 	ImportStatusCompleted  ImportStatus = "Completed"
 )
 
-// Actor is the authenticated administrator snapshot used for import writes.
-// It is built from the session user and deliberately excludes password data.
+// Actor is the authenticated account snapshot used for guild-store writes. It
+// is built from the session user and deliberately excludes password data.
+// Role carries the approved hierarchy so a service can make a capability
+// decision without re-reading the account.
 type Actor struct {
 	UserID   int64
 	UserName string
 	IsAdmin  bool
+	Role     Role
+}
+
+// CanManageInventory reports whether the actor may perform inventory and import
+// writes. It honours Role when supplied and otherwise falls back to the legacy
+// IsAdmin flag, so callers that predate the role model keep working.
+func (a Actor) CanManageInventory() bool {
+	if a.Role != "" {
+		return a.Role.AtLeast(RoleOfficer)
+	}
+	return a.IsAdmin
 }
 
 // ImportBatch is one uploaded file and its durable lifecycle state.

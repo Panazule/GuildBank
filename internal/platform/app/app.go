@@ -143,13 +143,14 @@ func Run(ctx context.Context, opts Options) error {
 	var adminService *service.AdminInventoryService
 	if guildStore != nil {
 		metadata := service.NewItemMetadataService(guildStore)
+		itemNames := service.NewItemNameResolver(guildStore)
 		importService = service.NewImportService(guildStore, metadata, settingsService, time.Now, logger)
 		inventoryService = service.NewInventoryService(guildStore, settingsService, time.Now, logger)
-		adminService = service.NewAdminInventoryService(guildStore, settingsService, metadata, time.Now, logger)
+		adminService = service.NewAdminInventoryService(guildStore, settingsService, metadata, itemNames, time.Now, logger)
 	} else {
 		importService = service.NewImportService(nil, nil, settingsService, time.Now, logger)
 		inventoryService = service.NewInventoryService(nil, settingsService, time.Now, logger)
-		adminService = service.NewAdminInventoryService(nil, settingsService, nil, time.Now, logger)
+		adminService = service.NewAdminInventoryService(nil, settingsService, nil, nil, time.Now, logger)
 	}
 
 	purgeCtx, stopPurge := context.WithCancel(ctx)

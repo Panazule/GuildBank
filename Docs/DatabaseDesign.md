@@ -64,8 +64,8 @@ CREATE TABLE Users (
     UserID        INTEGER PRIMARY KEY AUTOINCREMENT,
     UserName      TEXT    NOT NULL COLLATE NOCASE,   -- SPEC
     PasswordHash  TEXT    NOT NULL,                  -- SPEC: bcrypt (60 chars)
-    AccessLevel   TEXT    NOT NULL DEFAULT 'Admin'   -- SPEC value set
-                          CHECK (AccessLevel IN ('Admin')),
+    AccessLevel   TEXT    NOT NULL DEFAULT 'Member'  -- SPEC value set; widened by 0002
+                          CHECK (AccessLevel IN ('Admin','Officer','Member')),
     LastLogin     TEXT    NULL,                      -- SPEC: UTC ISO-8601
     DisabledFg    INTEGER NOT NULL DEFAULT 0         -- SPEC
                           CHECK (DisabledFg IN (0,1)),
@@ -81,8 +81,9 @@ CREATE UNIQUE INDEX ux_users_username ON Users (UserName COLLATE NOCASE);
 
 **Notes**
 - Uniqueness and `NOT NULL` are refinements; the spec lists fields but not constraints (MR-11). Case-insensitive uniqueness prevents `Admin`/`admin` confusion.
-- `AccessLevel` is constrained to the only documented value (L185–L187). Adding roles is a migration.
-- `DisabledFg` is the intended deactivation mechanism; `DELETE /api/users/{id}` should disable (DC-11). Physical deletion is not granted to the runtime user.
+- `AccessLevel` now stores the approved flat hierarchy `Member < Officer < Admin` (owner decision 2026-11-26): Member is the least-privileged default, Officer may administer inventory/imports and read history, Admin adds application configuration and user administration. An unrecognized value fails closed to Member in the service layer.
+- `0002_user_roles.sql` widens the CHECK by rebuilding the table (SQLite cannot alter a constraint in place). The rebuild copies every column verbatim, recreates `ux_users_username`, and normalises `sqlite_sequence`. Because `Sessions.UserID` references `Users ON DELETE CASCADE` and connections run `PRAGMA foreign_keys=ON`, the rebuild drops all sessions: every account signs in again after the upgrade. That is approved and expected.
+- `DisabledFg` is the intended deactivation mechanism (DC-11); disabling revokes that account's sessions in the same transaction, and the last enabled Administrator cannot be disabled or demoted (`CountEnabledAdmins` guard).
 - bcrypt hashes are ~60 characters; do not apply a short `VARCHAR` limit.
 
 ### 3.2 `Settings`
@@ -304,6 +305,7 @@ CREATE TABLE GuildBankItems (
 - `ModBy` stores the username at the time of the action because the user row lives in SQLite (DC-07); `ModByUserID` preserves the numeric identity without a cross-store FK.
 - `DateOpen`/`DateBazaar` are computed at insert time from settings (L314–L330). The CHECKs prevent inverted windows but cannot detect later settings changes (DC-06).
 - The physical FK to `Items` is intentionally **not enforced** (AM-01). An unresolved `EQUID` is by definition absent from `Items` at import time, so a foreign key would reject exactly the rows D-08 requires. `EQUID` still denotes the collector's item identifier (D-01), is never rewritten, and is validated in the service whenever the referenced `Items` row becomes available. `MetadataMissingFg = 1` marks the unresolved state and `ix_gbi_equid` keeps lookups cheap. An index is not a constraint, so the identifier remains the single key with no sentinel or shadow column. `Name` is copied at insert (L281–L283), so an `Items` rename never rewrites inventory (intended by L296/L309/L321).
+- **Manual unresolved identity (approved 2026-11-26, AM-01 addendum).** When a manual create supplies a `Name` that matches no `items` row and no EQUID, the service stores `EQUID = 4294967295` (the `INT UNSIGNED` maximum, far outside every real identifier), `MetadataMissingFg = 1`, and the entered `Name` as the authoritative identity. The value is server-assigned only and is rejected from any client. Spell merge and the item-consolidation command both exclude it because those paths group by `EQUID`. No schema change is needed: the column type, existing CHECKs and `ix_gbi_equid` already accept the value, and no index or constraint is added.
 - No `ON DELETE` path exists: the runtime user has no `DELETE` grant (principle 2). Soft delete is the only removal.
 - `NameSort` is a zero-padded, case-folded natural sort key maintained by the service (IC-11). It is nullable only so the migration can backfill; production writes always set it. Public reads use the `NameSort` index; the nulls-last expression is applied only when a filtered snapshot actually contains null keys.
 - `0002_public_inventory_indexes` is index-only: it adds `ix_gbi_public_type_name_sort`, `ix_gbi_public_added`, `ix_gbi_public_open` and `ix_gbi_public_bazaar` and retains all prior indexes. `EXPLAIN` and 250k/1M performance evidence are in `Phase4Validation.md`. Class/race membership (`FIND_IN_SET`) and leading-wildcard name search remain scan predicates.

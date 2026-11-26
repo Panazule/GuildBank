@@ -135,6 +135,10 @@ type AdminInventoryItem struct {
 	ModByUserID      *int64
 }
 
+func (i AdminInventoryItem) HasUnresolvedIdentity() bool {
+	return IsUnresolvedEQUID(i.EQUID)
+}
+
 // AdminInventoryPage is one page of administrative records plus the total from
 // the same snapshot.
 type AdminInventoryPage struct {

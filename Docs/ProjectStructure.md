@@ -31,6 +31,7 @@ GuildBank/
 │   │   ├── class_mask.go         ClassList → ClassString
 │   │   ├── race_mask.go          RaceList → RaceString
 │   │   ├── item_metadata.go      EQUID resolution and GuildBankItems metadata generation
+│   │   ├── item_name_resolver.go Name → EQUID resolution (normalize, collation-aware, cached, ambiguity-aware)
 │   │   ├── password.go           bcrypt hashing, policy and timing equalizer
 │   │   ├── auth.go               Login, session issuance/validation, logout, revocation
 │   │   ├── rate_limit.go         D-12 IP+username login lockout
@@ -52,8 +53,8 @@ GuildBank/
 │   │   ├── sqlite/
 │   │   │   ├── store.go          Open/pragmas/setup probe/checkpoint
 │   │   │   ├── migrate.go        Forward-only PRAGMA user_version runner
-│   │   │   ├── migrations/       0001_phase1.sql (Users, Settings, Sessions)
-│   │   │   ├── users.go          Account lookup, LastLogin, admin count
+│   │   │   ├── migrations/       0001_phase1.sql (Users, Settings, Sessions) and 0002_user_roles.sql (Member/Officer/Admin)
+│   │   │   ├── users.go          Account lookup, LastLogin, admin count, role/disable guards
 │   │   │   ├── sessions.go       Hashed-token CRUD, touch, expiry purge
 │   │   │   ├── settings.go       Typed settings list/upsert
 │   │   │   ├── setup.go          Atomic administrator + settings transaction
@@ -82,6 +83,7 @@ GuildBank/
 │   │   ├── admin_pages_handlers.go Admin create/update/remove/restore handlers
 │   │   ├── admin_inventory.go    Admin inventory HTML/JSON list, detail and write handlers
 │   │   ├── admin_json.go         Admin DTOs, strict request decoding, response helpers
+│   │   ├── admin_lookup.go        Item-name lookup endpoint and candidate DTOs
 │   │   ├── admin_movement_pages.go Issue/Return/movement-history pages and forms
 │   │   ├── admin_movements.go    Issue/Return/movement-history JSON handlers
 │   │   ├── admin_audit.go        Audit viewer and per-record history handlers
@@ -91,7 +93,7 @@ GuildBank/
 │   │   ├── csrf.go               Signed double-submit CSRF
 │   │   ├── cookies.go            Session/CSRF cookie flags and redirect safety
 │   │   ├── middleware.go          Request ID, access log, panic recovery
-│   │   ├── middleware_auth.go    Setup gate, default-deny auth, admin check, headers
+│   │   ├── middleware_auth.go    Setup gate, default-deny auth, RequireRole hierarchy, headers
 │   │   ├── errors.go             Domain-error to HTTP status mapping
 │   │   ├── health.go             /healthz and /readyz handlers
 │   │   └── *_test.go
@@ -99,7 +101,7 @@ GuildBank/
 │   │   ├── embed.go              Embedded template/static filesystems
 │   │   ├── embed_test.go         Import guard + embed checks
 │   │   ├── templates/            setup, login, settings, imports, import_detail, inventory_list, inventory_detail, admin_inventory, admin_inventory_form, admin_inventory_detail, admin_inventory_issue, admin_inventory_return, admin_inventory_history, admin_remove, admin_restore, admin_bulk_remove, admin_audit, error, partials
-│   │   └── static/               app.css, setup.js and imports.js
+│   │   └── static/               app.css, setup.js, imports.js and admin_inventory.js
 │   └── platform/
 │       ├── config/
 │       │   ├── config.go        Defaults -> env -> flags, validation, redaction
@@ -189,7 +191,10 @@ succeeds. Migration failures stay fatal after `MariaDB.InitAttempts` attempts.
 `Items` remains externally owned and read-only; `items.go` is the only file
 that knows the physical lowercase table and its `id`/`name`/`classes`/`races`
 columns (PD-19). It provides single, batch, count and keyset-page reads and no
-write method. Production grants must still enforce `SELECT` only (E-01).
+write method. `FindItemsByName` adds a bounded exact-name read
+(`WHERE name = ? ORDER BY id LIMIT 2|6`) that the name-first create path and the
+officer lookup endpoint share; names are not unique in the source, so two rows
+are reported as ambiguity rather than resolved. Production grants must still enforce `SELECT` only (E-01).
 
 `migrate.go` applies embedded forward-only migrations under a per-database
 `GET_LOCK` and records them in `schema_migrations`; `0001_guild_store.sql`

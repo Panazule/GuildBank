@@ -170,7 +170,7 @@ func (s *ImportService) Upload(ctx context.Context, actor domain.Actor, fileName
 }
 
 func validateActor(actor domain.Actor) error {
-	if actor.UserID <= 0 || strings.TrimSpace(actor.UserName) == "" || !actor.IsAdmin {
+	if actor.UserID <= 0 || strings.TrimSpace(actor.UserName) == "" || !actor.CanManageInventory() {
 		return domain.ErrForbidden
 	}
 	return nil

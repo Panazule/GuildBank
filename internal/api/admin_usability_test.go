@@ -33,7 +33,7 @@ func newMetadataPageHandler(t *testing.T, store *movementFakeStore, metadata ser
 	h := newPageTestHandler(t, store)
 	h.admin = service.NewAdminInventoryService(store,
 		movementTestSettings{"GuildOpenDays": "14", "BazaarDays": "30"},
-		metadata, func() time.Time { return time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC) },
+		metadata, nil, func() time.Time { return time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC) },
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return h
 }

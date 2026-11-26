@@ -95,22 +95,31 @@ func RequireAuth(auth *service.AuthService, secure bool) gin.HandlerFunc {
 	}
 }
 
-// RequireAdmin enforces the only access level defined by the specification.
-func RequireAdmin() gin.HandlerFunc {
+// RequireRole enforces the approved role hierarchy (Member < Officer < Admin)
+// on an already-authenticated request. It never authorizes a missing principal:
+// RequireAuth must run first.
+func RequireRole(min domain.Role) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session, ok := CurrentSession(c)
-		if !ok || !session.User.IsAdmin() {
+		if !ok {
+			unauthorized(c)
+			return
+		}
+		if !session.User.Role().AtLeast(min) {
 			if wantsHTML(c) {
-				c.Redirect(http.StatusSeeOther, "/login")
-				c.Abort()
+				writeHTMLStatus(c, http.StatusForbidden, "Forbidden",
+					"You do not have permission to view this page.")
 				return
 			}
-			writeError(c, http.StatusForbidden, "forbidden", "administrator access required")
+			writeError(c, http.StatusForbidden, "forbidden", "insufficient permissions")
 			return
 		}
 		c.Next()
 	}
 }
+
+// RequireAdmin keeps the pre-role call site working; it is RequireRole(Admin).
+func RequireAdmin() gin.HandlerFunc { return RequireRole(domain.RoleAdmin) }
 
 func unauthorized(c *gin.Context) {
 	if strings.HasPrefix(c.Request.URL.Path, "/api/") {

@@ -308,7 +308,7 @@ func movementTestItem(id int64, quantity uint32) domain.AdminInventoryItem {
 func newMovementTestHandler(store *movementFakeStore) *adminInventoryHandler {
 	svc := service.NewAdminInventoryService(store,
 		movementTestSettings{"GuildOpenDays": "14", "BazaarDays": "30"},
-		nil, func() time.Time { return time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC) },
+		nil, nil, func() time.Time { return time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC) },
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return &adminInventoryHandler{
 		admin: svc, logger: slog.New(slog.NewTextHandler(io.Discard, nil)),

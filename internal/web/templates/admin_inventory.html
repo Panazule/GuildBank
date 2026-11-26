@@ -117,7 +117,7 @@
               <td class="cell-nowrap">{{if and (not .Deleted) (not .MovementBacked)}}<input type="checkbox" name="remove" value="{{.ID}}|{{.ModAtValue}}" aria-label="Select record {{.ID}} {{.Name}} for removal">{{else}}<span class="muted" aria-label="This row cannot be selected for removal">—</span>{{end}}</td>
               <td class="cell-nowrap mono">{{.ID}}</td>
               <td class="cell-nowrap mono">{{.EQUID}}</td>
-              <td class="cell-nowrap"><a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">{{.Name}}</a></td>
+              <td class="cell-nowrap"><a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">{{.Name}}</a>{{if .UnresolvedIdentity}} <span class="identity-badge" title="No item metadata match; the stored name is authoritative">Unresolved identity</span>{{end}}</td>
               <td class="cell-nowrap">{{.ItemType}}</td>
               <td class="cell-nowrap">{{.Quantity}}</td>
               <td class="cell-nowrap">{{if .SourceLocation}}{{.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</td>

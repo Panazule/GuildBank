@@ -293,9 +293,13 @@ func createInputFromForm(c *gin.Context) (domain.CreateItemInput, adminFormValue
 		fields["itemType"] = "Choose Item or Spell"
 	}
 	if values.EQUID == "" {
-		fields["equid"] = "EQUID is required"
+		// Name-first: the service resolves an exact item name. An omitted EQUID is
+		// accepted here; the service reports a validation error only when neither
+		// an EQUID nor a name is supplied.
 	} else if value, err := strconv.ParseUint(values.EQUID, 10, 64); err != nil || value < 1 || value > 4294967295 {
 		fields["equid"] = "EQUID must be 1-4294967295"
+	} else if domain.IsUnresolvedEQUID(value) {
+		fields["equid"] = "4294967295 is reserved for unresolved identities"
 	} else {
 		in.EQUID = value
 	}
@@ -453,6 +457,15 @@ func (h *adminInventoryHandler) updateForm(c *gin.Context) {
 func (h *adminInventoryHandler) renderForm(c *gin.Context, status int, edit bool,
 	values adminFormValues, item domain.AdminInventoryItem, banner string,
 	fields map[string]string, conflict bool) {
+	h.renderFormCandidates(c, status, edit, values, item, banner, fields, conflict, nil)
+}
+
+// renderFormCandidates renders the form and, for an ambiguous item name, the
+// bounded candidate list so the officer chooses an identity instead of the
+// server guessing one.
+func (h *adminInventoryHandler) renderFormCandidates(c *gin.Context, status int, edit bool,
+	values adminFormValues, item domain.AdminInventoryItem, banner string,
+	fields map[string]string, conflict bool, candidates []domain.Item) {
 	title := "Add inventory record"
 	if edit {
 		title = "Edit " + item.Name
@@ -462,15 +475,21 @@ func (h *adminInventoryHandler) renderForm(c *gin.Context, status int, edit bool
 			Title: title, CSRF: CSRF(c), User: currentUserPointer(c),
 			Error: banner, ErrorFields: fields,
 		},
-		Ready: true, Edit: edit, Item: adminItemViewOf(item), Form: values, Conflict: conflict,
+		Ready: true, Edit: edit, Item: adminItemViewOf(item), Form: values,
+		Conflict: conflict, Candidates: itemCandidatesOf(candidates),
 	})
 }
 
 // renderFormError maps a service failure onto the form or the shared error page.
 func (h *adminInventoryHandler) renderFormError(c *gin.Context, edit bool,
 	values adminFormValues, item domain.AdminInventoryItem, err error) {
+	var ambiguous *domain.ItemNameAmbiguousError
 	var validation *domain.ValidationError
 	switch {
+	case errors.As(err, &ambiguous):
+		h.renderFormCandidates(c, http.StatusUnprocessableEntity, edit, values, item,
+			"That item name matches more than one item. Choose the intended item.",
+			map[string]string{"equid": "choose one of the matching items"}, false, ambiguous.Candidates)
 	case errors.As(err, &validation):
 		h.renderForm(c, http.StatusUnprocessableEntity, edit, values, item,
 			"The record was not saved. Correct the highlighted fields.", validation.Fields, false)

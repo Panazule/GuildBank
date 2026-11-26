@@ -1192,6 +1192,15 @@ Referential validity shall be validated in the service layer whenever the refere
 
 Missing metadata shall be recorded with MetadataMissingFg rather than by altering the identifier.
 
+AM-01 Addendum: Manual Unresolved Identity (approved 2026-11-26)
+AM-01 governs imported identity: the imported EQUID is preserved and is never replaced by a sentinel.
+
+A manually added inventory row whose entered Name matches no Items metadata has no EQUID at all. Such a row stores the reserved placeholder EQUID 4294967295, sets MetadataMissingFg to True, leaves ClassString and RaceString blank, and treats the stored Name as the authoritative identity.
+
+The placeholder is server-assigned; it shall not be accepted from a client. It is never used for imported rows, and existing rows are never rewritten.
+
+While the placeholder is present, the row shall not participate in EQUID-keyed merging: spell merge and item consolidation both skip it. Consolidation, repair, reporting and any future inventory workflow shall use the stored Name as the identity source for such a row until a formal identity-repair workflow is introduced.
+
 AM-02 MetadataMissingFg
 MetadataMissingFg is a GuildBankItems field.
 

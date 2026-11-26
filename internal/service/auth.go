@@ -126,7 +126,9 @@ func (s *AuthService) IssueSession(ctx context.Context, user domain.User, client
 }
 
 func (s *AuthService) issueSession(ctx context.Context, user domain.User, clientIP, userAgent string) (LoginResult, error) {
-	if !user.IsEnabled() || !user.IsAdmin() {
+	// Every enabled role may sign in: Members and Officers use the same session
+	// model as Administrators. Authorization is enforced per route, not here.
+	if !user.IsEnabled() {
 		return LoginResult{}, domain.ErrUnauthorized
 	}
 	policy, err := s.policy.SessionPolicy(ctx)

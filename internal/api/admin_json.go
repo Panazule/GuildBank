@@ -244,27 +244,30 @@ type updateItemRequest struct {
 }
 
 type adminItemResponse struct {
-	ID              int64                    `json:"id"`
-	EQUID           uint64                   `json:"equid"`
-	Name            string                   `json:"name"`
-	ItemType        domain.ItemType          `json:"itemType"`
-	Quantity        uint32                   `json:"quantity"`
-	ClassString     string                   `json:"classString"`
-	RaceString      string                   `json:"raceString"`
-	MetadataMissing bool                     `json:"metadataMissing"`
-	SourceLocation  *string                  `json:"sourceLocation"`
-	LocationGroup   string                   `json:"locationGroup"`
-	LocationSort    string                   `json:"locationSort"`
-	GivenTo         *string                  `json:"givenTo"`
-	Deleted         bool                     `json:"deleted"`
-	NameSort        string                   `json:"nameSort"`
-	DateAdded       string                   `json:"dateAdded"`
-	DateOpen        string                   `json:"dateOpen"`
-	DateBazaar      string                   `json:"dateBazaar"`
-	Availability    domain.AvailabilityState `json:"availability"`
-	ModAt           string                   `json:"modAt"`
-	ModBy           string                   `json:"modBy"`
-	ModByUserID     *int64                   `json:"modByUserId"`
+	ID              int64           `json:"id"`
+	EQUID           uint64          `json:"equid"`
+	Name            string          `json:"name"`
+	ItemType        domain.ItemType `json:"itemType"`
+	Quantity        uint32          `json:"quantity"`
+	ClassString     string          `json:"classString"`
+	RaceString      string          `json:"raceString"`
+	MetadataMissing bool            `json:"metadataMissing"`
+	// UnresolvedIdentity reports the documented placeholder EQUID (4294967295):
+	// the row has no resolved identity and its stored name is authoritative.
+	UnresolvedIdentity bool                     `json:"unresolvedIdentity"`
+	SourceLocation     *string                  `json:"sourceLocation"`
+	LocationGroup      string                   `json:"locationGroup"`
+	LocationSort       string                   `json:"locationSort"`
+	GivenTo            *string                  `json:"givenTo"`
+	Deleted            bool                     `json:"deleted"`
+	NameSort           string                   `json:"nameSort"`
+	DateAdded          string                   `json:"dateAdded"`
+	DateOpen           string                   `json:"dateOpen"`
+	DateBazaar         string                   `json:"dateBazaar"`
+	Availability       domain.AvailabilityState `json:"availability"`
+	ModAt              string                   `json:"modAt"`
+	ModBy              string                   `json:"modBy"`
+	ModByUserID        *int64                   `json:"modByUserId"`
 }
 
 type adminWarningResponse struct {
@@ -349,7 +352,8 @@ func adminActor(c *gin.Context) (domain.Actor, bool) {
 		return domain.Actor{}, false
 	}
 	return domain.Actor{
-		UserID: session.User.ID, UserName: session.User.UserName, IsAdmin: session.User.IsAdmin(),
+		UserID: session.User.ID, UserName: session.User.UserName,
+		IsAdmin: session.User.IsAdmin(), Role: session.User.Role(),
 	}, true
 }
 
@@ -357,7 +361,12 @@ func adminActor(c *gin.Context) (domain.Actor, bool) {
 // that PD5-27 requires for an inverted derived window.
 func (h *adminInventoryHandler) respondAdminError(c *gin.Context, err error) {
 	var validation *domain.ValidationError
+	var ambiguous *domain.ItemNameAmbiguousError
 	switch {
+	case errors.As(err, &ambiguous):
+		fields := map[string]string{"equid": "the name matches more than one item; choose one of the candidates"}
+		writeErrorCandidates(c, http.StatusUnprocessableEntity, "validation_failed",
+			"the item name matches more than one item", fields, itemCandidatesOf(ambiguous.Candidates))
 	case errors.As(err, &validation):
 		writeErrorFields(c, http.StatusUnprocessableEntity, "validation_failed",
 			"one or more fields are invalid", validation.Fields)

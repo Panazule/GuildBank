@@ -49,6 +49,11 @@ const (
 	// create supplies a name that differs from the resolved metadata name. The
 	// metadata name is still stored; the warning only explains which name won.
 	ItemWarningNameMismatch = "name_metadata_mismatch"
+	// ItemWarningIdentityUnresolved is raised when the entered name matched no
+	// source metadata and the row therefore stores the documented placeholder
+	// EQUID. The entered name is the authoritative identity until a formal
+	// identity-repair workflow exists (owner decision 2026-11-26).
+	ItemWarningIdentityUnresolved = "item_identity_unresolved"
 )
 
 // AdminAuditEventTypes is the closed event-type allowlist for the audit viewer.
@@ -123,29 +128,49 @@ type AdminWriteResult struct {
 // AdminInventoryService owns administrative filter validation, lifecycle date
 // derivation, location normalization and the single audit row per write.
 type AdminInventoryService struct {
-	store    AdminStore
-	settings InventorySettingsReader
-	metadata AdminMetadataResolver
-	now      func() time.Time
-	logger   *slog.Logger
+	store     AdminStore
+	settings  InventorySettingsReader
+	metadata  AdminMetadataResolver
+	itemNames *ItemNameResolver
+	now       func() time.Time
+	logger    *slog.Logger
 }
 
 // NewAdminInventoryService wires the administrative inventory path. A nil store
-// produces a degraded service whose Ready() is false.
+// produces a degraded service whose Ready() is false. A nil itemNames resolver
+// disables name-first creation: an omitted EQUID then fails with a validation
+// error instead of guessing.
 func NewAdminInventoryService(store AdminStore, settings InventorySettingsReader,
-	metadata AdminMetadataResolver, now func() time.Time, logger *slog.Logger) *AdminInventoryService {
+	metadata AdminMetadataResolver, itemNames *ItemNameResolver,
+	now func() time.Time, logger *slog.Logger) *AdminInventoryService {
 	if now == nil {
 		now = time.Now
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &AdminInventoryService{store: store, settings: settings, metadata: metadata, now: now, logger: logger}
+	return &AdminInventoryService{
+		store: store, settings: settings, metadata: metadata, itemNames: itemNames,
+		now: now, logger: logger,
+	}
 }
 
 // Ready reports whether the guild store is available.
 func (s *AdminInventoryService) Ready() bool {
 	return s != nil && s.store != nil && s.store.Ready()
+}
+
+// ResolveItemName returns the exact-name lookup used by the name-first create
+// form. It runs the same resolution the create path runs, so the officer-facing
+// hint and the stored identity cannot disagree.
+func (s *AdminInventoryService) ResolveItemName(ctx context.Context, name string) (ItemNameResolution, error) {
+	if err := s.requireReady(); err != nil {
+		return ItemNameResolution{}, err
+	}
+	if s.itemNames == nil {
+		return ItemNameResolution{}, domain.ErrUnavailable
+	}
+	return s.itemNames.Resolve(ctx, name)
 }
 
 func (s *AdminInventoryService) requireReady() error {
@@ -351,6 +376,25 @@ func (s *AdminInventoryService) withDeadlockRetry(operation string, attempt func
 	return result, err
 }
 
+// withIdentityUnresolvedWarning replaces the generic missing-metadata warning
+// with the placeholder-identity advisory. The placeholder is not "an EQUID
+// absent from Items": the row has no resolved identity yet, and the stored name
+// is what identifies it until a formal repair workflow exists.
+func withIdentityUnresolvedWarning(warnings []ItemWarning, name string) []ItemWarning {
+	kept := make([]ItemWarning, 0, len(warnings)+1)
+	for _, warning := range warnings {
+		if warning.Code == ItemWarningMetadataMissing {
+			continue
+		}
+		kept = append(kept, warning)
+	}
+	return append(kept, ItemWarning{
+		Code: ItemWarningIdentityUnresolved, Field: "equid",
+		Detail: fmt.Sprintf("EQUID %d is the unresolved-identity placeholder; the entered name %q is authoritative",
+			domain.UnresolvedEQUID, name),
+	})
+}
+
 // prepareCreate validates the request, resolves metadata, derives the dates and
 // builds the row template shared by every created row.
 func (s *AdminInventoryService) prepareCreate(ctx context.Context, in domain.CreateItemInput) (domain.CreateItemInput, domain.GuildBankItem, []ItemWarning, error) {
@@ -367,10 +411,45 @@ func (s *AdminInventoryService) prepareCreate(ctx context.Context, in domain.Cre
 	default:
 		fields["itemType"] = "itemType must be Item or Spell"
 	}
-	if in.EQUID == 0 || in.EQUID > math.MaxUint32 {
+	in.Name = adminText("name", in.Name, AdminMaxNameRunes, false, fields)
+	// Name-first identity (owner decision 2026-11-26): an omitted EQUID is
+	// resolved from an exact item name. A unique match supplies the identity, an
+	// ambiguous name returns the candidate list instead of guessing, and an
+	// unknown name stores the documented unresolved placeholder with the entered
+	// name authoritative.
+	unresolvedIdentity := false
+	switch {
+	case in.EQUID == 0:
+		switch {
+		case strings.TrimSpace(in.Name) == "":
+			fields["name"] = "enter an item name or supply an EQUID"
+			fields["equid"] = "supply an EQUID or enter an item name"
+		case s.itemNames == nil:
+			fields["equid"] = "item name lookup is unavailable; supply an EQUID"
+		default:
+			resolution, err := s.itemNames.Resolve(ctx, in.Name)
+			if err != nil {
+				return in, domain.GuildBankItem{}, nil, err
+			}
+			switch resolution.Status {
+			case ItemNameStatusUnique:
+				in.EQUID = resolution.Match.EQUID
+				in.Name = resolution.Match.Name
+			case ItemNameStatusAmbiguous:
+				return in, domain.GuildBankItem{}, nil, &domain.ItemNameAmbiguousError{
+					Name: resolution.Name, Candidates: resolution.Candidates,
+				}
+			default:
+				in.EQUID = domain.UnresolvedEQUID
+				in.Name = resolution.Name
+				unresolvedIdentity = true
+			}
+		}
+	case domain.IsUnresolvedEQUID(in.EQUID):
+		fields["equid"] = fmt.Sprintf("%d is reserved for unresolved identities and cannot be supplied", domain.UnresolvedEQUID)
+	case in.EQUID > math.MaxUint32:
 		fields["equid"] = "equid must be between 1 and 4294967295"
 	}
-	in.Name = adminText("name", in.Name, AdminMaxNameRunes, false, fields)
 	in.SourceLocation = adminOptionalText("sourceLocation", in.SourceLocation, AdminMaxLocationRunes, fields)
 	in.GivenTo = adminOptionalText("givenTo", in.GivenTo, AdminMaxGivenToRunes, fields)
 	// Active rows must not carry a recipient. A whole-record disposition is
@@ -414,6 +493,9 @@ func (s *AdminInventoryService) prepareCreate(ctx context.Context, in domain.Cre
 					entered, meta.Name),
 			})
 		}
+	}
+	if unresolvedIdentity {
+		warnings = withIdentityUnresolvedWarning(warnings, in.Name)
 	}
 
 	now := s.now().UTC()
@@ -493,7 +575,7 @@ func (s *AdminInventoryService) createAttempt(ctx context.Context, in domain.Cre
 		}
 	}()
 
-	if row.ItemType == domain.ItemTypeSpell {
+	if row.ItemType == domain.ItemTypeSpell && !domain.IsUnresolvedEQUID(row.EQUID) {
 		spells, err := tx.FindActiveSpells(ctx, row.EQUID)
 		if err != nil {
 			return AdminWriteResult{}, err

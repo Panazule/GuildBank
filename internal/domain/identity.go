@@ -7,8 +7,62 @@ import (
 	"time"
 )
 
-// AccessAdmin is the only access level defined by Design.md L185-L187.
+// AccessAdmin is the administrative access level (Design.md L185-L187). The
+// approved role hierarchy is Member < Officer < Admin; AccessLevel stores the
+// role name and remains the single source of truth.
 const AccessAdmin = "Admin"
+
+// Role is the approved authorization role. A flat hierarchy is used: an Admin
+// may do everything an Officer may do, and an Officer everything a Member may
+// do, so no per-permission table is needed.
+type Role string
+
+const (
+	RoleMember  Role = "Member"
+	RoleOfficer Role = "Officer"
+	RoleAdmin   Role = "Admin"
+)
+
+// Roles is the canonical ordered allowlist (least to most privileged).
+var Roles = []Role{RoleMember, RoleOfficer, RoleAdmin}
+
+// ParseRole maps a stored AccessLevel onto the hierarchy. Anything that is not
+// an approved value, including a blank legacy row, is treated as the least
+// privileged role so a corrupt value can never grant access.
+func ParseRole(value string) Role {
+	switch Role(value) {
+	case RoleAdmin:
+		return RoleAdmin
+	case RoleOfficer:
+		return RoleOfficer
+	default:
+		return RoleMember
+	}
+}
+
+// Valid reports whether the role is one of the approved values.
+func (r Role) Valid() bool {
+	return r == RoleMember || r == RoleOfficer || r == RoleAdmin
+}
+
+// Rank orders the hierarchy: Member 1, Officer 2, Admin 3. An unknown role has
+// the Member rank, matching ParseRole's fail-closed rule.
+func (r Role) Rank() int {
+	switch r {
+	case RoleAdmin:
+		return 3
+	case RoleOfficer:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// AtLeast reports whether the role is at or above min.
+func (r Role) AtLeast(min Role) bool { return r.Rank() >= min.Rank() }
+
+// String returns the stored value.
+func (r Role) String() string { return string(r) }
 
 // Sentinel errors shared by the service and API layers. Repositories translate
 // driver errors into these values so the API can map status codes without
@@ -78,8 +132,32 @@ type User struct {
 	MustChangePassword bool
 }
 
+// Role reports the account's authorization role. An unrecognized AccessLevel
+// fails closed to Member.
+func (u User) Role() Role { return ParseRole(u.AccessLevel) }
+
 // IsAdmin reports whether the account has administrative access.
-func (u User) IsAdmin() bool { return u.AccessLevel == AccessAdmin }
+func (u User) IsAdmin() bool { return u.Role() == RoleAdmin }
+
+// IsOfficer reports whether the account may administer inventory. Admin
+// includes Officer, so this is a hierarchy check rather than an equality check.
+func (u User) IsOfficer() bool { return u.Role().AtLeast(RoleOfficer) }
+
+// CanAdministerInventory reports whether the account may add, edit, issue,
+// return, remove, restore and import inventory.
+func (u User) CanAdministerInventory() bool { return u.IsOfficer() }
+
+// CanViewAudit reports whether the account may read the audit viewer and
+// movement history. User-management events are Administrator-only and are
+// excluded from the Officer view by the audit scope filter.
+func (u User) CanViewAudit() bool { return u.IsOfficer() }
+
+// CanManageUsers reports whether the account may administer accounts.
+func (u User) CanManageUsers() bool { return u.IsAdmin() }
+
+// CanManageSettings reports whether the account may change application
+// configuration.
+func (u User) CanManageSettings() bool { return u.IsAdmin() }
 
 // IsEnabled reports whether the account may authenticate.
 func (u User) IsEnabled() bool { return !u.Disabled }

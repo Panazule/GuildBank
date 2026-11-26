@@ -85,7 +85,8 @@ func adminItemViewOf(item domain.AdminInventoryItem) adminItemView {
 		ID: item.ID, EQUID: item.EQUID, Name: item.Name, ItemType: string(item.ItemType),
 		Quantity: item.Quantity, ClassText: adminClassText(item.ClassString),
 		RaceText: adminClassText(item.RaceString), MetadataMissing: item.MetadataMissingFg,
-		SourceLocation: item.SourceLocation, LocationGroup: item.LocationGroup,
+		UnresolvedIdentity: item.HasUnresolvedIdentity(),
+		SourceLocation:     item.SourceLocation, LocationGroup: item.LocationGroup,
 		LocationGroupLabel: adminGroupLabel(item.LocationGroup),
 		GivenTo:            item.GivenTo, Deleted: item.DeletedFg,
 		// Restore is offered only for a plain administrative removal. An issued

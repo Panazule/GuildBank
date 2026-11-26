@@ -146,6 +146,130 @@ func insertUserTx(ctx context.Context, tx *sql.Tx, u domain.User) (int64, error)
 	return id, nil
 }
 
+// rowQuerier is satisfied by *sql.DB and *sql.Tx, so the last-administrator
+// guards can run inside a write transaction or as a standalone read.
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// CountEnabledAdmins counts enabled Administrator accounts, optionally
+// excluding one account. This is the last-administrator guard: at least one
+// enabled Administrator must always remain.
+func (s *Store) CountEnabledAdmins(ctx context.Context, excludeUserID int64) (int, error) {
+	return countEnabledAdmins(ctx, s.db, excludeUserID)
+}
+
+func countEnabledAdmins(ctx context.Context, q rowQuerier, excludeUserID int64) (int, error) {
+	var n int
+	err := q.QueryRowContext(ctx, `
+		SELECT COUNT(1) FROM Users
+		WHERE AccessLevel = ? AND DisabledFg = 0 AND UserID <> ?`,
+		domain.AccessAdmin, excludeUserID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: count enabled administrators: %w", err)
+	}
+	return n, nil
+}
+
+func getUserByID(ctx context.Context, q rowQuerier, userID int64) (domain.User, error) {
+	row := q.QueryRowContext(ctx, `SELECT `+userColumns+` FROM Users WHERE UserID = ?`, userID)
+	return scanUser(row)
+}
+
+// SetUserAccessLevel changes one account's role. It runs in a single
+// transaction and refuses to remove the last enabled Administrator. The actor
+// must be an Administrator; the route layer already enforces the same rule.
+func (s *Store) SetUserAccessLevel(ctx context.Context, userID int64, role domain.Role,
+	at time.Time, actor domain.Actor) (domain.User, error) {
+	if !role.Valid() {
+		return domain.User{}, domain.NewValidationError("role", "role must be Admin, Officer or Member")
+	}
+	if !actor.IsAdmin {
+		return domain.User{}, domain.ErrForbidden
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.User{}, fmt.Errorf("sqlite: begin role change: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	current, err := getUserByID(ctx, tx, userID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if current.Role() == domain.RoleAdmin && !current.Disabled && role != domain.RoleAdmin {
+		remaining, err := countEnabledAdmins(ctx, tx, userID)
+		if err != nil {
+			return domain.User{}, err
+		}
+		if remaining == 0 {
+			return domain.User{}, fmt.Errorf("%w: at least one enabled administrator is required", domain.ErrConflict)
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE Users SET AccessLevel = ?, ModAt = ?, ModBy = ? WHERE UserID = ?`,
+		string(role), formatTime(at), nullString(actor.UserName), userID); err != nil {
+		return domain.User{}, fmt.Errorf("sqlite: update access level: %w", err)
+	}
+	updated, err := getUserByID(ctx, tx, userID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.User{}, fmt.Errorf("sqlite: commit role change: %w", err)
+	}
+	return updated, nil
+}
+
+// SetUserDisabled enables or disables one account. Disabling revokes that
+// account's sessions in the same transaction and is refused when it would leave
+// no enabled Administrator. The actor must be an Administrator.
+func (s *Store) SetUserDisabled(ctx context.Context, userID int64, disabled bool,
+	at time.Time, actor domain.Actor) (domain.User, error) {
+	if !actor.IsAdmin {
+		return domain.User{}, domain.ErrForbidden
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.User{}, fmt.Errorf("sqlite: begin status change: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	current, err := getUserByID(ctx, tx, userID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if disabled && !current.Disabled && current.Role() == domain.RoleAdmin {
+		remaining, err := countEnabledAdmins(ctx, tx, userID)
+		if err != nil {
+			return domain.User{}, err
+		}
+		if remaining == 0 {
+			return domain.User{}, fmt.Errorf("%w: at least one enabled administrator is required", domain.ErrConflict)
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE Users SET DisabledFg = ?, ModAt = ?, ModBy = ? WHERE UserID = ?`,
+		boolInt(disabled), formatTime(at), nullString(actor.UserName), userID); err != nil {
+		return domain.User{}, fmt.Errorf("sqlite: update disabled flag: %w", err)
+	}
+	if disabled {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM Sessions WHERE UserID = ?`, userID); err != nil {
+			return domain.User{}, fmt.Errorf("sqlite: revoke sessions: %w", err)
+		}
+	}
+	updated, err := getUserByID(ctx, tx, userID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.User{}, fmt.Errorf("sqlite: commit status change: %w", err)
+	}
+	return updated, nil
+}
+
 func nullableString(t *time.Time) any {
 	if t == nil {
 		return nil

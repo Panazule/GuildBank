@@ -35,9 +35,9 @@ func adminItemResponseOf(item domain.AdminInventoryItem) adminItemResponse {
 	return adminItemResponse{
 		ID: item.ID, EQUID: item.EQUID, Name: item.Name, ItemType: item.ItemType,
 		Quantity: item.Quantity, ClassString: item.ClassString, RaceString: item.RaceString,
-		MetadataMissing: item.MetadataMissingFg,
-		SourceLocation:  nullableAdminText(item.SourceLocation),
-		LocationGroup:   item.LocationGroup, LocationSort: item.LocationSort,
+		MetadataMissing: item.MetadataMissingFg, UnresolvedIdentity: item.HasUnresolvedIdentity(),
+		SourceLocation: nullableAdminText(item.SourceLocation),
+		LocationGroup:  item.LocationGroup, LocationSort: item.LocationSort,
 		GivenTo:      nullableAdminText(item.GivenTo),
 		Deleted:      item.DeletedFg,
 		NameSort:     item.NameSort,
@@ -190,9 +190,15 @@ func createInputFrom(req createItemRequest) (domain.CreateItemInput, *requestErr
 		}
 	}
 	if !req.EQUID.Set {
-		fields["equid"] = "equid is required"
+		// Name-first: the service resolves an exact item name. An omitted EQUID
+		// is accepted here so a name-only create reaches that resolution.
+		if strings.TrimSpace(derefString(req.Name)) == "" {
+			fields["equid"] = "equid is required unless an item name is supplied"
+		}
 	} else if req.EQUID.Value > 4294967295 {
 		fields["equid"] = "equid must be between 1 and 4294967295"
+	} else if domain.IsUnresolvedEQUID(req.EQUID.Value) {
+		fields["equid"] = "4294967295 is reserved for unresolved identities and cannot be supplied"
 	} else {
 		in.EQUID = req.EQUID.Value
 	}

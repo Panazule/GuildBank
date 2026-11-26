@@ -205,7 +205,8 @@ func (h *importsHandler) upload(c *gin.Context) {
 	}
 	defer file.Close()
 	principal, _ := CurrentSession(c)
-	actor := domain.Actor{UserID: principal.User.ID, UserName: principal.User.UserName, IsAdmin: principal.User.IsAdmin()}
+	actor := domain.Actor{UserID: principal.User.ID, UserName: principal.User.UserName,
+		IsAdmin: principal.User.IsAdmin(), Role: principal.User.Role()}
 	result, err := h.imports.Upload(c.Request.Context(), actor, files[0].Filename, file,
 		GetRequestID(c), c.ClientIP())
 	if err != nil {
@@ -445,7 +446,8 @@ func (h *importsHandler) commit(c *gin.Context) {
 		return
 	}
 	principal, _ := CurrentSession(c)
-	actor := domain.Actor{UserID: principal.User.ID, UserName: principal.User.UserName, IsAdmin: principal.User.IsAdmin()}
+	actor := domain.Actor{UserID: principal.User.ID, UserName: principal.User.UserName,
+		IsAdmin: principal.User.IsAdmin(), Role: principal.User.Role()}
 	result, err := h.imports.Commit(c.Request.Context(), batchID, actor, GetRequestID(c), c.ClientIP())
 	if err != nil {
 		h.respondImportError(c, err)

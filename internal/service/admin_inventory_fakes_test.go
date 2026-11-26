@@ -356,7 +356,7 @@ func testAdminService(store *fakeAdmin, metadata fakeMetadata, now time.Time) *A
 	}
 	return NewAdminInventoryService(store,
 		fakeSettings{"GuildOpenDays": "14", "BazaarDays": "30"},
-		metadata, func() time.Time { return now }, nil)
+		metadata, nil, func() time.Time { return now }, nil)
 }
 
 func testActor() domain.Actor {

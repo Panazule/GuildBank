@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Panazule/guildbank/internal/domain"
 	"github.com/Panazule/guildbank/internal/service"
 	"github.com/Panazule/guildbank/internal/web"
 )
@@ -54,7 +55,7 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	if deps.Admin == nil {
 		// Tests and degraded configurations may omit the admin service; a nil
 		// store keeps every admin route responding 503 rather than panicking.
-		deps.Admin = service.NewAdminInventoryService(nil, nil, nil, nil, deps.Logger)
+		deps.Admin = service.NewAdminInventoryService(nil, nil, nil, nil, nil, deps.Logger)
 	}
 	if deps.StartTime.IsZero() {
 		deps.StartTime = time.Now()
@@ -115,71 +116,81 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	public.GET("/api/v1/items", inventoryHandler.list)
 	public.GET("/api/v1/items/:id", inventoryHandler.get)
 
-	admin := r.Group("/")
-	admin.Use(RequireAuth(deps.Auth, deps.SecureCookies), csrf.middleware(), RequireAdmin())
-	admin.GET("/admin", ui.adminRoot)
+	// Authenticated routes. Deny-by-default: every route belongs to exactly one
+	// group below, and authorization_matrix_test.go fails when a route is added
+	// without a classification. Order is authentication, then role, then CSRF so
+	// a caller who may not use a route never needs a token for it.
+	member := r.Group("")
+	member.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequireRole(domain.RoleMember), csrf.middleware())
+	// Session inspection and logout are available to every signed-in role.
+	member.GET("/api/v1/auth/session", authHandler.session)
+	member.POST("/api/v1/auth/logout", authHandler.logout)
+
+	officer := r.Group("")
+	officer.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequireRole(domain.RoleOfficer), csrf.middleware())
+	officer.GET("/admin", ui.adminRoot)
+	officer.GET("/admin/imports", importHandler.page)
+	officer.GET("/admin/imports/:batchID", importHandler.detailPage)
+	officer.GET("/api/v1/imports", importHandler.list)
+	officer.POST("/api/v1/imports", importHandler.upload)
+	officer.GET("/api/v1/imports/:batchID", importHandler.get)
+	officer.GET("/api/v1/imports/:batchID/locations", importHandler.locations)
+	officer.GET("/api/v1/imports/:batchID/rows", importHandler.rows)
+	officer.GET("/api/v1/imports/:batchID/row-ids", importHandler.rowIDs)
+	officer.GET("/api/v1/imports/:batchID/default-selection", importHandler.defaultSelection)
+	officer.GET("/api/v1/imports/:batchID/selection", importHandler.selection)
+	officer.PUT("/api/v1/imports/:batchID/selection", importHandler.putSelection)
+	officer.GET("/api/v1/imports/:batchID/summary", importHandler.summary)
+	officer.POST("/api/v1/imports/:batchID/commit", importHandler.commit)
+
+	// Administrative inventory and the audit viewer are Officer work: adding,
+	// editing, issuing, returning, removing and restoring inventory, imports and
+	// reading history (owner decision 2026-11-26, Q1/Q2).
+	officer.GET("/admin/inventory", adminHandler.page)
+	officer.GET("/admin/inventory/new", adminHandler.newPage)
+	officer.GET("/admin/inventory/:id", adminHandler.detailPage)
+	officer.GET("/admin/inventory/:id/edit", adminHandler.editPage)
+	officer.GET("/admin/inventory/:id/remove", adminHandler.removePage)
+	officer.GET("/admin/inventory/:id/restore", adminHandler.restorePage)
+	officer.GET("/admin/inventory/:id/issue", adminHandler.issuePage)
+	officer.GET("/admin/inventory/:id/return", adminHandler.returnPage)
+	officer.GET("/admin/inventory/:id/movements", adminHandler.movementsPage)
+	officer.GET("/admin/inventory/movements/:movementID/return", adminHandler.returnIssuancePage)
+
+	officer.POST("/admin/inventory", adminHandler.createForm)
+	officer.POST("/admin/inventory/bulk-remove", adminHandler.bulkRemovePreview)
+	officer.POST("/admin/inventory/bulk-remove/apply", adminHandler.bulkRemoveForm)
+	officer.POST("/admin/inventory/:id", adminHandler.updateForm)
+	officer.POST("/admin/inventory/:id/remove", adminHandler.removeForm)
+	officer.POST("/admin/inventory/:id/restore", adminHandler.restoreForm)
+	officer.POST("/admin/inventory/:id/issue", adminHandler.issueForm)
+	officer.POST("/admin/inventory/:id/return", adminHandler.returnForm)
+	officer.POST("/admin/inventory/movements/:movementID/return", adminHandler.returnIssuanceForm)
+
+	officer.GET("/admin/audit", adminHandler.auditPage)
+	officer.GET("/api/v1/admin/items", adminHandler.list)
+	officer.GET("/api/v1/admin/items/:id", adminHandler.getItem)
+	officer.GET("/api/v1/admin/item-names", adminHandler.itemNames)
+	officer.POST("/api/v1/items", adminHandler.create)
+	officer.PUT("/api/v1/items/:id", adminHandler.update)
+	officer.DELETE("/api/v1/items/:id", adminHandler.remove)
+	officer.POST("/api/v1/items/:id/restore", adminHandler.restore)
+	officer.POST("/api/v1/items/:id/issue", adminHandler.issue)
+	officer.POST("/api/v1/items/:id/return", adminHandler.returnItem)
+	officer.GET("/api/v1/admin/items/:id/movements", adminHandler.movements)
+	officer.GET("/api/v1/admin/movements/:movementID", adminHandler.movement)
+	officer.GET("/api/v1/audit", adminHandler.auditList)
+	officer.GET("/api/v1/audit/:id", adminHandler.auditEntry)
+
+	// Application configuration is Administrator-only.
+	admin := r.Group("")
+	admin.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequireRole(domain.RoleAdmin), csrf.middleware())
 	admin.GET("/admin/settings", settingsHandler.page)
-	admin.GET("/admin/imports", importHandler.page)
-	admin.GET("/admin/imports/:batchID", importHandler.detailPage)
-	admin.GET("/api/v1/auth/session", authHandler.session)
-	admin.POST("/api/v1/auth/logout", authHandler.logout)
 	admin.GET("/api/v1/settings", settingsHandler.get)
 	admin.PUT("/api/v1/settings", settingsHandler.update)
 	// HTML forms cannot issue PUT; POST is a thin adapter onto the same REST
 	// handler and service, preserving the D-03 single write path.
 	admin.POST("/api/v1/settings", settingsHandler.update)
-	admin.GET("/api/v1/imports", importHandler.list)
-	admin.POST("/api/v1/imports", importHandler.upload)
-	admin.GET("/api/v1/imports/:batchID", importHandler.get)
-	admin.GET("/api/v1/imports/:batchID/locations", importHandler.locations)
-	admin.GET("/api/v1/imports/:batchID/rows", importHandler.rows)
-	admin.GET("/api/v1/imports/:batchID/row-ids", importHandler.rowIDs)
-	admin.GET("/api/v1/imports/:batchID/default-selection", importHandler.defaultSelection)
-	admin.GET("/api/v1/imports/:batchID/selection", importHandler.selection)
-	admin.PUT("/api/v1/imports/:batchID/selection", importHandler.putSelection)
-	admin.GET("/api/v1/imports/:batchID/summary", importHandler.summary)
-	admin.POST("/api/v1/imports/:batchID/commit", importHandler.commit)
-
-	// Phase 5 administrative inventory and audit viewer. The group above
-	// already enforces RequireAuth -> CSRF -> RequireAdmin for every route.
-	admin.GET("/admin/inventory", adminHandler.page)
-	admin.GET("/admin/inventory/new", adminHandler.newPage)
-	admin.GET("/admin/inventory/:id", adminHandler.detailPage)
-	admin.GET("/admin/inventory/:id/edit", adminHandler.editPage)
-	admin.GET("/admin/inventory/:id/remove", adminHandler.removePage)
-	admin.GET("/admin/inventory/:id/restore", adminHandler.restorePage)
-	admin.GET("/admin/inventory/:id/issue", adminHandler.issuePage)
-	admin.GET("/admin/inventory/:id/return", adminHandler.returnPage)
-	admin.GET("/admin/inventory/:id/movements", adminHandler.movementsPage)
-	// Movement-targeted return (issued-row projection). The admin group already
-	// enforces RequireAuth -> CSRF -> RequireAdmin.
-	admin.GET("/admin/inventory/movements/:movementID/return", adminHandler.returnIssuancePage)
-
-	admin.POST("/admin/inventory", adminHandler.createForm)
-	admin.POST("/admin/inventory/bulk-remove", adminHandler.bulkRemovePreview)
-	admin.POST("/admin/inventory/bulk-remove/apply", adminHandler.bulkRemoveForm)
-	admin.POST("/admin/inventory/:id", adminHandler.updateForm)
-	admin.POST("/admin/inventory/:id/remove", adminHandler.removeForm)
-	admin.POST("/admin/inventory/:id/restore", adminHandler.restoreForm)
-	admin.POST("/admin/inventory/:id/issue", adminHandler.issueForm)
-	admin.POST("/admin/inventory/:id/return", adminHandler.returnForm)
-	admin.POST("/admin/inventory/movements/:movementID/return", adminHandler.returnIssuanceForm)
-
-	admin.GET("/admin/audit", adminHandler.auditPage)
-	admin.GET("/api/v1/admin/items", adminHandler.list)
-	admin.GET("/api/v1/admin/items/:id", adminHandler.getItem)
-	admin.POST("/api/v1/items", adminHandler.create)
-	admin.PUT("/api/v1/items/:id", adminHandler.update)
-	admin.DELETE("/api/v1/items/:id", adminHandler.remove)
-	admin.POST("/api/v1/items/:id/restore", adminHandler.restore)
-	// Partial-issuance movement routes (partial-issuance Phase 4). The admin
-	// group already enforces RequireAuth -> CSRF -> RequireAdmin.
-	admin.POST("/api/v1/items/:id/issue", adminHandler.issue)
-	admin.POST("/api/v1/items/:id/return", adminHandler.returnItem)
-	admin.GET("/api/v1/admin/items/:id/movements", adminHandler.movements)
-	admin.GET("/api/v1/admin/movements/:movementID", adminHandler.movement)
-	admin.GET("/api/v1/audit", adminHandler.auditList)
-	admin.GET("/api/v1/audit/:id", adminHandler.auditEntry)
 
 	r.NoRoute(notFound)
 	r.NoMethod(methodNotAllowed)

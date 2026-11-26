@@ -112,14 +112,17 @@ type inventoryDetailPageData struct {
 // detail, edit and remove pages all use it so the identity fields rendered in
 // the admin area cannot drift.
 type adminItemView struct {
-	ID                 int64
-	EQUID              uint64
-	Name               string
-	ItemType           string
-	Quantity           uint32
-	ClassText          string
-	RaceText           string
-	MetadataMissing    bool
+	ID              int64
+	EQUID           uint64
+	Name            string
+	ItemType        string
+	Quantity        uint32
+	ClassText       string
+	RaceText        string
+	MetadataMissing bool
+	// UnresolvedIdentity marks the documented placeholder EQUID (4294967295):
+	// the row has no resolved item identity and its stored name is authoritative.
+	UnresolvedIdentity bool
 	SourceLocation     string
 	LocationGroup      string
 	LocationGroupLabel string
@@ -241,11 +244,14 @@ type adminFormValues struct {
 
 type adminFormPageData struct {
 	pageData
-	Ready    bool
-	Edit     bool
-	Item     adminItemView
-	Form     adminFormValues
-	Conflict bool
+	Ready bool
+	Edit  bool
+	Item  adminItemView
+	Form  adminFormValues
+	// Candidates is populated when an entered item name matched more than one
+	// metadata row. The officer selects one; the server never guesses.
+	Candidates []itemCandidateResponse
+	Conflict   bool
 }
 
 type auditEntryView struct {

@@ -117,16 +117,20 @@ type consolidationGroup struct {
 // consolidationGroups returns active duplicate stacks ordered by their lowest
 // row ID. MIN(GuildBankItemID) is the survivor, matching the "lowest ID wins"
 // rule used by the spell merge.
+//
+// Rows holding the unresolved-identity placeholder EQUID are excluded: they
+// share one identifier by definition while representing different items, so
+// grouping them would merge unrelated stock. Their stored name is authoritative.
 func consolidationGroups(ctx context.Context, conn *sql.Conn, cursor int64,
 	limit int) ([]consolidationGroup, error) {
 	rows, err := conn.QueryContext(ctx, `SELECT MIN(GuildBankItemID), COUNT(*), SUM(Quantity),
 			EQUID, SourceLocation, LocationGroup, GivenTo, DateAdded, DateOpen, DateBazaar
 		FROM GuildBankItems
-		WHERE ItemType='Item' AND DeletedFg=0 AND GuildBankItemID > ?
+		WHERE ItemType='Item' AND DeletedFg=0 AND GuildBankItemID > ? AND EQUID <> ?
 		GROUP BY EQUID, SourceLocation, LocationGroup, GivenTo, DateAdded, DateOpen, DateBazaar
 		HAVING COUNT(*) > 1
 		ORDER BY MIN(GuildBankItemID)
-		LIMIT ?`, cursor, limit)
+		LIMIT ?`, cursor, domain.UnresolvedEQUID, limit)
 	if err != nil {
 		return nil, mapStoreError("read consolidation groups", err)
 	}

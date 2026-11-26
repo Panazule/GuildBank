@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,10 +24,21 @@ func migratedStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("version = %d, want 1", version)
+	if want := latestSchemaVersion(t); version != want {
+		t.Fatalf("version = %d, want %d", version, want)
 	}
 	return store
+}
+
+// latestSchemaVersion is the number of embedded migrations, so adding a
+// migration updates every version assertion at once.
+func latestSchemaVersion(t *testing.T) int {
+	t.Helper()
+	names, err := fs.Glob(migrationFiles, "migrations/*.sql")
+	if err != nil {
+		t.Fatalf("glob migrations: %v", err)
+	}
+	return len(names)
 }
 
 func hashForTest(password string) (string, error) {
@@ -66,8 +78,8 @@ func TestMigrateCreatesPhase1SchemaAndSeeds(t *testing.T) {
 	}
 
 	version, err := store.Migrate(ctx)
-	if err != nil || version != 1 {
-		t.Fatalf("second Migrate = %d, %v; want 1, nil", version, err)
+	if want := latestSchemaVersion(t); err != nil || version != want {
+		t.Fatalf("second Migrate = %d, %v; want %d, nil", version, err, want)
 	}
 }
 

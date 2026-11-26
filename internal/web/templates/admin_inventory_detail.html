@@ -16,7 +16,17 @@
       <span class="availability-badge availability-{{.Item.Availability}}">{{.Item.AvailabilityLabel}}</span>
       {{if .Item.IssuedURL}}<a class="status-badge {{.Item.StatusClass}}" href="{{.Item.IssuedURL}}">{{.Item.StatusLabel}}</a>{{else}}<span class="status-badge {{.Item.StatusClass}}">{{.Item.StatusLabel}}</span>{{end}}
       {{if .Item.MetadataMissing}}<span class="warning-badge">Metadata missing</span>{{end}}
+      {{if .Item.UnresolvedIdentity}}<span class="identity-badge">Unresolved identity</span>{{end}}
     </p>
+
+    {{if .Item.UnresolvedIdentity}}
+      <div class="alert" role="note">
+        No item metadata matched this name, so EQUID {{.Item.EQUID}} is the documented
+        unresolved-identity placeholder. The stored name <strong>{{.Item.Name}}</strong>
+        is the authoritative identity; metadata and class/race values stay blank until a
+        formal identity-repair workflow is available.
+      </div>
+    {{end}}
 
     <dl class="detail-list">
       <div><dt>Quantity</dt><dd>{{.Item.Quantity}}</dd></div>

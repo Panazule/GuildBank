@@ -17,10 +17,13 @@ type errorEnvelope struct {
 }
 
 type errorBody struct {
-	Code      string            `json:"code"`
-	Message   string            `json:"message"`
-	Fields    map[string]string `json:"fields,omitempty"`
-	RequestID string            `json:"request_id,omitempty"`
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Fields  map[string]string `json:"fields,omitempty"`
+	// Candidates is carried only when a supplied item name matched more than one
+	// metadata row, so the caller can offer a choice instead of guessing.
+	Candidates []itemCandidateResponse `json:"candidates,omitempty"`
+	RequestID  string                  `json:"request_id,omitempty"`
 }
 
 func writeError(c *gin.Context, status int, code, message string) {
@@ -28,11 +31,17 @@ func writeError(c *gin.Context, status int, code, message string) {
 }
 
 func writeErrorFields(c *gin.Context, status int, code, message string, fields map[string]string) {
+	writeErrorCandidates(c, status, code, message, fields, nil)
+}
+
+func writeErrorCandidates(c *gin.Context, status int, code, message string,
+	fields map[string]string, candidates []itemCandidateResponse) {
 	c.AbortWithStatusJSON(status, errorEnvelope{Error: errorBody{
-		Code:      code,
-		Message:   message,
-		Fields:    fields,
-		RequestID: GetRequestID(c),
+		Code:       code,
+		Message:    message,
+		Fields:     fields,
+		Candidates: candidates,
+		RequestID:  GetRequestID(c),
 	}})
 }
 
