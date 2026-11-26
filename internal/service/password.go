@@ -79,7 +79,7 @@ func passwordPolicyError(username, password string) string {
 		return "must be at least 12 characters"
 	}
 	if len(password) > PasswordMaxBytes {
-		return "must be at most 72 bytes"
+		return "must be at most 72 characters"
 	}
 	if username != "" && strings.EqualFold(strings.TrimSpace(username), strings.TrimSpace(password)) {
 		return "must not equal the username"
