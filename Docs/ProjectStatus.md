@@ -1109,6 +1109,26 @@ A visitor can now create a Member account with Discord, with no email, no SMTP a
 
 **Validation.** `gofmt -l` on the five touched files empty, `go build ./...` and `go vet ./...` clean, and `go test` passes for `internal/api`, `internal/service` and `internal/domain`.
 
+### 6.22 Password capability: Set for Discord-created accounts (2026-11-26)
+
+**Decision.** D-SR-15…21 (recorded in `SelfRegistrationDesign.md` §14) replace the "Administrator reset is the only way to gain password access" half of D-SR-7. A Discord-created account has no password its owner knows, so the owner may now **Set** one from its own session; an account that already has one **Changes** it. `Users.HasPassword` records the capability — never a credential — and is monotone: only an actual password write turns it on.
+
+| Aspect | Behaviour |
+|---|---|
+| Storage | `0005_password_capability.sql`: `ALTER TABLE Users ADD COLUMN HasPassword INTEGER NOT NULL DEFAULT 1 CHECK (HasPassword IN (0,1))`, then `0` where `Origin = 'SelfRegistration'`. Metadata-only: no rebuild, no session cascade, nobody signed out |
+| Creation | `CreateRegisteredUser` writes `0`; Administrator-created accounts and the setup Administrator keep `1` |
+| `POST /api/v1/auth/password/set` | Session is the proof (no `currentPassword`); writes `1`, keeps the acting session, does **not** set `MustChangePassword`; refuses an account that already has a password |
+| `POST /api/v1/auth/password/change` | Requires the current password and refuses a passwordless account (`ErrConflict`); `/api/v1/auth/password` stays as the pre-0005 alias |
+| Password sign-in | Consults `HasPassword` before verifying, so the placeholder hash can never authenticate |
+| Discord unlink | Refused while passwordless — `409 password_required` (JSON), `notice=discord-password-required` (HTML) — and the profile hides the form with an explanation |
+| Page | `/account/password` renders Set (no current-password field) or Change, posting to the matching route; the success redirect carries the flow (`?set=1` / `?changed=1`) |
+
+**Defect found and fixed.** The success notice was derived from the *current* account state, so a first Set re-rendered as *"Password updated. Other sessions were signed out."* `passwordSucceeded` now takes the flow (`setting bool`) and redirects to `?set=1` or `?changed=1`; the page notice switch reads the corresponding query key. The new API test caught it; nothing else did.
+
+**Tests.** `repository/sqlite/migration_0005_test.go` (backfill, no session cascade, CHECK, monotone write), `repository/sqlite/password_capability_test.go`, `service/password_capability_test.go`, `api/password_capability_test.go` (Set end-to-end, route state enforcement on both transports, unlink refusal then success after Set, seeded account Changes without Set).
+
+**Validation.** `gofmt -l .` empty, `go build ./...` and `go vet ./...` clean, full `go test ./... -count=1` passing.
+
 ---
 
 ## 7. Next actions

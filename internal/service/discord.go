@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"strconv"
@@ -310,6 +311,12 @@ func (s *DiscordService) Unlink(ctx context.Context, user domain.User, correlati
 	}
 	if !identity.Linked() {
 		return domain.ErrNotFound
+	}
+	// A passwordless account signs in only with Discord. Removing the identity
+	// would lock the owner out of their own account, so the unlink is refused
+	// until a password exists (D-SR-18).
+	if !user.HasPassword {
+		return fmt.Errorf("%w: set a password before unlinking Discord", domain.ErrConflict)
 	}
 	at := s.now().UTC()
 	if err := s.store.ClearDiscordIdentity(ctx, user.ID, at, user.UserName); err != nil {

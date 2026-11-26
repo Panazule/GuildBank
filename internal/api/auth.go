@@ -36,6 +36,9 @@ type publicUser struct {
 	LastLogin          *time.Time `json:"lastLogin,omitempty"`
 	Disabled           bool       `json:"disabled"`
 	MustChangePassword bool       `json:"mustChangePassword"`
+	// HasPassword tells a client whether to offer Set Password or Change
+	// Password. It never replaces the password itself as a credential.
+	HasPassword bool `json:"hasPassword"`
 }
 
 func toPublicUser(u domain.User) publicUser {
@@ -46,6 +49,7 @@ func toPublicUser(u domain.User) publicUser {
 		LastLogin:          u.LastLogin,
 		Disabled:           u.Disabled,
 		MustChangePassword: u.MustChangePassword,
+		HasPassword:        u.HasPassword,
 	}
 }
 

@@ -74,6 +74,12 @@ CREATE TABLE Users (
     ModBy         TEXT    NULL,                      -- IMPLEMENTED: username snapshot
     MustChangePassword INTEGER NOT NULL DEFAULT 0    -- IMPLEMENTED
                           CHECK (MustChangePassword IN (0,1)),
+    HasPassword     INTEGER NOT NULL DEFAULT 1       -- IMPLEMENTED (0005): capability, never a credential
+                          CHECK (HasPassword IN (0,1)),
+    AccountStatus   TEXT    NOT NULL DEFAULT 'Approved' -- IMPLEMENTED (0004)
+                          CHECK (AccountStatus IN ('Approved','PendingApproval')),
+    Origin          TEXT    NULL,                    -- IMPLEMENTED (0004): 'SelfRegistration' or NULL
+    GuildVerifiedAt TEXT    NULL,                    -- IMPLEMENTED (0004): UTC ISO-8601
     DiscordUserID   TEXT NULL,                       -- IMPLEMENTED (0003): Discord snowflake
     DiscordUserName TEXT NULL,                       -- IMPLEMENTED (0003): display snapshot
     DiscordLinkedAt TEXT NULL                        -- IMPLEMENTED (0003): UTC ISO-8601
@@ -82,6 +88,7 @@ CREATE TABLE Users (
 CREATE UNIQUE INDEX ux_users_username ON Users (UserName COLLATE NOCASE);
 CREATE UNIQUE INDEX ux_users_discord  ON Users (DiscordUserID)
     WHERE DiscordUserID IS NOT NULL;                 -- unlinked accounts do not collide
+CREATE INDEX ix_users_status ON Users (AccountStatus, CreatedAt); -- 0004: pending queue
 ```
 
 **Notes**
@@ -89,6 +96,8 @@ CREATE UNIQUE INDEX ux_users_discord  ON Users (DiscordUserID)
 - `AccessLevel` now stores the approved flat hierarchy `Member < Officer < Admin` (owner decision 2026-11-26): Member is the least-privileged default, Officer may administer inventory/imports and read history, Admin adds application configuration and user administration. An unrecognized value fails closed to Member in the service layer.
 - `0002_user_roles.sql` widens the CHECK by rebuilding the table (SQLite cannot alter a constraint in place). The rebuild copies every column verbatim, recreates `ux_users_username`, and normalises `sqlite_sequence`. Because `Sessions.UserID` references `Users ON DELETE CASCADE` and connections run `PRAGMA foreign_keys=ON`, the rebuild drops all sessions: every account signs in again after the upgrade. That is approved and expected.
 - `0003_user_profiles.sql` adds the three Discord columns with `ALTER TABLE ADD COLUMN`, which SQLite treats as a metadata-only change: no rebuild, no session cascade, nobody is signed out. The columns stay `NULL` until an account links; unlinking returns them to `NULL`, so the row (and the account) is never deleted.
+- `0004_self_registration.sql` adds `AccountStatus`, `Origin` and `GuildVerifiedAt`; they are documented with the approval design in `SelfRegistrationDesign.md` §4 rather than repeated here.
+- `0005_password_capability.sql` adds `HasPassword INTEGER NOT NULL DEFAULT 1 CHECK (HasPassword IN (0,1))` and sets it to `0` where `Origin = 'SelfRegistration'`. `ADD COLUMN` with a constant default is metadata-only: no table rebuild, no session cascade, nobody is signed out. The flag records whether the owner has ever established a password; it is never a credential (the bcrypt `PasswordHash` stays the only verifier), it is monotone (only a real password write turns it on), and `0` only narrows authentication: password sign-in is refused and Discord unlinking is refused (`409 password_required`) because Discord is then the only way in. Backfill is exact for Administrator-created accounts and the setup Administrator, and a deliberately narrowing approximation for self-registered rows — see `SelfRegistrationDesign.md` §4.6 (D-SR-21).
 - `ux_users_discord` is a partial unique index, so any number of accounts can be unlinked while one Discord identity maps to at most one account. The service also checks ownership before writing, so a shared identity is refused before the index is hit.
 - `DisabledFg` is the intended deactivation mechanism (DC-11); disabling revokes that account's sessions in the same transaction, and the last enabled Administrator cannot be disabled or demoted (`CountEnabledAdmins` guard).
 - bcrypt hashes are ~60 characters; do not apply a short `VARCHAR` limit.

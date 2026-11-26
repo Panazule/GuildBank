@@ -150,7 +150,8 @@ func (f fixedPolicy) SessionPolicy(context.Context) (domain.SessionPolicy, error
 func authFixture(t *testing.T) (*AuthService, *fakeUsers, *fakeSessions, func(time.Duration)) {
 	t.Helper()
 	users := &fakeUsers{users: map[string]domain.User{
-		"admin": {ID: 1, UserName: "admin", PasswordHash: testHash("a long enough password"), AccessLevel: domain.AccessAdmin},
+		"admin": {ID: 1, UserName: "admin", PasswordHash: testHash("a long enough password"),
+			AccessLevel: domain.AccessAdmin, HasPassword: true},
 	}}
 	sessions := newFakeSessions()
 	auth := NewAuthService(users, sessions, fixedPolicy{policy: domain.SessionPolicy{Idle: 30 * time.Minute, Absolute: 8 * time.Hour}})

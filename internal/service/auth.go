@@ -100,7 +100,11 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (LoginResult, er
 	}
 	failed := errors.Is(err, domain.ErrNotFound)
 	if !failed {
-		failed = !VerifyPassword(user.PasswordHash, in.Password) || !user.IsEnabled()
+		// bcrypt runs first and stays authoritative; HasPassword can only
+		// narrow the result. A Discord-only account stores a discarded hash,
+		// so it could never authenticate by password anyway, but refusing it
+		// explicitly keeps the invariant visible in one place.
+		failed = !VerifyPassword(user.PasswordHash, in.Password) || !user.IsEnabled() || !user.HasPassword
 	}
 	if failed {
 		if retry, locked := s.limiter.Failure(key, s.now().UTC()); locked {

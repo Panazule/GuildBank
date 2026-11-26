@@ -142,7 +142,9 @@ func enabledDiscordSettings() map[string]string {
 }
 
 func discordUser() domain.User {
-	return domain.User{ID: 2, UserName: "Keeper", AccessLevel: string(domain.RoleMember)}
+	// HasPassword is true because these fixtures model an account that can still
+	// sign in after unlinking (D-SR-18).
+	return domain.User{ID: 2, UserName: "Keeper", AccessLevel: string(domain.RoleMember), HasPassword: true}
 }
 
 func TestParseDiscordConfig(t *testing.T) {

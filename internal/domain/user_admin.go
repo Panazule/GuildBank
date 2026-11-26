@@ -157,6 +157,28 @@ func (in ChangePasswordInput) Validate() error {
 	return validationFields(fields)
 }
 
+// SetPasswordInput is a signed-in account establishing its first password. There
+// is deliberately no CurrentPassword: no password exists yet, so a session is
+// the only proof of ownership D-SR-17 requires.
+type SetPasswordInput struct {
+	NewPassword     string
+	ConfirmPassword string
+}
+
+// Validate checks the rules that do not need the account name or the store. The
+// 12–72 byte policy and the "not the username" rule are applied by
+// HashUserPassword once the account is known.
+func (in SetPasswordInput) Validate() error {
+	fields := map[string]string{}
+	switch {
+	case strings.TrimSpace(in.NewPassword) == "":
+		fields["newPassword"] = "must not be blank"
+	case in.NewPassword != in.ConfirmPassword:
+		fields["confirmPassword"] = "must match the new password"
+	}
+	return validationFields(fields)
+}
+
 // DeleteUserInput carries the destructive-action confirmation. An administrator
 // must retype the account name so a stray click cannot remove an account.
 type DeleteUserInput struct {

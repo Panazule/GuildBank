@@ -38,7 +38,7 @@ GuildBank/
 │   │   ├── password.go           bcrypt hashing, policy, username-aware hashing and timing equalizer
 │   │   ├── auth.go               Login, session issuance/validation, logout, revocation
 │   │   ├── rate_limit.go         D-12 IP+username login lockout
-│   │   ├── user_admin.go         Account create/role/status/reset/delete and own password change
+│   │   ├── user_admin.go         Account create/role/status/reset/delete, own password set/change and reset grant
 │   │   ├── characters.go         Profile character list for the account owner and administrative removal
 │   │   ├── discord.go            Discord configuration, link/unlink workflow, sign-in session issuance and audit
 │   │   ├── setup.go              Wizard validation, DB test and atomic commit
@@ -59,8 +59,8 @@ GuildBank/
 │   │   ├── sqlite/
 │   │   │   ├── store.go          Open/pragmas/setup probe/checkpoint
 │   │   │   ├── migrate.go        Forward-only PRAGMA user_version runner
-│   │   │   ├── migrations/       0001_phase1.sql (Users, Settings, Sessions), 0002_user_roles.sql (Member/Officer/Admin) and 0003_user_profiles.sql (Discord columns, UserCharacters)
-│   │   │   ├── users.go          Account lookup, LastLogin, admin count, role/disable guards
+│   │   │   ├── migrations/       0001_phase1.sql (Users, Settings, Sessions), 0002_user_roles.sql (Member/Officer/Admin), 0003_user_profiles.sql (Discord columns, UserCharacters), 0004_self_registration.sql (AccountStatus, Origin, GuildVerifiedAt) and 0005_password_capability.sql (Users.HasPassword)
+│   │   │   ├── users.go          Account lookup, LastLogin, admin count, role/disable guards, HasPassword capability
 │   │   │   ├── characters.go     Profile character list, cap, global uniqueness and ownership-scoped delete
 │   │   ├── discord.go        Discord identity columns: read, owner lookup, link and unlink
 │   │   │   ├── sessions.go       Hashed-token CRUD, touch, expiry purge
@@ -95,7 +95,7 @@ GuildBank/
 │   │   ├── admin_movement_pages.go Issue/Return/movement-history pages and forms
 │   │   ├── admin_movements.go    Issue/Return/movement-history JSON handlers
 │   │   ├── admin_audit.go        Audit viewer and per-record history handlers
-│   │   ├── users.go              Account list/create/detail pages, JSON API and own password change
+│   │   ├── users.go              Account list/create/detail pages, JSON API and the Set/Change own password page and endpoints
 │   │   ├── profile.go            Profile page and /api/v1/me/characters (owner-scoped)
 │   │   ├── discord.go            Discord link start (GET navigation + POST JSON), callback, unlink, identity API, sign-in start/callback
 │   │   ├── discord_state.go      Signed OAuth state bound to flow, account, session and destination

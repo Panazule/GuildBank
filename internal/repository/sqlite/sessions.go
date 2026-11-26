@@ -15,7 +15,7 @@ const sessionSelect = `
 	       s.ExpiresAt, s.AbsoluteExpiresAt, s.RevokedAt, s.ClientIP, s.UserAgent,
 	       u.UserID, u.UserName, u.PasswordHash, u.AccessLevel, u.LastLogin,
 	       u.DisabledFg, u.ModAt, u.CreatedAt, u.ModBy, u.MustChangePassword,
-	       u.AccountStatus, u.Origin, u.GuildVerifiedAt
+	       u.AccountStatus, u.Origin, u.GuildVerifiedAt, u.HasPassword
 	FROM Sessions s
 	JOIN Users u ON u.UserID = s.UserID`
 
@@ -66,13 +66,14 @@ func scanSession(scanner interface{ Scan(...any) error }) (domain.Session, error
 		status    string
 		origin    sql.NullString
 		verified  sql.NullString
+		hasPw     int
 	)
 	err := scanner.Scan(
 		&session.ID, &session.TokenHash, &session.UserID, &createdAt, &accessed,
 		&expires, &absolute, &revoked, &clientIP, &userAgent,
 		&session.User.ID, &session.User.UserName, &session.User.PasswordHash,
 		&session.User.AccessLevel, &lastLogin, &disabled, &modAt, &userMade,
-		&modBy, &must, &status, &origin, &verified,
+		&modBy, &must, &status, &origin, &verified, &hasPw,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -112,6 +113,7 @@ func scanSession(scanner interface{ Scan(...any) error }) (domain.Session, error
 	}
 	session.User.Disabled = disabled == 1
 	session.User.MustChangePassword = must == 1
+	session.User.HasPassword = hasPw == 1
 	session.User.AccountStatus = status
 	if modBy.Valid {
 		session.User.ModBy = modBy.String

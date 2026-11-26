@@ -50,9 +50,17 @@
       {{with index .ErrorFields "characterName"}}<p class="field-error">{{.}}</p>{{end}}
       <div class="wizard-actions">
         <button type="submit" class="primary">Add character</button>
-        <a class="link" href="/account/password">Change password</a>
       </div>
     </form>
+
+    <h2>Password</h2>
+    {{if .HasPassword}}
+      <p class="muted">Password configured. You can sign in with your password or with Discord.</p>
+      <p><a class="link" href="/account/password">Change Password</a></p>
+    {{else}}
+      <p class="muted">No password configured. You currently sign in with Discord.</p>
+      <p><a class="link" href="/account/password">Set Password</a></p>
+    {{end}}
 
     <h2>Discord</h2>
     {{if not .Discord.Available}}
@@ -60,10 +68,14 @@
     {{else if .Discord.Linked}}
       <p>Linked to <strong>{{.Discord.UserName}}</strong>{{if .Discord.LinkedText}} since {{.Discord.LinkedText}}{{end}}.</p>
       {{if .Discord.GuildID}}<p class="muted">Guild membership was checked when the account was linked.</p>{{end}}
+      {{if .Discord.CanUnlink}}
       <form method="post" action="/account/discord/unlink" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
         <button type="submit" class="link-button">Unlink Discord account</button>
       </form>
+      {{else}}
+      <p class="muted">Set a password above before unlinking Discord; otherwise Discord is the only way to sign in.</p>
+      {{end}}
     {{else}}
       <p class="muted">Linking records your Discord name on this profile. It does not change how you sign in.</p>
       {{/* A plain navigation, not a form POST: the 303 to discord.com would be

@@ -122,6 +122,7 @@ func (f *fakeUserAdminStore) ResetUserPassword(ctx context.Context, id int64, ha
 	}
 	user.PasswordHash = hash
 	user.MustChangePassword = true
+	user.HasPassword = true
 	user.ModAt = at
 	user.ModBy = actor.UserName
 	f.users[id] = user
@@ -137,6 +138,7 @@ func (f *fakeUserAdminStore) SetOwnPassword(ctx context.Context, id int64, hash 
 	}
 	user.PasswordHash = hash
 	user.MustChangePassword = false
+	user.HasPassword = true
 	user.ModAt = at
 	f.users[id] = user
 	f.ownPasswordID = id
@@ -301,7 +303,7 @@ func TestChangeOwnPasswordVerifiesCurrentAndKeepsSession(t *testing.T) {
 		t.Fatalf("HashUserPassword: %v", err)
 	}
 	k := domain.User{ID: 3, UserName: "Keeper", AccessLevel: string(domain.RoleMember),
-		PasswordHash: realHash, MustChangePassword: true}
+		PasswordHash: realHash, MustChangePassword: true, HasPassword: true}
 	store := newFakeUserAdminStore(k)
 	sink := &fakeAuditSink{}
 	svc := NewUserAdminService(store, sink, nil)

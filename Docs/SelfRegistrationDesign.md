@@ -119,7 +119,15 @@ A pending account is never shown as "Active", and a disabled pending account is 
 h, _ := service.HashPassword(randomSecret) // 32 bytes from crypto/rand, never logged, never returned
 ```
 
-`VerifyPassword` on that hash succeeds only for a secret that no longer exists anywhere. Administrators can still issue a temporary password through the existing reset action, which turns the account into a password-capable account; the profile "change password" page refuses with the existing `currentPassword` validation until then. **Owner decision D-SR-7** covers whether self-registered users may set an initial password at registration instead.
+`VerifyPassword` on that hash succeeds only for a secret that no longer exists anywhere. **Owner decision D-SR-7** covers whether self-registered users may set an initial password at registration instead.
+
+**Superseded in part by D-SR-15…21 (2026-11-26).** The placeholder hash is still written, because `PasswordHash` stays `NOT NULL` and the verifier stays `PasswordHash`. What changed is the *capability*: a new `Users.HasPassword` flag records whether the owner has ever established a password, so the server no longer has to infer it from an unguessable hash.
+
+- A self-registered account starts with `HasPassword = 0`. It cannot sign in by password (`VerifyPassword` is not even consulted; the account is refused as passwordless), and its profile offers **Set Password** rather than Change.
+- `POST /api/v1/auth/password/set` establishes the first password. Session ownership is the only proof required (there is no current password to ask for), and it is the only place `HasPassword` is written to 1 besides an administrator reset (D-SR-17, D-SR-19).
+- `POST /api/v1/auth/password/change` still requires the current password and refuses a passwordless account with `409` — Change can never create the first credential (D-SR-19).
+- Discord unlinking is refused while `HasPassword = 0` (D-SR-18), because Discord would otherwise be the only way to sign in.
+- The flag is monotone after migration: nothing in the application writes 0 (D-SR-16, D-SR-21).
 
 ---
 
@@ -224,6 +232,23 @@ SetUserAccountStatus(ctx context.Context, userID int64, status domain.AccountSta
 ### 4.5 No MariaDB change
 
 Accounts, identities and approvals all live in SQLite (D-13). The guild store only receives audit rows whose `EventType` is a free-form string, so `USER_SELF_REGISTERED` and `USER_APPROVED` need no schema or privilege change. No cross-store transaction is introduced: the SQLite commit is authoritative and the audit write stays best-effort, exactly as `writeAudit` already behaves.
+
+### 4.6 Migration `0005_password_capability.sql` (SQLite, D-SR-21)
+
+```sql
+ALTER TABLE Users ADD COLUMN HasPassword INTEGER NOT NULL DEFAULT 1
+    CHECK (HasPassword IN (0,1));
+
+UPDATE Users SET HasPassword = 0 WHERE Origin = 'SelfRegistration';
+```
+
+`ADD COLUMN` with a constant default is metadata-only: there is no table rebuild and no session cascade, so nobody is signed out (unlike 0002). The existing `Sessions` rows stay valid; because `sessionSelect`/`scanSession` re-list every user column, an authenticated request sees the same `HasPassword` value as a fresh account read.
+
+**Backfill is a one-time approximation, and deliberately a narrowing one.** Every pre-existing row defaults to `1`, which is exact for the setup Administrator and for Administrator-created accounts (both are given a password). Self-registered rows are then set to `0` using `Origin = 'SelfRegistration'` — the best evidence available. A self-registered account that had already set a password *before* this migration would be marked `0` and asked to set one again; that is harmless (it can set the same password, and the account is never locked out because Discord sign-in still works). The opposite error — telling an account it has a password it does not have — is impossible, because nothing writes `1` except an actual password write.
+
+**Monotone contract (D-SR-16).** After this migration nothing writes `HasPassword = 0`. `SetOwnPassword` and the Administrator `ResetPassword` write `1`; creation writes `0` only for a brand-new self-registered row. A CHECK rejects any value outside `(0,1)`.
+
+Verification: `repository/sqlite/migration_0005_test.go` replays 0001–0004 over a database holding both account shapes, asserts the backfill, asserts a pre-existing session survives with no cascade, asserts the CHECK rejects `HasPassword = 2`, and asserts the monotone write. `password_capability_test.go` in the repository and service packages pins the reads and writes.
 
 ---
 
@@ -713,6 +738,13 @@ Each phase is independently shippable: S1 changes no user-visible behaviour, S2 
 | **D-SR-12** | Is Officer approval of *character names* (not accounts) in scope later? | (a) no; (b) yes, an approval flag on `UserCharacters` | **(a)** now; the request system may want its own review step |
 | **D-SR-13** | Which OAuth scopes does each flow request? | (a) every flow requests `identify guilds`; (b) registration requests `identify guilds`, login and linking keep `identify` | **(b) — decided 2026-11-26.** The finding in §6.5 is accepted, and the current link/login implementation stays unchanged. Only the dedicated registration flow asks for the guild list; ordinary login and linking are never broadened (§6.4) |
 | **D-SR-14** | May Discord sign-in tell a pending or disabled account *why* it cannot sign in? | (a) keep one neutral message for unlinked, pending and disabled; (b) distinguish pending and disabled with fixed text | **(b) — decided 2026-11-26.** The caller has just proved control of that Discord identity, and `/register` already distinguishes `registration-pending` from `registration-exists` for the same identity, so (a) hides nothing an attacker does not already know while sending real members to a password form they cannot use. Password sign-in stays neutral |
+| **D-SR-15** | A Discord-created account has no password the owner knows; may the owner set one later? | (a) no — Administrator reset is the only way to gain password access (the original D-SR-7); (b) yes — a Set flow on the signed-in account | **(b) — decided 2026-11-26.** "One field, one credential" still holds: Set adds a second credential only when the owner asks for it. Discord sign-in keeps working either way, so no member is ever locked out by the change |
+| **D-SR-16** | How does the server know whether an account has a password? | (a) infer from `Origin` or from the hash; (b) store an explicit `Users.HasPassword` capability flag | **(b) — decided 2026-11-26.** The hash cannot answer the question (a placeholder hash is indistinguishable from a real one) and `Origin` is about creation, not about later changes. The flag is monotone: nothing writes `0` after the migration, and it is never a credential — `PasswordHash` stays the only verifier |
+| **D-SR-17** | What proof is required to establish the first password? | (a) a current password (impossible); (b) an emailed/administrator-issued token; (c) ownership of the signed-in session | **(c) — decided 2026-11-26.** The session was issued after Discord OAuth plus the approval gate, so it already proves control of the account. The Set request therefore has no `currentPassword` field at all, and the endpoint is confined to a live session by the route matrix |
+| **D-SR-18** | May a passwordless account unlink Discord? | (a) yes — the owner chose to; (b) no — refuse with `409 password_required` | **(b) — decided 2026-11-26.** Discord is the only credential in that state, so unlinking would strand the account behind an Administrator reset. Both transports refuse (`DELETE /api/v1/me/discord` → `409 password_required`; `POST /account/discord/unlink` → `notice=discord-password-required`), and the profile hides the form with an explanation |
+| **D-SR-19** | One password endpoint that infers the state, or two explicit endpoints? | (a) one endpoint; (b) separate `/set` and `/change`, each refusing the other state | **(b) — decided 2026-11-26.** Inference would let a stale page silently replace a password or create one without proof of intent. `/set` refuses an account with `HasPassword = 1`; `/change` refuses one with `HasPassword = 0`; the page posts to the route that matches the state it rendered. `/api/v1/auth/password` remains as the pre-0005 alias of `/change` |
+| **D-SR-20** | How is the distinction presented? | (a) one form with optional current-password; (b) the page switches between Set and Change, and the profile says which | **(b) — decided 2026-11-26.** `/account/password` renders Set with no current-password field and Change with one; the success redirect carries the flow that ran (`?set=1` / `?changed=1`) so the notice describes what happened rather than the new state; the profile's Password section says "Set Password" or "Change Password" and the unlink control follows `CanUnlink` |
+| **D-SR-21** | How is `HasPassword` backfilled on an existing database? | (a) rebuild the table to derive it; (b) `ADD COLUMN ... DEFAULT 1` and set `0` where `Origin = 'SelfRegistration'` | **(b) — decided 2026-11-26.** Metadata-only, so no table rebuild and no session cascade. Exact for the setup Administrator and Administrator-created accounts; the self-registered approximation can only narrow (a pre-migration password owner sets one again) and is corrected on the next Set. See §4.6 |
 
 ---
 
@@ -728,6 +760,7 @@ Each phase is independently shippable: S1 changes no user-visible behaviour, S2 
 8. `go build ./...`, `go vet ./...`, `gofmt -l .` are clean; all existing suites pass; the route matrix classifies every new route; the new migration and registration suites pass.
 9. Documentation (README, DatabaseDesign, ProjectStructure, ProjectStatus) reflects the delivered behaviour, including the third Discord redirect URI.
 10. Scope isolation holds: `/auth/discord` and `/account/discord/link` still request `identify` and nothing more, `/register/discord` requests `identify guilds`, and `TestAuthorizeScopeIsPerFlow` pins all three (D-SR-13). The Phase B guild check keeps its current behaviour, `403` included.
+11. A Discord-created account can establish a first password from its own session without an Administrator, is refused when it tries to unlink Discord before doing so, and an Administrator-created account is offered Change rather than Set. `HasPassword` is monotone, and migration `0005` signs nobody out (D-SR-15…21).
 
 ---
 
@@ -760,5 +793,18 @@ Two small additions beyond the text above, both recorded here rather than silent
 Verification: `gofmt -l .` empty, `go build ./...` and `go vet ./...` clean; new tests `domain/account_status_test.go`, `repository/sqlite/migration_0004_test.go`, `repository/sqlite/registration_test.go`, `service/scope_test.go` (`TestAuthorizeScopeIsPerFlow`), `service/registration_test.go`, `api/register_test.go`, `api/user_approval_test.go`; existing suites unchanged and passing.
 
 **Follow-up, same day (D-SR-14).** Discord sign-in now names the refusal instead of always reporting an unlinked account. `domain.AccountStateError` (a typed error that unwraps to `ErrUnauthorized`) is returned by `DiscordService.Login` from the `domain.User` it already has — no second query — and `api/discord.go` maps it to the fixed notices `discord-pending` and `discord-disabled` *before* the `ErrUnauthorized` branch. The `IsEnabled()` gate itself, `discord-unlinked`, the session rule, the limiter and the password path are unchanged. Recorded in `ProjectStatus.md` §6.21.
+
+**Password capability, same day (D-SR-15…21).** A Discord-created account can now establish its first password instead of waiting for an Administrator reset. Files: `domain/identity.go` (`User.HasPassword`), `repository/sqlite/migrations/0005_password_capability.sql`, `repository/sqlite/users.go` and `sessions.go` (`HasPassword` in the column list, scan order, session join; `CreateRegisteredUser` writes 0; `SetOwnPassword`/reset write 1), `service/user_admin.go` (`SetOwnPassword`, the `ErrConflict` gates in `ChangeOwnPassword`, the reset grant), `service/auth.go` (password login refuses a passwordless account before verifying), `api/users.go` (`setPassword`, the state-driven page and failure paths, the `?set=1` / `?changed=1` notices), `api/router.go`, `api/views.go` (`Setting`, `Action`, `HasPassword`, `CanUnlink`), `api/discord.go` (`ErrConflict`→`password_required` on both transports) and the templates `account_password.html`, `account_profile.html`.
+
+Behaviour worth naming:
+
+- `/api/v1/auth/password/set` takes only `newPassword` and `confirmPassword`; the session is the proof (D-SR-17). It writes `HasPassword = 1`, keeps the acting session, and does **not** set `MustChangePassword` — a Discord-only owner knows the password they just chose, so forcing a rotation would be theatre. An Administrator reset still forces a change.
+- `/api/v1/auth/password/change` requires the current password and refuses a passwordless account with `ErrConflict` (D-SR-19); `/api/v1/auth/password` is a compatibility alias of it.
+- Unlinking Discord while passwordless fails with `409 password_required` (JSON) and `notice=discord-password-required` (HTML). The profile shows the explanation in place of the button (D-SR-18).
+- Password sign-in consults `HasPassword` first, so a placeholder hash is never accepted even if its random secret somehow matched.
+
+One defect was found by the new API test and fixed: the success notice was derived from the *current* account state, so after a first Set the page said "Password updated. Other sessions were signed out." The redirect now carries the flow (`?set=1`), and the notice describes what happened (D-SR-20).
+
+Verification: `gofmt -l .` empty, `go build ./...` and `go vet ./...` clean, full `go test ./...` passing. New tests: `repository/sqlite/migration_0005_test.go`, `repository/sqlite/password_capability_test.go`, `service/password_capability_test.go`, `api/password_capability_test.go`; `service/user_admin_test.go` fixtures set `HasPassword = true` where the helper models an account that already has a password.
 
 

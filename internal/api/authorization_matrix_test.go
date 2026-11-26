@@ -57,6 +57,8 @@ var routeMatrix = map[string]routeClass{
 	"POST /api/v1/auth/logout":              classMember,
 	"GET /account/password":                 classMember,
 	"POST /api/v1/auth/password":            classMember,
+	"POST /api/v1/auth/password/change":     classMember,
+	"POST /api/v1/auth/password/set":        classMember,
 	"GET /account/profile":                  classMember,
 	"GET /api/v1/me/characters":             classMember,
 	"POST /api/v1/me/characters":            classMember,

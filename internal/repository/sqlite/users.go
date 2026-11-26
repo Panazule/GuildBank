@@ -61,11 +61,12 @@ func scanUser(scanner interface{ Scan(...any) error }) (domain.User, error) {
 		accountStatus string
 		origin        sql.NullString
 		guildVerified sql.NullString
+		hasPassword   int
 	)
 	if err := scanner.Scan(
 		&u.ID, &u.UserName, &u.PasswordHash, &u.AccessLevel, &lastLogin,
 		&disabled, &modAt, &createdAt, &modBy, &must,
-		&accountStatus, &origin, &guildVerified,
+		&accountStatus, &origin, &guildVerified, &hasPassword,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.User{}, domain.ErrNotFound
@@ -87,6 +88,7 @@ func scanUser(scanner interface{ Scan(...any) error }) (domain.User, error) {
 	}
 	u.Disabled = disabled == 1
 	u.MustChangePassword = must == 1
+	u.HasPassword = hasPassword == 1
 	u.AccountStatus = accountStatus
 	if modBy.Valid {
 		u.ModBy = modBy.String
@@ -97,7 +99,7 @@ func scanUser(scanner interface{ Scan(...any) error }) (domain.User, error) {
 	return u, nil
 }
 
-const userColumns = `UserID, UserName, PasswordHash, AccessLevel, LastLogin, DisabledFg, ModAt, CreatedAt, ModBy, MustChangePassword, AccountStatus, Origin, GuildVerifiedAt`
+const userColumns = `UserID, UserName, PasswordHash, AccessLevel, LastLogin, DisabledFg, ModAt, CreatedAt, ModBy, MustChangePassword, AccountStatus, Origin, GuildVerifiedAt, HasPassword`
 
 // GetUserByName returns the account with the supplied case-insensitive name.
 func (s *Store) GetUserByName(ctx context.Context, name string) (domain.User, error) {
@@ -162,12 +164,12 @@ func insertUser(ctx context.Context, e execer, u domain.User, identity *domain.D
 	}
 	res, err := e.ExecContext(ctx, `
 		INSERT INTO Users (UserName, PasswordHash, AccessLevel, LastLogin, DisabledFg, ModAt, CreatedAt, ModBy, MustChangePassword,
-		                   DiscordUserID, DiscordUserName, DiscordLinkedAt, AccountStatus, Origin, GuildVerifiedAt)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   DiscordUserID, DiscordUserName, DiscordLinkedAt, AccountStatus, Origin, GuildVerifiedAt, HasPassword)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.UserName, u.PasswordHash, u.AccessLevel, nullableString(u.LastLogin),
 		boolInt(u.Disabled), formatTime(u.ModAt), formatTime(u.CreatedAt), nullString(u.ModBy),
 		boolInt(u.MustChangePassword), discordID, discordName, discordAt,
-		string(status), nullString(u.Origin), nullableString(u.GuildVerifiedAt))
+		string(status), nullString(u.Origin), nullableString(u.GuildVerifiedAt), boolInt(u.HasPassword))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, domain.ErrAlreadyExists
@@ -182,6 +184,8 @@ func insertUser(ctx context.Context, e execer, u domain.User, identity *domain.D
 }
 
 func insertUserTx(ctx context.Context, tx *sql.Tx, u domain.User) (int64, error) {
+	// The setup wizard collects a real password for the first administrator.
+	u.HasPassword = true
 	return insertUser(ctx, tx, u, nil)
 }
 
@@ -216,6 +220,8 @@ func (s *Store) CreateUser(ctx context.Context, u domain.User) (domain.User, err
 	u.AccountStatus = string(domain.AccountStatusApproved)
 	u.Origin = ""
 	u.GuildVerifiedAt = nil
+	// The administrator typed a password, so the account is password-capable.
+	u.HasPassword = true
 
 	id, err := insertUser(ctx, s.db, u, nil)
 	if err != nil {
@@ -260,6 +266,9 @@ func (s *Store) CreateRegisteredUser(ctx context.Context, u domain.User,
 	u.AccessLevel = string(role)
 	u.AccountStatus = string(status)
 	u.LastLogin = nil
+	// The stored hash is a discarded random secret, not a credential the user
+	// knows, so the account starts without a usable password (D-SR-16).
+	u.HasPassword = false
 	if identity.LinkedAt == nil {
 		linkedAt := u.CreatedAt
 		identity.LinkedAt = &linkedAt
@@ -487,7 +496,8 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID int64, disabled bool
 // ResetUserPassword stores an administrator-supplied temporary password,
 // requires a change at the next sign-in and revokes every session for the
 // account, all in one transaction. The actor must be an Administrator; the route
-// layer enforces the same rule.
+// layer enforces the same rule. HasPassword becomes true: the account now owns a
+// password the user can type, even if it is only temporary.
 func (s *Store) ResetUserPassword(ctx context.Context, userID int64, passwordHash string,
 	at time.Time, actor domain.Actor) (domain.User, error) {
 	if !actor.IsAdmin {
@@ -507,7 +517,7 @@ func (s *Store) ResetUserPassword(ctx context.Context, userID int64, passwordHas
 		return domain.User{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE Users SET PasswordHash = ?, MustChangePassword = 1, ModAt = ?, ModBy = ?
+		UPDATE Users SET PasswordHash = ?, MustChangePassword = 1, HasPassword = 1, ModAt = ?, ModBy = ?
 		WHERE UserID = ?`,
 		passwordHash, formatTime(at), nullString(actor.UserName), userID); err != nil {
 		return domain.User{}, fmt.Errorf("sqlite: reset password: %w", err)
@@ -526,9 +536,13 @@ func (s *Store) ResetUserPassword(ctx context.Context, userID int64, passwordHas
 }
 
 // SetOwnPassword replaces an account's password after the service has verified
-// the current one, clears MustChangePassword and revokes every session except
-// keepSessionID. A blank keepSessionID revokes all of them. No actor is required
-// because the caller is the account owner.
+// the current one (or established the first one, D-SR-15), clears
+// MustChangePassword and revokes every session except keepSessionID. A blank
+// keepSessionID revokes all of them. No actor is required because the caller is
+// the account owner.
+//
+// HasPassword is written as 1 here and only here: the transition is monotone, so
+// establishing a password can never be undone by a later write.
 func (s *Store) SetOwnPassword(ctx context.Context, userID int64, passwordHash string,
 	at time.Time, keepSessionID string) (domain.User, error) {
 	if strings.TrimSpace(passwordHash) == "" {
@@ -546,7 +560,7 @@ func (s *Store) SetOwnPassword(ctx context.Context, userID int64, passwordHash s
 		return domain.User{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE Users SET PasswordHash = ?, MustChangePassword = 0, ModAt = ?, ModBy = ?
+		UPDATE Users SET PasswordHash = ?, MustChangePassword = 0, HasPassword = 1, ModAt = ?, ModBy = ?
 		WHERE UserID = ?`,
 		passwordHash, formatTime(at), nullString(current.UserName), userID); err != nil {
 		return domain.User{}, fmt.Errorf("sqlite: change own password: %w", err)

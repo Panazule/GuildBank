@@ -178,6 +178,12 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	member.GET("/api/v1/auth/session", authHandler.session)
 	member.POST("/api/v1/auth/logout", authHandler.logout)
 	member.GET("/account/password", usersHandler.passwordPage)
+	// Separate endpoints for the two account states (D-SR-19). /set refuses an
+	// account that already has a password; /change requires the current one.
+	// /api/v1/auth/password remains as the pre-0005 alias of /change so existing
+	// API clients keep working; it can only ever change an existing password.
+	member.POST("/api/v1/auth/password/set", usersHandler.setPassword)
+	member.POST("/api/v1/auth/password/change", usersHandler.changePassword)
 	member.POST("/api/v1/auth/password", usersHandler.changePassword)
 	// The profile is the account owner's own character list (P3 Phase A).
 	member.GET("/account/profile", profileHandler.page)

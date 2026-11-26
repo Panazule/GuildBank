@@ -129,6 +129,10 @@ func (h *discordHandler) unlink(c *gin.Context) {
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
 			writeError(c, http.StatusNotFound, "not_found", "no Discord account is linked")
+		case errors.Is(err, domain.ErrConflict):
+			// D-SR-18: a passwordless account has no other way to sign in.
+			writeError(c, http.StatusConflict, "password_required",
+				"set a password before unlinking Discord")
 		case errors.Is(err, domain.ErrUnavailable):
 			writeError(c, http.StatusServiceUnavailable, "discord_unavailable", "Discord linking is not configured")
 		default:
@@ -149,6 +153,10 @@ func (h *discordHandler) unlinkForm(c *gin.Context) {
 	if err := h.discord.Unlink(c.Request.Context(), session.User, GetRequestID(c), c.ClientIP()); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			h.redirectNotice(c, "discord-not-linked")
+			return
+		}
+		if errors.Is(err, domain.ErrConflict) {
+			h.redirectNotice(c, "discord-password-required")
 			return
 		}
 		h.logger.Error("discord unlink failed", "user_id", session.User.ID,

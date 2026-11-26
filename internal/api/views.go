@@ -539,6 +539,11 @@ type accountPasswordPageData struct {
 	// Forced reports the MustChangePassword state, so the page can explain why
 	// the account cannot reach anything else yet.
 	Forced bool
+	// Setting is true when the account has no password yet. The page then shows
+	// Set Password and omits the current-password field (D-SR-15/19).
+	Setting bool
+	// Action is the form target: the set or the change endpoint (D-SR-19).
+	Action string
 }
 
 func (v *views) adminUsers(c *gin.Context, status int, data usersPageData) {
@@ -571,6 +576,9 @@ type profilePageData struct {
 	Characters    []characterView
 	MaxCharacters int
 	Discord       discordSectionView
+	// HasPassword selects between Set Password and Change Password on the
+	// dedicated Password section (D-SR-20). It is a presentation flag only.
+	HasPassword bool
 }
 
 // discordSectionView is the profile-page state of the Discord card. Available is
@@ -582,6 +590,10 @@ type discordSectionView struct {
 	UserName   string
 	LinkedText string
 	GuildID    string
+	// CanUnlink is false for a passwordless account: Discord is its only way in,
+	// so the unlink control stays hidden and the service refuses it anyway
+	// (D-SR-18).
+	CanUnlink bool
 }
 
 func (v *views) accountProfile(c *gin.Context, status int, data profilePageData) {

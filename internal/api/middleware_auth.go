@@ -129,6 +129,8 @@ func passwordChangeAllowlist(method, path string) bool {
 	switch method + " " + path {
 	case "GET /account/password",
 		"POST /api/v1/auth/password",
+		"POST /api/v1/auth/password/change",
+		"POST /api/v1/auth/password/set",
 		"POST /api/v1/auth/logout",
 		"GET /api/v1/auth/session":
 		return true

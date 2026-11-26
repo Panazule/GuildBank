@@ -35,10 +35,13 @@ type userResponse struct {
 	Origin             string     `json:"origin,omitempty"`
 	GuildVerifiedAt    *time.Time `json:"guildVerifiedAt,omitempty"`
 	MustChangePassword bool       `json:"mustChangePassword"`
-	LastLogin          *time.Time `json:"lastLogin,omitempty"`
-	CreatedAt          time.Time  `json:"createdAt"`
-	ModAt              time.Time  `json:"modAt"`
-	ModBy              string     `json:"modBy,omitempty"`
+	// HasPassword is the account's password capability (D-SR-16). It is a
+	// read-only projection: no account route can set it directly.
+	HasPassword bool       `json:"hasPassword"`
+	LastLogin   *time.Time `json:"lastLogin,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	ModAt       time.Time  `json:"modAt"`
+	ModBy       string     `json:"modBy,omitempty"`
 }
 
 func userResponseOf(u domain.User) userResponse {
@@ -47,6 +50,7 @@ func userResponseOf(u domain.User) userResponse {
 		Disabled: u.Disabled, AccountStatus: string(u.Status()), Pending: u.IsPending(),
 		Origin: u.Origin, GuildVerifiedAt: u.GuildVerifiedAt,
 		MustChangePassword: u.MustChangePassword,
+		HasPassword:        u.HasPassword,
 		LastLogin:          u.LastLogin, CreatedAt: u.CreatedAt.UTC(), ModAt: u.ModAt.UTC(),
 		ModBy: u.ModBy,
 	}
@@ -118,6 +122,17 @@ func (r changePasswordRequest) input() domain.ChangePasswordInput {
 		CurrentPassword: r.CurrentPassword, NewPassword: r.NewPassword,
 		ConfirmPassword: r.ConfirmPassword,
 	}
+}
+
+// setPasswordRequest carries a Discord-only account's first password. It has no
+// currentPassword field on purpose: there is nothing to verify (D-SR-17).
+type setPasswordRequest struct {
+	NewPassword     string `json:"newPassword" form:"newPassword"`
+	ConfirmPassword string `json:"confirmPassword" form:"confirmPassword"`
+}
+
+func (r setPasswordRequest) input() domain.SetPasswordInput {
+	return domain.SetPasswordInput{NewPassword: r.NewPassword, ConfirmPassword: r.ConfirmPassword}
 }
 
 // bindUserWrite decodes an account request from JSON under the strict
@@ -659,17 +674,40 @@ func (h *usersHandler) passwordPage(c *gin.Context) {
 		unauthorized(c)
 		return
 	}
+	setting := !session.User.HasPassword
 	notice := ""
-	if c.Query("changed") == "1" {
+	switch {
+	// The notice describes what just happened, not the state the account is in
+	// now: after a first password the page already reads as "Change", so the
+	// query carries the flow that succeeded.
+	case c.Query("set") == "1":
+		notice = "Password set. You can now sign in with your password or with Discord."
+	case c.Query("changed") == "1":
 		notice = "Password updated. Other sessions for this account were signed out."
+	}
+	title := "Change password"
+	if setting {
+		title = "Set password"
 	}
 	h.views.accountPassword(c, http.StatusOK, accountPasswordPageData{
 		pageData: pageData{
-			Title: "Change password", CSRF: CSRF(c), User: &session.User, Notice: notice,
+			Title: title, CSRF: CSRF(c), User: &session.User, Notice: notice,
 		},
 		UserName: session.User.UserName,
 		Forced:   session.User.MustChangePassword,
+		Setting:  setting,
+		Action:   passwordAction(setting),
 	})
+}
+
+// passwordAction returns the endpoint that matches the account state, so the
+// page can never post a first password to the change route or the reverse
+// (D-SR-19).
+func passwordAction(setting bool) string {
+	if setting {
+		return "/api/v1/auth/password/set"
+	}
+	return "/api/v1/auth/password/change"
 }
 
 func (h *usersHandler) changePassword(c *gin.Context) {
@@ -680,36 +718,88 @@ func (h *usersHandler) changePassword(c *gin.Context) {
 	}
 	var req changePasswordRequest
 	if rerr := bindUserWrite(c, &req); rerr != nil {
-		h.passwordFailure(c, session.User, rerr.fields, rerr.message)
+		h.passwordFailure(c, session.User, false, rerr.fields, rerr.message)
 		return
 	}
 	updated, err := h.users.ChangeOwnPassword(c.Request.Context(), session.User, session.Session.ID,
 		req.input(), GetRequestID(c), c.ClientIP())
 	if err != nil {
-		var validation *domain.ValidationError
-		if errors.As(err, &validation) {
-			h.passwordFailure(c, session.User, validation.Fields, "Check the highlighted fields.")
-			return
-		}
-		respondError(c, h.logger, err)
+		h.passwordServiceFailure(c, session.User, false, err)
 		return
 	}
+	h.passwordSucceeded(c, updated, false)
+}
+
+// setPassword establishes the first password for a signed-in account that has
+// none (D-SR-15). Session ownership is the only proof required (D-SR-17), so the
+// request deliberately has no currentPassword field.
+func (h *usersHandler) setPassword(c *gin.Context) {
+	session, ok := CurrentSession(c)
+	if !ok {
+		writeError(c, http.StatusUnauthorized, "unauthenticated", "authentication required")
+		return
+	}
+	var req setPasswordRequest
+	if rerr := bindUserWrite(c, &req); rerr != nil {
+		h.passwordFailure(c, session.User, true, rerr.fields, rerr.message)
+		return
+	}
+	updated, err := h.users.SetOwnPassword(c.Request.Context(), session.User, session.Session.ID,
+		req.input(), GetRequestID(c), c.ClientIP())
+	if err != nil {
+		h.passwordServiceFailure(c, session.User, true, err)
+		return
+	}
+	h.passwordSucceeded(c, updated, true)
+}
+
+// passwordSucceeded answers a successful password write. The redirect carries the
+// flow that ran because the account state alone cannot distinguish a first Set
+// from a later Change once the capability is on.
+func (h *usersHandler) passwordSucceeded(c *gin.Context, updated domain.User, setting bool) {
 	if wantsHTML(c) {
-		c.Redirect(http.StatusSeeOther, "/account/password?changed=1")
+		target := "/account/password?changed=1"
+		if setting {
+			target = "/account/password?set=1"
+		}
+		c.Redirect(http.StatusSeeOther, target)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"user": userResponseOf(updated)}})
 }
 
-func (h *usersHandler) passwordFailure(c *gin.Context, user domain.User,
+// passwordServiceFailure maps a password error to the page or the API envelope.
+// A missing password or an already established one is a conflict: the account
+// state no longer matches the endpoint, so the page is re-rendered as the state
+// actually is.
+func (h *usersHandler) passwordServiceFailure(c *gin.Context, user domain.User, setting bool, err error) {
+	var validation *domain.ValidationError
+	if errors.As(err, &validation) {
+		h.passwordFailure(c, user, setting, validation.Fields, "Check the highlighted fields.")
+		return
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		h.passwordFailure(c, user, setting, nil,
+			"The account state changed. Reload the page and try again.")
+		return
+	}
+	respondError(c, h.logger, err)
+}
+
+func (h *usersHandler) passwordFailure(c *gin.Context, user domain.User, setting bool,
 	fields map[string]string, message string) {
 	if wantsHTML(c) {
+		title := "Change password"
+		if setting {
+			title = "Set password"
+		}
 		h.views.accountPassword(c, http.StatusUnprocessableEntity, accountPasswordPageData{
 			pageData: pageData{
-				Title: "Change password", CSRF: CSRF(c), User: &user,
+				Title: title, CSRF: CSRF(c), User: &user,
 				Error: message, ErrorFields: fields,
 			},
 			UserName: user.UserName, Forced: user.MustChangePassword,
+			Setting: setting, Action: passwordAction(setting),
 		})
 		return
 	}

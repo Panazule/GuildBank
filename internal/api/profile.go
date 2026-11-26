@@ -67,7 +67,8 @@ func (h *profileHandler) page(c *gin.Context) {
 		RoleLabel:     userRoleLabel(session.User.Role()),
 		Characters:    characterViews(characters),
 		MaxCharacters: domain.CharacterMaxPerUser,
-		Discord:       h.discordSection(c, session.User.ID),
+		Discord:       h.discordSection(c, session.User.ID, session.User.HasPassword),
+		HasPassword:   session.User.HasPassword,
 	}
 	data.Notice = profileNotice(c.Query("notice"))
 	h.views.accountProfile(c, http.StatusOK, data)
@@ -76,7 +77,7 @@ func (h *profileHandler) page(c *gin.Context) {
 // discordSection reads the linking state for the profile card. Every failure is
 // logged and rendered as "not available": the page must never break because the
 // provider or its configuration is missing.
-func (h *profileHandler) discordSection(c *gin.Context, userID int64) discordSectionView {
+func (h *profileHandler) discordSection(c *gin.Context, userID int64, hasPassword bool) discordSectionView {
 	cfg, err := h.discord.Config(c.Request.Context())
 	if err != nil {
 		h.logger.Error("discord configuration read failed", "request_id", GetRequestID(c), "error", err)
@@ -94,6 +95,7 @@ func (h *profileHandler) discordSection(c *gin.Context, userID int64) discordSec
 	if identity.Linked() {
 		section.Linked = true
 		section.UserName = identity.DiscordUserName
+		section.CanUnlink = hasPassword
 		if identity.LinkedAt != nil {
 			section.LinkedText = identity.LinkedAt.UTC().Format("2006-01-02")
 		}
@@ -261,7 +263,8 @@ func (h *profileHandler) renderFormError(c *gin.Context, err error, message stri
 		RoleLabel:     userRoleLabel(session.User.Role()),
 		Characters:    characterViews(characters),
 		MaxCharacters: domain.CharacterMaxPerUser,
-		Discord:       h.discordSection(c, session.User.ID),
+		Discord:       h.discordSection(c, session.User.ID, session.User.HasPassword),
+		HasPassword:   session.User.HasPassword,
 	})
 }
 
@@ -302,6 +305,8 @@ func profileNotice(code string) string {
 		return "Discord linking is not enabled."
 	case "discord-not-linked":
 		return "No Discord account is linked."
+	case "discord-password-required":
+		return "Set a password before unlinking Discord. Without a password, Discord is the only way to sign in."
 	case "discord-error":
 		return "The Discord link could not be completed."
 	}

@@ -187,6 +187,12 @@ type User struct {
 	CreatedAt          time.Time
 	ModBy              string
 	MustChangePassword bool
+	// HasPassword reports whether the account has ever established a password.
+	// A Discord self-registration starts false and becomes true once, through
+	// SetOwnPassword or an administrator reset; it is never cleared (D-SR-16).
+	// The flag can only narrow authentication: PasswordHash remains the sole
+	// verifier, so a true value never grants access by itself.
+	HasPassword bool
 	// AccountStatus is the raw stored approval value. Use Status() so a corrupt
 	// value is quarantined rather than trusted.
 	AccountStatus string

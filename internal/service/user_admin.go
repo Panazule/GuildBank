@@ -388,6 +388,11 @@ func (s *UserAdminService) ChangeOwnPassword(ctx context.Context, user domain.Us
 	if !current.IsEnabled() {
 		return domain.User{}, domain.ErrUnauthorized
 	}
+	if !current.HasPassword {
+		// There is no current password to verify, so this route cannot be the
+		// one that creates the first credential (D-SR-19).
+		return domain.User{}, fmt.Errorf("%w: this account has no password yet", domain.ErrConflict)
+	}
 	if !VerifyPassword(current.PasswordHash, in.CurrentPassword) {
 		return domain.User{}, domain.NewValidationError("currentPassword", "is not correct")
 	}
@@ -403,6 +408,47 @@ func (s *UserAdminService) ChangeOwnPassword(ctx context.Context, user domain.Us
 		IsAdmin: updated.IsAdmin()}
 	s.record(ctx, "USER_PASSWORD_CHANGED", updated, map[string]string{},
 		map[string]string{"self": "true"}, actor, correlationID, sourceIP)
+	updated.PasswordHash = ""
+	return updated, nil
+}
+
+// SetOwnPassword establishes the first password for a signed-in account that has
+// none (D-SR-15). A session proves ownership, so no current password is asked for
+// (D-SR-17). The store writes HasPassword = 1, clears MustChangePassword and
+// revokes every other session; the account may keep signing in with Discord.
+func (s *UserAdminService) SetOwnPassword(ctx context.Context, user domain.User, sessionID string,
+	in domain.SetPasswordInput, correlationID, sourceIP string) (domain.User, error) {
+	if err := s.requireReady(); err != nil {
+		return domain.User{}, err
+	}
+	if err := in.Validate(); err != nil {
+		return domain.User{}, err
+	}
+	current, err := s.store.GetUserByID(ctx, user.ID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if !current.IsEnabled() {
+		return domain.User{}, domain.ErrUnauthorized
+	}
+	if current.HasPassword {
+		// Establishing a password is a one-time transition. Once it exists the
+		// owner must prove it, so this endpoint cannot silently replace it.
+		return domain.User{}, fmt.Errorf("%w: this account already has a password", domain.ErrConflict)
+	}
+	hash, err := HashUserPassword(current.UserName, in.NewPassword)
+	if err != nil {
+		return domain.User{}, err
+	}
+	updated, err := s.store.SetOwnPassword(ctx, current.ID, hash, s.now().UTC(), sessionID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	actor := domain.Actor{UserID: updated.ID, UserName: updated.UserName, Role: updated.Role(),
+		IsAdmin: updated.IsAdmin()}
+	s.record(ctx, "USER_PASSWORD_SET", updated,
+		map[string]string{"hasPassword": "false"},
+		map[string]string{"hasPassword": "true"}, actor, correlationID, sourceIP)
 	updated.PasswordHash = ""
 	return updated, nil
 }

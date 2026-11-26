@@ -151,7 +151,10 @@ with no session, which an Administrator approves from `/admin/users`
 | POST | `/api/v1/auth/logout` | Revoke the session; requires authentication and CSRF |
 | GET | `/api/v1/auth/session` | Current account, role and expiry; any signed-in role |
 | GET | `/api/v1/auth/csrf` | Issue a signed CSRF token for API clients |
-| GET | `/account/profile` | Profile page: the account's character names with add and remove |
+| GET | `/account/profile` | Profile page: the account's character names with add and remove, its Password section (Set or Change) and its Discord section |
+| GET | `/account/password` | Password page; renders **Set password** for a passwordless account and **Change password** otherwise, posting to the matching endpoint |
+| POST | `/api/v1/auth/password/set` | Establish the first password from a signed-in passwordless account; no current password; JSON or `303 /account/password?set=1`; `422` when the account already has one or the fields fail policy |
+| POST | `/api/v1/auth/password/change`, `/api/v1/auth/password` | Change the password with the current one; JSON or `303 /account/password?changed=1`; a passwordless account is refused (`422`). The second path is the pre-0005 alias |
 | GET | `/api/v1/me/characters` | The signed-in account's character names (future requester dropdown) |
 | POST | `/api/v1/me/characters` | Add a character name; JSON or `303` for HTML |
 | DELETE | `/api/v1/me/characters/:id` | Remove one of the account's own names; another account's ID is `404` |
@@ -170,7 +173,7 @@ with no session, which an Administrator approves from `/admin/users`
 | POST | `/admin/users/:id/withdraw-approval`, `/api/v1/users/:id/withdraw-approval` | Return an approved account to pending; every session is revoked |
 | POST | `/account/discord/unlink` | HTML form adapter that unlinks Discord |
 | GET | `/api/v1/me/discord` | The account's linked Discord identity (`linked`, name, date) |
-| DELETE | `/api/v1/me/discord` | Unlink Discord from the signed-in account |
+| DELETE | `/api/v1/me/discord` | Unlink Discord from the signed-in account; `409 password_required` while the account has no password |
 | GET | `/admin/settings` | Administrator settings screen |
 | GET | `/api/v1/settings` | Redacted settings JSON; secrets never returned |
 | PUT/POST | `/api/v1/settings` | Validate and persist settings; POST is the HTML form adapter for PUT |
