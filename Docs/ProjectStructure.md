@@ -61,7 +61,7 @@ GuildBank/
 │   │   └── mariadb/
 │   │       ├── store.go          MariaDB pool, bounded ping and connection test
 │   │       ├── migrate.go        Embedded guild-store migration runner (GET_LOCK)
-│   │       ├── migrations/       0001_guild_store.sql, 0002_public_inventory_indexes.sql, 0003_admin_inventory.sql, 0004_import_ignored_rows.sql, 0005_item_quantity_model.sql and 0006_inventory_movement.sql
+│   │       ├── migrations/       0001_guild_store.sql, 0002_public_inventory_indexes.sql, 0003_admin_inventory.sql, 0004_import_ignored_rows.sql, 0005_item_quantity_model.sql, 0006_inventory_movement.sql and 0007_movement_related_movement.sql
 │   │       ├── items.go          Read-only physical→logical Items repository
 │   │       ├── imports.go        Batch/row/location/selection reads and staging
 │   │       ├── imports_commit.go Advisory-locked atomic import commit and audit
@@ -78,6 +78,14 @@ GuildBank/
 │   │   ├── settings.go           Settings page and REST handlers
 │   │   ├── imports.go            Import upload, review, selection and commit handlers
 │   │   ├── inventory.go          Public list/detail HTML and JSON handlers, DTO/view models
+│   │   ├── admin_pages.go        Admin list/detail/restore pages and row view models
+│   │   ├── admin_pages_handlers.go Admin create/update/remove/restore handlers
+│   │   ├── admin_inventory.go    Admin inventory HTML/JSON list, detail and write handlers
+│   │   ├── admin_json.go         Admin DTOs, strict request decoding, response helpers
+│   │   ├── admin_movement_pages.go Issue/Return/movement-history pages and forms
+│   │   ├── admin_movements.go    Issue/Return/movement-history JSON handlers
+│   │   ├── admin_audit.go        Audit viewer and per-record history handlers
+│   │   ├── admin_navigation.go   returnTo allowlist and navigation-context helpers
 │   │   ├── views.go              Embedded template rendering
 │   │   ├── ui.go                 Shared HTML page helpers
 │   │   ├── csrf.go               Signed double-submit CSRF
@@ -90,7 +98,7 @@ GuildBank/
 │   ├── web/
 │   │   ├── embed.go              Embedded template/static filesystems
 │   │   ├── embed_test.go         Import guard + embed checks
-│   │   ├── templates/            setup, login, settings, imports, import_detail, inventory_list, inventory_detail, admin_inventory, admin_inventory_form, admin_inventory_detail, admin_remove, admin_bulk_remove, admin_audit, error, partials
+│   │   ├── templates/            setup, login, settings, imports, import_detail, inventory_list, inventory_detail, admin_inventory, admin_inventory_form, admin_inventory_detail, admin_inventory_issue, admin_inventory_return, admin_inventory_history, admin_remove, admin_restore, admin_bulk_remove, admin_audit, error, partials
 │   │   └── static/               app.css, setup.js and imports.js
 │   └── platform/
 │       ├── config/
@@ -172,6 +180,12 @@ ImportList, Audit). It builds a DSN with `go-sql-driver/mysql` (UTF-8,
 `parseTime`, UTC), sets explicit pool limits (20 open / 10 idle, 30-minute
 lifetime, 5-minute idle timeout), and pings with a five-second bound. The
 password exists only in the driver configuration and is never logged.
+`OpenPool` builds that pool without dialing and keeps it for the process
+lifetime; `Run` (in `supervisor.go`) supervises it: connectivity failures retry
+with bounded backoff, `Initialize` applies migrations plus the startup repairs
+and re-runs after every reconnect, and readiness is published only after it
+succeeds. Migration failures stay fatal after `MariaDB.InitAttempts` attempts.
+`Open` keeps the eager ping for the setup wizard and the integration tests.
 `Items` remains externally owned and read-only; `items.go` is the only file
 that knows the physical lowercase table and its `id`/`name`/`classes`/`races`
 columns (PD-19). It provides single, batch, count and keyset-page reads and no
@@ -262,7 +276,9 @@ main
      ├─ sqlite.Open  ── pragmas, ping, single writer
      ├─ sqlite.Migrate ── PRAGMA user_version = 1 (Users, Settings, Sessions)
      ├─ mariadb.Open ── OPTIONAL: pool + 5s ping (failure = degraded)
-     ├─ mariadb.Migrate ── 0001…0006 guild-store migrations (fatal on migration error)
+     ├─ mariadb.OpenPool ── bounded pool, no dial (invalid config only is fatal)
+     ├─ go mariadb.Store.Run ── retry connectivity, Initialize (migrate + recovery + backfills), publish Ready
+     ├─ mariadb.Migrate ── 0001…0007 guild-store migrations (fatal after InitAttempts failures; version ≤ 32 characters)
      ├─ mariadb.RecoverInterrupted ── fail stranded Processing batches
      ├─ mariadb.BackfillInventoryLocations ── fill missing LocationGroup/LocationSort
      ├─ mariadb.BackfillSpellMetadata ── repair pre-DEFECT-01 spell class/race strings

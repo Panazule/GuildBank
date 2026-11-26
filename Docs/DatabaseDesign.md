@@ -459,6 +459,33 @@ CREATE TABLE InventoryMovement (
 - `ActorUserID` is a cross-store snapshot with no physical FK, following the same rule as `GuildBankItems.ModBy` and `Audit.UserID`.
 - Existing lots become opening balances. No movement history is backfilled and imports create no `RECEIVE` rows in the first release (OD-05).
 
+#### 4.6.1 `0007_movement_related_movement` **IMPLEMENTED (2026-11-25)**
+
+Additive migration for the movement-derived issued-row projection
+(`AdminInventoryIssuedRowsDesign.md`). It attributes a `RETURN` to the `ISSUE` movement it
+closes, so an issuance can be addressed individually. Delivered as three statements
+because the runner splits a file on `;` and each DDL statement auto-commits:
+
+```sql
+ALTER TABLE InventoryMovement
+    ADD COLUMN RelatedMovementID BIGINT UNSIGNED NULL AFTER RelatedItemID;
+
+ALTER TABLE InventoryMovement
+    ADD KEY ix_movement_related_movement (RelatedMovementID);
+
+ALTER TABLE InventoryMovement
+    ADD CONSTRAINT fk_movement_related_movement
+        FOREIGN KEY (RelatedMovementID) REFERENCES InventoryMovement (MovementID)
+        ON UPDATE RESTRICT ON DELETE RESTRICT;
+```
+
+**Notes**
+- `RelatedMovementID` is `NULL` on `ISSUE`, `RECEIVE`, `WRITE_OFF` rows and on any `RETURN` that closes no issuance (a stock return to an active lot). Existing `RETURN` rows stay `NULL` until the one-time FIFO attribution backfill runs; new returns set it at write time.
+- Outstanding per issuance is `Quantity − SUM(RETURN.Quantity WHERE RelatedMovementID = MovementID)`; the movement row itself is never updated.
+- The self-FK is `RESTRICT` like `fk_movement_item`: the ledger is append-only, so a referenced `ISSUE` row is never deleted.
+- `RelatedItemID` keeps its original meaning (the lot row); it is not reused for movement attribution.
+- The file name is part of the contract: the runner records the file name without `.sql` as `schema_migrations.Version VARCHAR(32)`, so names must be 32 characters or fewer. See section 8.
+
 ---
 
 ## 5. Relationships
@@ -474,6 +501,7 @@ MariaDB (GuildBank)
   ImportBatch 1 ──── n Audit         (logical: EntityType='ImportBatch', EntityID)
   GuildBankItems 1 ──── n Audit      (logical: EntityType='GuildBankItem', EntityID)
   GuildBankItems 1 ──── n InventoryMovement (GuildBankItemID, RESTRICT)
+  InventoryMovement 1 ──── n InventoryMovement (RelatedMovementID, RESTRICT, nullable)
 ```
 
 | Relationship | Enforced by | Cross-store? | Notes |
@@ -485,6 +513,7 @@ MariaDB (GuildBank)
 | `ImportBatch.ImportedBy(UserID)` → `Users.UserID` | Application only | **Yes** | Same pattern as `ModBy` |
 | `Audit.UserID` → `Users.UserID` | Application only | **Yes** | Snapshot plus optional numeric reference; D-10 field names are normative |
 | `InventoryMovement.GuildBankItemID → GuildBankItems.GuildBankItemID` | MariaDB FK | No | `RESTRICT`; movement rows are append-only and lots are never physically deleted |
+| `InventoryMovement.RelatedMovementID → InventoryMovement.MovementID` | MariaDB FK (self) | No | `RESTRICT`; nullable; set only on a `RETURN` that closes an `ISSUE`, which is what makes each issuance individually addressable (issued rows) |
 | `InventoryMovement.ActorUserID` → `Users.UserID` | Application only | **Yes** | Snapshot plus optional numeric reference; same pattern as `ModBy` |
 | `AuditOutbox` → `Audit` | Application | **Yes** | Outbox row is inserted into MariaDB; `SentAt` tracks delivery |
 
@@ -699,12 +728,14 @@ COMMIT;
 | Store | Mechanism | Rules |
 |---|---|---|
 | SQLite | `PRAGMA user_version` + embedded ordered migrations | Forward-only; each migration runs in a transaction; startup refuses `user_version > binary version`; backup the file before migrating |
-| MariaDB | `schema_migrations (Version VARCHAR(32) PRIMARY KEY, AppliedAt DATETIME(6) NOT NULL)` **IMPLEMENTED** | Forward-only; per-database advisory lock (`GET_LOCK`) around migration; lexical downgrade guard; fatal startup on migration failure (PD3-10) |
+| MariaDB | `schema_migrations (Version VARCHAR(32) PRIMARY KEY, AppliedAt DATETIME(6) NOT NULL)` **IMPLEMENTED** | Forward-only; per-database advisory lock (`GET_LOCK`) around migration; lexical downgrade guard; fatal startup on migration failure (PD3-10); the version is the embedded file name without `.sql`, so a name longer than 32 characters is rejected before any statement executes |
 | `Items` | Out-of-band loader | Not managed by application migrations; version/compatibility documented separately (MR-05) |
 
 Startup order: (1) open SQLite, migrate, (2) load settings, (3) if the `Users` table has no administrator, serve setup only (D-02), (4) connect MariaDB, migrate, (5) serve application. A failure at any step leaves the previous state usable and logs a structured error; it never auto-recreates a database (SR-01).
 
 Migration content rules: add columns as `NULL` or with defaults; backfill in a separate migration; never rename a column in place without a compatibility view; keep `Items` DDL in the loader repository, not the application (SR-13).
+
+Migration naming rule: the recorded version is the embedded file name minus `.sql`, so one file maps to exactly one `schema_migrations` row and a name longer than 32 characters cannot be recorded. `migrate.go` enforces this with `schemaMigrationsVersionMaxLen` **before executing any statement**, and `TestMigrationManifest` fails the build for an over-long name. The rule exists because MariaDB DDL is not transactional: a file whose statements succeed and whose bookkeeping insert fails leaves partial schema behind while the version stays unapplied, so every later start re-runs it and fails on the first already-applied object. That is exactly what happened on 2026-11-25 with the 40-character `0007` name — `1406 Data too long for column 'Version'` followed by `1060 Duplicate column name` — and recovery is to revert the partial objects (FK → index → column) and let the runner re-apply the file; hand-writing the version row is not a repair, because the version is recomputed from the file name on every start.
 
 ---
 

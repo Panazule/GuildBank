@@ -29,6 +29,10 @@ type Options struct {
 	Version string
 }
 
+// consolidationReadyTimeout bounds how long the owner-run consolidation command
+// waits for the guild store to become ready before failing.
+const consolidationReadyTimeout = 60 * time.Second
+
 // Run starts the service and blocks until ctx is cancelled or the listener
 // fails. Shutdown is bounded to ten seconds (IP §7.3 step 6).
 func Run(ctx context.Context, opts Options) error {
@@ -59,85 +63,74 @@ func Run(ctx context.Context, opts Options) error {
 	logger.Info("sqlite schema ready", "user_version", version, "path", cfg.SQLitePath)
 
 	var guildStore *mariadb.Store
-	var guildErr error
 	if cfg.MariaDB.Configured() {
-		guildStore, guildErr = mariadb.Open(ctx, mariadb.Config{
+		store, err := mariadb.OpenPool(ctx, mariadb.Config{
 			Host:     cfg.MariaDB.Host,
 			Port:     cfg.MariaDB.Port,
 			Database: cfg.MariaDB.Database,
 			Username: cfg.MariaDB.Username,
 			Password: cfg.MariaDB.Password,
 		})
-		if guildErr != nil {
-			// Keep serving and report the failure through /readyz. The pool is
-			// not hot-swappable in Phase 3 (PD-18).
-			logger.Warn("guild store unreachable; continuing in degraded mode",
-				"target", cfg.MariaDB.Redacted(), "error", guildErr)
-		} else {
-			if version, err := guildStore.Migrate(ctx); err != nil {
-				return fmt.Errorf("app: migrate guild store: %w", err)
-			} else {
-				logger.Info("guild store schema ready", "schema_version", version)
-			}
-			if n, err := guildStore.RecoverInterrupted(ctx); err != nil {
-				logger.Warn("import recovery failed", "error", err)
-			} else if n > 0 {
-				logger.Warn("failed interrupted import batches", "count", n)
-			}
-			logger.Info("location backfill starting")
-			backfilled, err := guildStore.BackfillInventoryLocations(ctx, 500)
-			if err != nil {
-				return fmt.Errorf("app: backfill inventory locations: %w", err)
-			}
-			logger.Info("location backfill complete", "rows", backfilled)
-			// DEFECT-01: repair spell rows that resolved metadata before the
-			// commit path persisted the decoded class/race strings.
-			spellsRepaired, err := guildStore.BackfillSpellMetadata(ctx, 500)
-			if err != nil {
-				return fmt.Errorf("app: backfill spell metadata: %w", err)
-			}
-			if spellsRepaired > 0 {
-				logger.Info("spell metadata backfill complete", "rows", spellsRepaired)
-			}
-			defer func() {
-				if cerr := guildStore.Close(); cerr != nil {
-					logger.Warn("mariadb close failed", "error", cerr)
-				}
-			}()
-			// QTY-09 Option C: an owner-run, dry-run-first maintenance pass
-			// consolidates legacy expanded item rows. It never runs implicitly
-			// and leaves the process after reporting its summary.
-			if cfg.ConsolidateItems {
-				logger.Info("item consolidation starting", "dry_run", cfg.ConsolidateDryRun,
-					"actor", cfg.ConsolidateActor)
-				consolidated, err := guildStore.ConsolidateItemStacks(ctx, 100,
-					cfg.ConsolidateDryRun, domain.Actor{UserName: cfg.ConsolidateActor})
-				if err != nil {
-					return fmt.Errorf("app: consolidate item stacks: %w", err)
-				}
-				logger.Info("item consolidation complete",
-					"dry_run", consolidated.DryRun, "groups", consolidated.Groups,
-					"absorbed_rows", consolidated.AbsorbedRows,
-					"units_in_groups", consolidated.UnitsInGroups,
-					"units_absorbed", consolidated.UnitsAbsorbed,
-					"units_remaining", consolidated.UnitsRemaining)
-				return nil
-			}
+		if err != nil {
+			return fmt.Errorf("app: open guild store: %w", err)
 		}
+		guildStore = store
+		defer func() {
+			if cerr := guildStore.Close(); cerr != nil {
+				logger.Warn("mariadb close failed", "error", cerr)
+			}
+		}()
 	}
 
-	if cfg.ConsolidateItems && guildStore == nil {
-		return errors.New("app: -consolidate-items requires an available MariaDB guild store")
+	// The supervisor owns connectivity, schema initialization and readiness:
+	// connectivity failures retry with bounded backoff (so a database that
+	// starts late is waited for), readiness is published only after a
+	// successful Initialize, and migration failures return a fatal error here
+	// after the configured attempts.
+	var supervisorErr <-chan error
+	if guildStore != nil {
+		outcome := make(chan error, 1)
+		go func() { outcome <- guildStore.Run(ctx, logger, cfg.MariaDB.InitAttempts) }()
+		supervisorErr = outcome
+	}
+
+	// QTY-09 Option C: an owner-run, dry-run-first maintenance pass
+	// consolidates legacy expanded item rows. It never runs implicitly and
+	// leaves the process after reporting its summary.
+	if cfg.ConsolidateItems {
+		if guildStore == nil {
+			return errors.New("app: -consolidate-items requires an available MariaDB guild store")
+		}
+		waitCtx, cancel := context.WithTimeout(ctx, consolidationReadyTimeout)
+		err := guildStore.WaitReady(waitCtx)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("app: -consolidate-items requires an available MariaDB guild store: %w", err)
+		}
+		logger.Info("item consolidation starting", "dry_run", cfg.ConsolidateDryRun,
+			"actor", cfg.ConsolidateActor)
+		consolidated, err := guildStore.ConsolidateItemStacks(ctx, 100,
+			cfg.ConsolidateDryRun, domain.Actor{UserName: cfg.ConsolidateActor})
+		if err != nil {
+			return fmt.Errorf("app: consolidate item stacks: %w", err)
+		}
+		logger.Info("item consolidation complete",
+			"dry_run", consolidated.DryRun, "groups", consolidated.Groups,
+			"absorbed_rows", consolidated.AbsorbedRows,
+			"units_in_groups", consolidated.UnitsInGroups,
+			"units_absorbed", consolidated.UnitsAbsorbed,
+			"units_remaining", consolidated.UnitsRemaining)
+		return nil
 	}
 
 	healthDeps := service.HealthDeps{
 		SQLite:            appStore,
 		Setup:             appStore,
 		MariaDBConfigured: cfg.MariaDB.Configured(),
-		MariaDBErr:        guildErr,
 	}
 	if guildStore != nil {
 		healthDeps.MariaDB = guildStore
+		healthDeps.MariaDBStatus = guildStore
 	}
 	health := service.NewHealthService(healthDeps)
 
@@ -228,12 +221,20 @@ func Run(ctx context.Context, opts Options) error {
 		serveErr <- err
 	}()
 
+	var supervisorFailure error
 	select {
 	case err := <-serveErr:
 		if err != nil {
 			return fmt.Errorf("app: http server: %w", err)
 		}
 		return nil
+	case err := <-supervisorErr:
+		if err != nil {
+			// A migration or schema failure is fatal; shut the server down
+			// cleanly and exit non-zero.
+			supervisorFailure = err
+			logger.Error("guild store supervisor failed; shutting down", "error", err)
+		}
 	case <-ctx.Done():
 		logger.Info("shutdown requested")
 	}
@@ -246,6 +247,9 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	if err := <-serveErr; err != nil {
 		return fmt.Errorf("app: http server: %w", err)
+	}
+	if supervisorFailure != nil {
+		return fmt.Errorf("app: guild store: %w", supervisorFailure)
 	}
 	logger.Info("application stopped")
 	return nil

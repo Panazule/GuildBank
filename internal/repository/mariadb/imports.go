@@ -26,9 +26,6 @@ const importBatchColumns = `ImportBatchID, FileName, FileSha256, SourceRowCount,
 	AcceptedRowCount, IgnoredRowCount, Status, FailureReason, ImportedBy,
 	ImportedByUserID, ImportedAt`
 
-// Ready reports whether the import repository has an open pool.
-func (s *Store) Ready() bool { return s != nil && s.db != nil }
-
 // CreateBatch inserts a Processing batch and returns its generated ID.
 func (s *Store) CreateBatch(ctx context.Context, batch domain.ImportBatch) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `INSERT INTO ImportBatch

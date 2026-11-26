@@ -25,6 +25,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.MariaDB.Configured() {
 		t.Fatalf("MariaDB must be unconfigured by default")
 	}
+	if cfg.MariaDB.InitAttempts != DefaultMariaDBInitAttempts {
+		t.Fatalf("InitAttempts = %d, want %d", cfg.MariaDB.InitAttempts, DefaultMariaDBInitAttempts)
+	}
 }
 
 func TestLoadPrecedenceFlagsOverEnv(t *testing.T) {
@@ -44,16 +47,17 @@ func TestLoadPrecedenceFlagsOverEnv(t *testing.T) {
 
 func TestLoadEnvironment(t *testing.T) {
 	env := envFrom(map[string]string{
-		"GUILDBANK_PORT":             "8081",
-		"GUILDBANK_SQLITE_PATH":      "/config/test.db",
-		"GUILDBANK_LOG_FORMAT":       "text",
-		"GUILDBANK_TRUSTED_PROXIES":  "10.0.0.0/8, 192.168.1.5",
-		"GUILDBANK_SECURE_COOKIES":   "true",
-		"GUILDBANK_MARIADB_HOST":     "db.internal",
-		"GUILDBANK_MARIADB_PORT":     "3307",
-		"GUILDBANK_MARIADB_DATABASE": "GuildBank",
-		"GUILDBANK_MARIADB_USERNAME": "guildbank",
-		"GUILDBANK_MARIADB_PASSWORD": "s3cret",
+		"GUILDBANK_PORT":                  "8081",
+		"GUILDBANK_SQLITE_PATH":           "/config/test.db",
+		"GUILDBANK_LOG_FORMAT":            "text",
+		"GUILDBANK_TRUSTED_PROXIES":       "10.0.0.0/8, 192.168.1.5",
+		"GUILDBANK_SECURE_COOKIES":        "true",
+		"GUILDBANK_MARIADB_HOST":          "db.internal",
+		"GUILDBANK_MARIADB_PORT":          "3307",
+		"GUILDBANK_MARIADB_DATABASE":      "GuildBank",
+		"GUILDBANK_MARIADB_USERNAME":      "guildbank",
+		"GUILDBANK_MARIADB_PASSWORD":      "s3cret",
+		"GUILDBANK_MARIADB_INIT_ATTEMPTS": "5",
 	})
 	cfg, err := Load(nil, env)
 	if err != nil {
@@ -70,6 +74,9 @@ func TestLoadEnvironment(t *testing.T) {
 	}
 	if !cfg.MariaDB.Configured() || cfg.MariaDB.Port != 3307 {
 		t.Fatalf("mariadb env not applied: %+v", cfg.MariaDB)
+	}
+	if cfg.MariaDB.InitAttempts != 5 {
+		t.Fatalf("GUILDBANK_MARIADB_INIT_ATTEMPTS was not applied: %+v", cfg.MariaDB)
 	}
 	if strings.Contains(cfg.MariaDB.Redacted(), "s3cret") {
 		t.Fatalf("Redacted leaked the password: %s", cfg.MariaDB.Redacted())
@@ -92,6 +99,8 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"bad secure cookies", nil, map[string]string{"GUILDBANK_SECURE_COOKIES": "sometimes"}, "not a boolean"},
 		{"mariadb without user", nil, map[string]string{"GUILDBANK_MARIADB_HOST": "db"}, "username"},
 		{"mariadb bad port", nil, map[string]string{"GUILDBANK_MARIADB_HOST": "db", "GUILDBANK_MARIADB_PORT": "70000", "GUILDBANK_MARIADB_USERNAME": "u"}, "MariaDB port"},
+		{"mariadb bad init attempts", nil, map[string]string{"GUILDBANK_MARIADB_HOST": "db", "GUILDBANK_MARIADB_USERNAME": "u", "GUILDBANK_MARIADB_INIT_ATTEMPTS": "0"}, "init attempts"},
+		{"mariadb init attempts not integer", nil, map[string]string{"GUILDBANK_MARIADB_INIT_ATTEMPTS": "many"}, "not an integer"},
 		{"positional args", []string{"serve"}, nil, "unexpected arguments"},
 	}
 	for _, tc := range tests {

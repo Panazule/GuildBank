@@ -17,6 +17,13 @@ type Pinger interface {
 	PingContext(ctx context.Context) error
 }
 
+// StatusProbe reports a store's current availability. It is implemented by the
+// MariaDB store supervisor, which publishes readiness only after a successful
+// initialization and withdraws it when the connection is lost.
+type StatusProbe interface {
+	Status() (ready bool, lastErr error)
+}
+
 // SetupProbe reports the D-02 setup state from the application store.
 type SetupProbe interface {
 	SetupStatus(ctx context.Context) (domain.SetupState, error)
@@ -42,7 +49,7 @@ type HealthService struct {
 	setup           SetupProbe
 	mariadb         Pinger
 	mariaConfigured bool
-	mariadbErr      error
+	mariadbStatus   StatusProbe
 	now             func() time.Time
 }
 
@@ -52,9 +59,10 @@ type HealthDeps struct {
 	Setup             SetupProbe
 	MariaDB           Pinger
 	MariaDBConfigured bool
-	// MariaDBErr records a connection failure at startup; it is reported
-	// until the process is restarted (no hot-swap in Phase 3).
-	MariaDBErr error
+	// MariaDBStatus reports the supervisor's current state. Readiness reflects
+	// that state on every probe, so a database that becomes available later is
+	// reported healthy without a process restart.
+	MariaDBStatus StatusProbe
 }
 
 // NewHealthService builds the readiness service.
@@ -64,7 +72,7 @@ func NewHealthService(deps HealthDeps) *HealthService {
 		setup:           deps.Setup,
 		mariadb:         deps.MariaDB,
 		mariaConfigured: deps.MariaDBConfigured,
-		mariadbErr:      deps.MariaDBErr,
+		mariadbStatus:   deps.MariaDBStatus,
 		now:             time.Now,
 	}
 }
@@ -123,8 +131,15 @@ func (h *HealthService) checkMariaDB(ctx context.Context) Check {
 	if !h.mariaConfigured {
 		return Check{Name: "mariadb", Status: "not_configured", Reason: "GuildBank store is not configured"}
 	}
-	if h.mariadbErr != nil {
-		return Check{Name: "mariadb", Status: "error", Reason: shortReason(h.mariadbErr)}
+	// The supervisor's state is authoritative: it is published only after a
+	// successful initialization and is withdrawn when the connection is lost.
+	if h.mariadbStatus != nil {
+		if ready, lastErr := h.mariadbStatus.Status(); !ready {
+			if lastErr == nil {
+				return Check{Name: "mariadb", Status: "initializing", Reason: "guild store initialization in progress"}
+			}
+			return Check{Name: "mariadb", Status: "error", Reason: shortReason(lastErr)}
+		}
 	}
 	if h.mariadb == nil {
 		return Check{Name: "mariadb", Status: "error", Reason: "store not initialized"}

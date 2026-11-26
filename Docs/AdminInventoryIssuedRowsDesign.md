@@ -1,13 +1,22 @@
 # Admin Inventory: Movement-Derived Issued Rows (Design)
 
-**Status:** Design proposal. No code, schema, or data changes are included in this document.
-**Supersedes:** the visibility model described in `PartialIssuanceImplementationPlan.md` section 13.4.
+**Status:** **Delivered (2026-11-25) and owner-approved.** The behavioural specification
+below is unchanged by the delivery; section 15 records the as-built implementation, the
+places where the code differs from this text, and the migration incident recovered during
+deployment.
+**Supersedes:** the lot-status `Issued` visibility model (PD5-17 in
+`Phase5ImplementationPlan.md`, E-1 in `ProjectStatus.md` §6.10) for the Admin Inventory
+page. `PartialIssuanceImplementationPlan.md` remains the ledger, issue and return baseline
+and its arithmetic is unchanged by this design.
 **Scope:** Admin Inventory page only. Public inventory, imports, and totals are unchanged.
 **Revision 2:** rewritten around the owner's confirmed requirement that **every** issue,
 including a partial issue, is a discrete, returnable `Issued` row. Legacy lots are no
 longer a design constraint (see section 8).
 **Revision 3:** all six owner decisions approved; see section 14. The design is now
 frozen for implementation.
+**Revision 4 (2026-11-25):** implementation reviewed and approved; the owner re-confirmed
+D1–D6. Sections 3.2, 5.1 and 7.4 gained as-built annotations, section 11 gained the
+backfill status and the deployment incident, and section 15 records the delivery.
 
 ## Normative requirement
 
@@ -170,21 +179,34 @@ recipient from the same lot would merge into one row, violating the owner's
 closes. `RelatedItemID` keeps its current meaning (the lot row) and is not
 reused. This is the only schema change in the design.
 
-### 3.2 Design-level schema sketch (not to be applied)
+### 3.2 Schema as applied (`0007_movement_related_movement`)
+
+This is the schema that shipped on 2026-11-25, with one structural difference from the
+earlier sketch: the file issues **three separate `ALTER TABLE` statements**, because the
+runner splits a file on `;` and executes each statement independently, and a MariaDB DDL
+statement cannot be rolled back with its neighbours.
 
 ```sql
--- 0007_movement_related_movement.sql (design sketch)
+-- 0007_movement_related_movement.sql (applied 2026-11-25)
 ALTER TABLE InventoryMovement
-    ADD COLUMN RelatedMovementID BIGINT UNSIGNED NULL AFTER RelatedItemID,
-    ADD KEY ix_movement_related_movement (RelatedMovementID),
+    ADD COLUMN RelatedMovementID BIGINT UNSIGNED NULL AFTER RelatedItemID;
+
+ALTER TABLE InventoryMovement
+    ADD KEY ix_movement_related_movement (RelatedMovementID);
+
+ALTER TABLE InventoryMovement
     ADD CONSTRAINT fk_movement_related_movement
         FOREIGN KEY (RelatedMovementID) REFERENCES InventoryMovement (MovementID)
         ON UPDATE RESTRICT ON DELETE RESTRICT;
 ```
 
-- Nullable: existing rows keep `NULL`; no backfill.
+- Nullable: existing rows keep `NULL`; the migration itself backfills nothing.
 - Self-referencing FK: a `RETURN` may only point at an existing movement.
 - No new table, no column on `GuildBankItems`, no change to `GivenTo`.
+- **The file name is part of the contract.** The runner derives the version from the file
+  name and `schema_migrations.Version` is `VARCHAR(32)`, so the name must be 32
+  characters or fewer. The original 40-character name applied its DDL and then failed to
+  record itself; see section 11.3.
 
 ### 3.3 How an issued row maps back to its lot
 
@@ -247,9 +269,10 @@ row itself is never mutated; the ledger stays append-only.
 
 ### 5.1 Where the projection lives
 
-Add one repository method to the admin store interface (design name:
-`ListIssuedRows`) and dispatch on `filter.Status` inside the existing admin list
-entry point, so the HTTP layer and templates keep one page model:
+Dispatch on `filter.Status` inside the existing admin list entry point, so the HTTP layer
+and templates keep one page model. (As built, the projection is `mariadb.Store.ListIssuedRows`,
+exported for tests, but the `AdminStore` read interface was **not** widened;
+`ListAdminInventory` dispatches internally.)
 
 ```text
 ListAdminInventory(ctx, filter)
@@ -582,6 +605,16 @@ The JSON API contract is unchanged (decision D3). The existing
 `movementId` field in this delivery. If a later change adds one, it must be
 validated against the same outstanding rule.
 
+**As built:** the *shape* of `adminItemResponse` is unchanged, but because one
+`ListAdminInventory` dispatch serves both HTML and JSON, the admin list response for
+`status=issued` and `status=all` now contains movement-derived rows. For such a row `id`
+is the lot id (`GuildBankItemID`), `quantity` is the outstanding quantity, `givenTo` is
+the movement's recipient, and no movement identifier is exposed. Two consequences are
+deliberate and must be preserved: a movement-derived row reports `deleted: false` even
+when a whole-stack issue soft-deleted its lot (the projection emits `0 AS DeletedFg`), and
+`status=issued` now returns only movement-derived rows, so a pre-ledger issued lot with no
+`ISSUE` movement is no longer returned by that filter (section 8).
+
 ## 8. Legacy lots are not a design constraint
 
 The owner's direction is explicit: do not optimize the design around legacy lots.
@@ -640,8 +673,9 @@ rows exclusively.
 
 ## 11. Migration and rollback
 
-- **Migration:** additive `0007` only (nullable column, index, self-FK). No row
-  counts change, no change to `GuildBankItems`, and no movement is fabricated.
+- **Migration:** additive `0007_movement_related_movement` only (nullable column, index,
+  self-FK). No row counts change, no change to `GuildBankItems`, and no movement is
+  fabricated.
 - **Attribution backfill (one-time, idempotent).** Existing `RETURN` rows have
   `RelatedMovementID = NULL`, so the projection would overstate outstanding on
   their `ISSUE` movements. The release therefore runs a reconciliation that
@@ -661,6 +695,48 @@ rows exclusively.
   already returned. Returns written by the old code during the window are picked
   up by the same backfill; returns written after deployment set the column
   directly.
+
+### 11.1 Attribution backfill status (open)
+
+The FIFO reconciliation above is documented and repeatable but has **not** been run
+against the development guild store; it is an operator step over live data. At
+implementation review that store held 15 `ISSUE` and 7 `RETURN` movements: the 2 returns
+created through the new code carry `RelatedMovementID`, and the 5 pre-deployment returns
+totalling 19 units (lot 891 ×2, lot 970 ×1 of 15 units, lot 1041 ×2) are still `NULL`.
+Until the backfill runs, those returns do not reduce their issuances' outstanding
+quantity, so `Issued` overstates outstanding for those lots. Running it and re-running the
+suite is an open item (section 15.4).
+
+### 11.2 Migration application notes
+
+- The applied file is `0007_movement_related_movement.sql` (30 characters). Its three
+  statements execute in order and each auto-commits.
+- MariaDB DDL is not transactional, so a failure after the first statement leaves partial
+  schema behind while no version row exists. The runner therefore validates the version
+  length **before** executing anything (`schemaMigrationsVersionMaxLen` in `migrate.go`),
+  and `TestMigrationManifest` rejects any embedded migration whose version exceeds 32
+  characters, so the failure cannot recur silently.
+- If a partially applied migration is ever found, inspect the three objects, revert only
+  what exists in dependency order (foreign key → index → column), and let the runner
+  re-apply the file.
+
+### 11.3 Deployment incident and recovery (2026-11-25)
+
+The first deployment used the 40-character name
+`0007_inventory_movement_related_movement.sql`. All three `ALTER TABLE` statements
+committed, then `INSERT INTO schema_migrations (Version, …)` failed with
+`Error 1406 (22001): Data too long for column 'Version'`. With no version row written, the
+next startup re-ran the file and failed with
+`Error 1060 (42S21): Duplicate column name 'RelatedMovementID'`, looping the container.
+
+Recovery, executed with the app stopped: confirm the partial state, verify
+`SELECT COUNT(*) FROM InventoryMovement WHERE RelatedMovementID IS NOT NULL` is `0`
+(it was), drop the foreign key, then the index, then the column, rename the file to
+`0007_movement_related_movement.sql`, and restart so the runner applies and records the
+migration itself. Writing the `schema_migrations` row by hand was rejected: the version is
+derived from the file name on every run, so a hand-written row would not match and the
+file would re-run and fail again. The full procedure, the inspection queries and the
+evidence are in `AdminInventoryIssuedRowsImplementationPlan.md` section 5.
 
 ## 12. Acceptance criteria
 
@@ -709,8 +785,14 @@ rows exclusively.
 
 ## 14. Decisions (approved by the owner)
 
-All six questions are closed. The identifiers `D1`–`D6` are referenced from the
-sections above and from the implementation plan.
+All six questions are closed and were re-confirmed by the owner at implementation review
+on 2026-11-25, when the delivered behaviour was accepted: returned units go back to the
+same active lot (Q1/D1), fully returned issuances are hidden while their history remains in
+`Movements` (Q2/D2), the JSON API is unchanged for this delivery (Q3/D3), the `id` filter
+matches both lot and movement ids (Q4/D4), no additional column is required (Q5/D5), and a
+return against an administratively removed lot creates a new active lot (Q6/D6). The
+identifiers `D1`–`D6` are referenced from the sections above and from the implementation
+plan.
 
 | ID | Decision | Consequence in this design |
 | --- | --- | --- |
@@ -725,4 +807,47 @@ sections above and from the implementation plan.
 
 The build sequence, file-level change list, and verification steps are in
 `Docs/AdminInventoryIssuedRowsImplementationPlan.md`. This document remains the
-behavioural specification; the plan document is the execution checklist.
+behavioural specification; the plan document is the execution record.
+
+## 15. Implementation record (delivered 2026-11-25)
+
+### 15.1 Delivered artefacts
+
+| Area | Artefact |
+| --- | --- |
+| Schema | `internal/repository/mariadb/migrations/0007_movement_related_movement.sql` |
+| Migration gate | `migration_files_test.go` (byte manifest, `NNNN_name` shape, version-length limit) and the `migrate.go` pre-flight length guard |
+| Domain | `InventoryMovement.RelatedMovementID` (+ validation), `ReturnIssuanceInput`, issued-row fields on `AdminInventoryItem` |
+| Repository | movement projection/insert/scan, `GetMovementOutstanding`, `LockMovementOutstanding`, `EarliestOutstandingIssue`, `ListIssuedRows`, the `All` union and lot-row suppression |
+| Service | `ReturnIssuance` (movement-targeted), `IssuanceForReturn`, FIFO attribution on the lot-level return |
+| API/UI | `GET\|POST /admin/inventory/movements/:movementID/return`; view fields `RowKey`, `MovementID`, `MovementBacked`, `IssuedQuantity`, `IssuedAtISO`/`IssuedAtText`, `IssuedBy`, `ReturnURL`; template action branch and movement-row bulk-selection suppression |
+| Tests | `admin_issued_test.go` (repository), `admin_issuance_return_test.go` (service), `admin_issuance_return_test.go` and `admin_issued_filter_test.go` (API) |
+
+### 15.2 As-built differences from this design
+
+| This document | As built | Why |
+| --- | --- | --- |
+| 3.2: one `ALTER TABLE` with three clauses | three separate `ALTER TABLE` statements | the runner splits on `;`; one statement per DDL keeps the failure mode legible |
+| 5.1: "add one repository method to the admin store interface" | read interface unchanged; `ListAdminInventory` dispatches on `Status`, `ListIssuedRows` exported on `mariadb.Store` for tests | no change to the service boundary, its fakes or its tests |
+| 3.2 sketch name `0007_inventory_movement_related_movement` | `0007_movement_related_movement` (30 characters) | the version is the file name and `schema_migrations.Version` is `VARCHAR(32)`; see 11.3 |
+| 7.4: "JSON API unchanged" | response shape unchanged; `status=issued` and `status=all` content is movement-derived | the HTML and JSON lists share one dispatch point |
+
+### 15.3 Verification
+
+- `gofmt -l .` reports nothing; `go build ./...`, `go vet ./...` and
+  `go test -count=1 ./...` pass for every package.
+- `TestMigrationManifest` pins the `0007` bytes, the `NNNN_name` shape and the 32-character
+  version limit.
+- Live development deployment: `schema_migrations` records
+  `0007_movement_related_movement`; `RelatedMovementID`, `ix_movement_related_movement` and
+  `fk_movement_related_movement` exist; the app logs
+  `guild store schema ready … schema_version=0007_movement_related_movement` and answers
+  `/healthz` with `200`.
+- Automated coverage follows section 13. The manual pass of the eleven acceptance criteria
+  in section 12 against a seeded 5-unit lot has **not** been recorded and remains open.
+
+### 15.4 Open items
+
+1. Run the one-time FIFO attribution backfill (11.1) against a store that already holds
+   returns, then re-run the full suite.
+2. Execute and record the manual acceptance pass (section 12).

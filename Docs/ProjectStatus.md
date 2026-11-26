@@ -853,6 +853,61 @@ The issued row's `Quantity` remains the original lot quantity and is **not** a r
 
 Evidence: `internal/domain/inventory_admin.go`, `internal/service/admin_inventory.go`, `internal/repository/mariadb/admin_inventory.go`, `internal/api/{admin_pages,admin_navigation,admin_movement_pages,views}.go`, `internal/web/templates/{admin_inventory,admin_inventory_detail,admin_inventory_history}.html`, `internal/web/static/app.css`; new tests `internal/api/admin_issued_filter_test.go` and `internal/repository/mariadb/admin_inventory_test.go`; `gofmt`, `go build ./...`, `go vet ./...` and `go test ./...` clean.
 
+**Superseded in part (2026-11-25):** §6.11 replaces the lot-derived `Issued` rows with movement-derived rows. An issued row now shows the outstanding quantity for its issuance, so the statement above that no issued-quantity or outstanding value is displayed no longer applies, and D6 (return against an administratively removed lot) is delivered. The D1–D5 contract of this section otherwise stands.
+
+### 6.11 Movement-derived issued rows (delivered 2026-11-25)
+
+The owner approved the design (`AdminInventoryIssuedRowsDesign.md`) and accepted the delivered behaviour at implementation review on 2026-11-25, re-confirming the six decisions: returned units rejoin the same active lot (Q1/D1), a fully returned issuance leaves `Issued` while its `RETURN` stays in `Movements` (Q2/D2), the JSON API is unchanged for this delivery (Q3/D3), the `id` filter matches both lot and movement ids (Q4/D4), no additional column is required on the table (Q5/D5), and a return against an administratively removed lot creates a new active lot (Q6/D6).
+
+The original requirement is met: partial issues are visible, full issues are visible, every outstanding issuance appears in the Admin Inventory experience, each outstanding issuance can be returned directly, inventory arithmetic is unchanged, and Issue / Return / Remove / Restore behaviour is intact.
+
+| Area | Delivered |
+|---|---|
+| Schema | `0007_movement_related_movement.sql`: nullable `InventoryMovement.RelatedMovementID`, `ix_movement_related_movement`, self-FK `fk_movement_related_movement` |
+| `Issued` projection | movement-only: `Quantity − SUM(attributed RETURN.Quantity) > 0`; a fully returned row is hidden |
+| `All` projection | `UNION ALL` of lot rows and issued rows, suppressing a whole-stack lot row that an `ISSUE` movement represents |
+| Row identity | `RowKey` = `l:<LotID>` or `m:<MovementID>`; movement rows carry `MovementID`, outstanding `IssuedQuantity`, `IssuedAt` and `IssuedBy` |
+| Return by movement | `GET\|POST /admin/inventory/movements/:movementID/return` with CSRF, idempotency key, optimistic `ModAt` and over-return `422` |
+| Lot-level return | attributes the `RETURN` FIFO to the earliest outstanding `ISSUE` |
+| JSON | `adminItemResponse` unchanged; `status=issued` and `status=all` content is movement-derived (design §7.4) |
+| On-hand totals | unchanged; movement quantities never enter the total |
+
+Deviations from the design text are recorded in `AdminInventoryIssuedRowsDesign.md` §15.2: three separate `ALTER TABLE` statements, the admin read interface left unwidened with the dispatch inside `ListAdminInventory`, and the shortened migration file name.
+
+Open items: the one-time FIFO attribution backfill has **not** been executed — 5 pre-deployment `RETURN` rows totalling 19 units (lots 891 ×2, 970 ×1 of 15 units, 1041 ×2) are still `NULL`, so `Issued` overstates outstanding for those lots — and the manual eleven-criterion acceptance pass has not been recorded. Both are tracked in the design §15.4. The migration incident and its recovery are recorded in §6.11.1.
+
+Evidence: the migration and manifest above; `internal/domain/{movement,inventory_admin}.go`; `internal/repository/mariadb/{movement,admin_inventory}.go`; `internal/service/{admin_inventory,admin_movement}.go`; `internal/api/{router,views,admin_pages,admin_movement_pages}.go`; `internal/web/templates/{admin_inventory,admin_inventory_detail,admin_inventory_return}.html`; new tests `internal/repository/mariadb/admin_issued_test.go`, `internal/service/admin_issuance_return_test.go` and `internal/api/{admin_issuance_return,admin_issued_filter}_test.go`; live Compose restart logged `schema_version=0007_movement_related_movement` with `/healthz` `200`; `gofmt`/`go vet`/`go test -count=1 ./...` clean.
+
+#### 6.11.1 Migration incident and recovery (2026-11-25)
+
+The migration version is the file name without `.sql`, recorded in `schema_migrations.Version VARCHAR(32)`. The first `0007` name was 40 characters, so its three `ALTER TABLE` statements committed while the version `INSERT` failed with `1406 Data too long for column 'Version'`; the next start re-ran the file and failed with `1060 Duplicate column name 'RelatedMovementID'`.
+
+Recovery, with the app stopped and after confirming `0` non-NULL values: drop `fk_movement_related_movement`, then `ix_movement_related_movement`, then the `RelatedMovementID` column; rename the file to `0007_movement_related_movement.sql`; rebuild so the runner applies and records the migration. Hand-writing the version row cannot work because the version is recomputed from the file name on every start, and widening `Version` was rejected because it contradicts `DatabaseDesign.md` §8 and is not retrofitted by `CREATE TABLE IF NOT EXISTS`.
+
+Guardrails: `migrate.go` now rejects an over-long version before executing any statement (`schemaMigrationsVersionMaxLen`), and `TestMigrationManifest` fails the build when any embedded migration name exceeds 32 characters. Exact SQL, inspection queries and evidence are in `AdminInventoryIssuedRowsImplementationPlan.md` §5.
+
+### 6.12 Guild-store startup order and automatic reconnect (2026-11-25)
+
+The owner decided that **connectivity failures recover automatically while migration failures remain fatal**, with `/healthz` kept as the liveness probe and `/readyz` as the operational readiness signal. This section records that change.
+
+Root cause of the old "503 until the container is restarted" behaviour: `mariadb.Open` pinged once and, on failure, **closed the pool and returned `nil`**. Every guild service was then built against a `nil` store, `Ready()` was a pointer check, and the readiness service cached the startup error, so a MariaDB that started later could never be adopted and nothing retried. (A live pool already reconnected on its own; only the startup path was broken.)
+
+| Area | Delivered |
+|---|---|
+| Pool | `mariadb.OpenPool` builds the bounded pool without dialing and keeps it for the process lifetime; `Open` keeps its eager ping for the setup wizard and integration tests |
+| Supervisor | `Store.Run` (`internal/repository/mariadb/supervisor.go`) retries connectivity with bounded backoff (1s → 2s → 4s → 8s → 15s → 30s cap), then initializes |
+| Initialization | `Store.Initialize` runs `Migrate`, `RecoverInterrupted` and both backfills; it is idempotent and **re-runs after every reconnect** before readiness is republished |
+| Readiness | published only after a successful `Initialize`; withdrawn when the 5s keepalive probe fails (2s timeout) |
+| Migration / schema failures | logged at ERROR, surfaced through `/readyz`, retried `MariaDB.InitAttempts` times (default 3) and then **fatal** — the process exits non-zero |
+| Config | `-mariadb-init-attempts` / `GUILDBANK_MARIADB_INIT_ATTEMPTS` (default 3, valid 1–100) |
+| `/readyz` | reports `initializing`, `error` with the live reason, or `ok`; a startup failure is no longer cached |
+| Services | keep one stable store reference; `Ready()` reads the supervisor's published state (no per-request ping) |
+| `-consolidate-items` | waits up to 60s for readiness instead of failing immediately |
+
+Not changed: PD-18 (Settings-backed hot-swap), the schema, issue/return arithmetic, on-hand totals and the 503 wording.
+
+Validation (live Compose, 2026-11-26): with MariaDB stopped the app started and served `/healthz` 200, `/readyz` 503 with a live reason (`dial tcp: lookup mariadb: i/o timeout`) and inventory 503; starting MariaDB then logged `guild store schema ready` → `guild store ready` and `/readyz` returned 200 **in the same process** (`RestartCount=0`), with one `unreachable; retrying` warning rather than a retry storm.
+
 ---
 
 ## 7. Next actions
@@ -962,7 +1017,9 @@ has been authorized; the owner review of the Phase 5 implementation is the gate.
 | 2.14 | 2026-11-24 | Owner-accepted **Track A** officer-usability improvements implemented (no Phase 6, ledger-integrity, aggregation, status-model, reporting or movement-rule change): a distinct presentation-only `Issued` status badge (`DeletedFg = true AND GivenTo <> ''`) wherever status renders; return-recipient prefill from `GivenTo` (editable); navigation-context preservation (`returnTo`) across Issue/Return/Remove/Restore/Bulk Remove with a single allowed destination and untrusted-value fallback; a state-driven movement-history action banner offering one canonical action; create-form label `Fallback name` → `Name` with metadata-precedence help text; and a non-blocking `name_metadata_mismatch` advisory when a typed name differs from the resolved metadata name (metadata name still stored). Explicitly excluded: issued status filter, return caps/remaining-returnable, EQUID reverse lookup, AJAX/HTMX lookup, item-centric cross-lot history and MOVE/ADJUST/MERGE. `gofmt -l`, `go build ./...`, `go vet ./...` and `go test ./...` clean. Recorded in §6.8 |
 | 2.15 | 2026-11-24 | Owner-approved **Enhancement B** implemented: the Admin Inventory list now offers a Restore action only for `DeletedFg = true AND GivenTo IS NULL AND ConsolidatedInto IS NULL` rows, with a new Remove-pattern confirmation page (`GET /admin/inventory/:id/restore`) that posts to the unchanged `POST /admin/inventory/:id/restore` handler. The existing restore service, validation, permissions, movement-writing and optimistic `ModAt` rules are unchanged; the GET page rejects active, issued and consolidated rows with `409`. Enhancement A (partial-issue visibility) was deferred to Phase 6. `gofmt`, `go build ./...`, `go vet ./...` and `go test ./...` clean. Recorded in §6.9 |
 | 2.16 | 2026-11-24 | Owner-approved actionable-state design implemented as Phases 0–3: `AdminStatusIssued` added to the status contract so Active/Issued/Removed/All are mutually exclusive (`removed` tightened to `DeletedFg=1 AND GivenTo` empty); `recipient`/`recipient_desc` admin sorts; lifecycle tabs on the filtered admin list; issued-row recipient and badge links to `/admin/inventory?status=issued&givenTo=…`; explicit Active+recipient empty-state hint; state-driven detail actions (Return for issued, Restore only for plain removals); and `returnTo` carried into movement history, its pager and its action banner. No issued-quantity, outstanding, return-cap or aggregation value is computed. D4 (recipient ledger view) and D6 (over-return work) remain deferred; Phase 4 was not started. `gofmt`, `go build ./...`, `go vet ./...` and `go test ./...` clean. Recorded in §6.10 |
-| 2.17 | 2026-11-24 | Owner-approved **movement-derived issued rows** (design `AdminInventoryIssuedRowsDesign.md` Revision 3, decisions D1–D6) implemented: additive migration `0007_movement_related_movement.sql` adds nullable `InventoryMovement.RelatedMovementID` with an index and a self-referencing FK; the `Issued` tab is projected from outstanding `ISSUE` movements (`Quantity − SUM(attributed RETURN.Quantity) > 0`) and `All` is the UNION of lot rows plus issued rows with whole-stack lot-row suppression; the new `GET|POST /admin/inventory/movements/:movementID/return` route returns one issuance and attributes the `RETURN` to the addressed movement, while the lot-level return attributes FIFO to the earliest outstanding issue; a return against an administratively removed lot lands the units in a new active lot (D6). The JSON API contract, on-hand totals and issue/return arithmetic are unchanged (D3); no issued-quantity column was added to the table (D5). `gofmt`, `go build ./...`, `go vet ./...` and `go test -count=1 ./...` clean. Recorded in `AdminInventoryIssuedRowsImplementationPlan.md` |
+| 2.17 | 2026-11-24 | Owner-approved **movement-derived issued rows** (design `AdminInventoryIssuedRowsDesign.md` Revisions 3–4, decisions D1–D6) implemented, reviewed and accepted on 2026-11-25: additive migration `0007_movement_related_movement.sql` adds nullable `InventoryMovement.RelatedMovementID` with an index and a self-referencing FK; the `Issued` tab is projected from outstanding `ISSUE` movements (`Quantity − SUM(attributed RETURN.Quantity) > 0`, so a fully returned issuance leaves the tab while its `RETURN` history stays in `Movements`) and `All` is the UNION of lot rows plus issued rows with whole-stack lot-row suppression; the new `GET|POST /admin/inventory/movements/:movementID/return` route returns one issuance and attributes the `RETURN` to the addressed movement, while the lot-level return attributes FIFO to the earliest outstanding issue; returned units rejoin the same active lot (D1) and a return against an administratively removed lot lands the units in a new active lot (D6). The `Issued` `id` filter matches both the lot id and the movement id (D4). The JSON response shape, on-hand totals and issue/return arithmetic are unchanged (D3); no issued-quantity column was added to the table (D5). `gofmt`, `go build ./...`, `go vet ./...` and `go test -count=1 ./...` clean. Recorded in §6.11 and `AdminInventoryIssuedRowsImplementationPlan.md` |
+| 2.18 | 2026-11-25 | Startup failure after 2.17 diagnosed and recovered. Root cause: the migration file name is the version recorded in `schema_migrations.Version VARCHAR(32)`, and `0007_inventory_movement_related_movement` is 40 characters, so the file's DDL applied and `INSERT INTO schema_migrations` failed with `1406 (22001) Data too long for column 'Version'`; with no version row, the next start re-ran the file and failed with `1060 (42S21) Duplicate column name 'RelatedMovementID'`. Recovery with the app stopped: inspected the tracking table and the three objects, confirmed `0` non-NULL `RelatedMovementID` values across 28 movement rows, dropped the self-FK, then the index, then the column, renamed the file to `0007_movement_related_movement.sql` (30 characters), and rebuilt so the runner applied and recorded it. Recording the version by hand was rejected (the version is derived from the file name, so the file would re-run and fail again) and widening the column was rejected (undocumented, and `CREATE TABLE IF NOT EXISTS` does not retrofit existing databases). Guardrails added: a pre-flight version-length check in `migrate.go` that fails before executing any statement, and a 32-character assertion in `TestMigrationManifest`. Live result: `schema_migrations` records `0007_movement_related_movement`, column/index/FK present, `/healthz` `200`. Recorded in §6.11.1 and `AdminInventoryIssuedRowsImplementationPlan.md` §5 |
+| 2.19 | 2026-11-25 | Guild-store startup-order recovery implemented per owner decision (connectivity recovers automatically, migrations stay fatal): `mariadb.OpenPool` keeps the bounded pool instead of discarding it on a failed ping; `Store.Run` supervises connectivity with bounded backoff (1s → 30s cap) and publishes readiness only after `Store.Initialize` (migrate + interrupted-import recovery + location/spell backfills, re-run after every reconnect); a failed keepalive probe (5s interval) withdraws readiness. Migration/schema failures log at ERROR, surface through `/readyz` and are fatal after `MariaDB.InitAttempts` attempts (`-mariadb-init-attempts`, `GUILDBANK_MARIADB_INIT_ATTEMPTS`, default 3). `HealthService` reports the supervisor's live state rather than a cached startup error, so `/readyz` turns green without a restart; services keep one stable store reference, and `-consolidate-items` waits up to 60s for readiness. `/healthz` remains the liveness probe. Live Compose validation: with MariaDB stopped the app started degraded (`/readyz` 503 with a live reason), then reached `guild store ready` and `/readyz` 200 in the same process (`RestartCount=0`) once MariaDB came up. `gofmt`, `go build ./...`, `go vet ./...` and `go test -count=1 ./...` clean. Recorded in §6.12 |
 
 
 
@@ -988,7 +1045,10 @@ The guild store now has embedded migrations for `ImportBatch`, `ImportList`,
 migration and the approved `0003_admin_inventory` migration that adds the
 derived location columns and the admin/audit indexes. Migration `0005` drops
 the old item quantity constraint, adds `ConsolidatedInto` and enables the
-one-row-per-line model. Phase 3 supports upload,
+one-row-per-line model; migration `0006` creates the append-only
+`InventoryMovement` ledger and `0007_movement_related_movement` adds the nullable
+self-referencing `RelatedMovementID` that attributes a `RETURN` to the `ISSUE` it
+closes. Phase 3 supports upload,
 durable parse failures, normalized staging, a selector derived from distinct
 `LocationGroup` values (with every `Hoard<n>` collapsed to `Hoard`), persisted
 selection, unit-aware summary, and an advisory-locked atomic commit that writes
@@ -1003,8 +1063,13 @@ filterable audit viewer with per-record history, the admin HTML/JSON
 routes under the existing admin group, the owner UI amendments and the
 owner-run item-stack consolidation command. Import and
 admin audit rows are written in the same transaction as the data change. The
-general audit outbox, user management and dashboard remain later phases; the
-item quantity model is the latest completed change.
+general audit outbox, user management and dashboard remain later phases;
+movement-derived issued rows on the Admin Inventory page (§6.11) are the latest
+completed change, and the one-time return-attribution backfill (design §11.1) is the
+one outstanding data step for it. The guild store now also survives a MariaDB
+startup race and a mid-life outage without a container restart (§6.12): the pool is
+retained, initialization is retried, readiness is published only after a successful
+initialize, and only migration failures remain fatal.
 
 A development copy of the item metadata is available as `GuildBank.items`
 (144,712 rows, read-only in use). The profile in DP-001 confirms both permanent

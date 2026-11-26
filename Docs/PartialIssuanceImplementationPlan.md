@@ -2,6 +2,7 @@
 
 **Status:** approved plan. Phases 1–5 are implemented: Phase 1 schema (`0006_inventory_movement.sql`, 2026-11-22), Phase 2 domain/repository, Phase 3 service layer, Phase 4 JSON API and Phase 5 officer UI (issue/return forms and per-record movement history, 2026-11-23). Phases 6 (audit taxonomy/public totals) and 7 (legacy `GivenTo` cleanup) are not started. This document remains the design baseline. Owner decisions OD-01 to OD-07 are recorded in section 12.
 **Revision (2026-11-23):** OD-01 was revised (Option A). Partial issue is governed by the on-hand lot quantity, not `EQUID` stackability: any active lot with `Quantity > 1` supports partial issue, and stackability metadata is advisory display only. Wherever this document still gates partial issue on stackability or an allow-list, the quantity-based rule in section 4.3 and section 12 governs.
+**Note (2026-11-25):** the Admin Inventory `Issued` view is now projected from outstanding `ISSUE` movements rather than lot status, and a `RETURN` is attributed to the `ISSUE` it closes (`AdminInventoryIssuedRowsDesign.md`, delivered). The ledger schema, issue arithmetic and return arithmetic described here are unchanged; only the admin visibility and the movement-targeted return entry point were added.
 **Date:** 2026-11-22
 **Baseline:** `Docs/PartialIssuanceApprovalPackage.md` and the owner decisions recorded for D-ISS-01 through D-ISS-15 and R-ISS-01 through R-ISS-16.
 **Implementation gate:** do not start code until this plan and the readiness conditions in section 13 are accepted.

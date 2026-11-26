@@ -25,6 +25,11 @@ const (
 	DefaultLogLevel    = "info"
 	DefaultLogFormat   = "json"
 	DefaultMariaDBPort = 3306
+	// DefaultMariaDBInitAttempts bounds guild-store initialization attempts
+	// (migrations and startup repairs) before the process exits non-zero.
+	// Connectivity failures are not bounded; they are retried until the
+	// server answers.
+	DefaultMariaDBInitAttempts = 3
 )
 
 // Config is the complete runtime configuration.
@@ -52,6 +57,10 @@ type MariaDB struct {
 	Database string
 	Username string
 	Password string
+	// InitAttempts bounds guild-store initialization (migration) attempts
+	// before the process exits non-zero. Connectivity failures are retried
+	// without limit, so a database that starts late is simply waited for.
+	InitAttempts int
 }
 
 // Configured reports whether a MariaDB connection was requested.
@@ -80,8 +89,9 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 		LogFormat:        DefaultLogFormat,
 		ConsolidateActor: "system",
 		MariaDB: MariaDB{
-			Port:     DefaultMariaDBPort,
-			Database: "GuildBank",
+			Port:         DefaultMariaDBPort,
+			Database:     "GuildBank",
+			InitAttempts: DefaultMariaDBInitAttempts,
 		},
 	}
 
@@ -96,6 +106,8 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn, error")
 	fs.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log format: json or text")
 	fs.BoolVar(&cfg.SecureCookies, "secure-cookies", cfg.SecureCookies, "mark session and CSRF cookies Secure (enable behind HTTPS)")
+	fs.IntVar(&cfg.MariaDB.InitAttempts, "mariadb-init-attempts", cfg.MariaDB.InitAttempts,
+		"guild-store initialization attempts before exiting non-zero")
 	fs.BoolVar(&cfg.ConsolidateItems, "consolidate-items", cfg.ConsolidateItems,
 		"consolidate active duplicate item stacks and exit")
 	fs.BoolVar(&cfg.ConsolidateDryRun, "dry-run", cfg.ConsolidateDryRun,
@@ -155,6 +167,13 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 			return fmt.Errorf("GUILDBANK_MARIADB_PORT: %q is not an integer", v)
 		}
 		cfg.MariaDB.Port = port
+	}
+	if v := strings.TrimSpace(getenv("GUILDBANK_MARIADB_INIT_ATTEMPTS")); v != "" {
+		attempts, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GUILDBANK_MARIADB_INIT_ATTEMPTS: %q is not an integer", v)
+		}
+		cfg.MariaDB.InitAttempts = attempts
 	}
 	if cfg.MariaDB.Configured() {
 		if v := strings.TrimSpace(getenv("GUILDBANK_MARIADB_DATABASE")); v != "" {
@@ -220,6 +239,9 @@ func (c Config) Validate() error {
 		if c.MariaDB.Port < 1 || c.MariaDB.Port > 65535 {
 			return fmt.Errorf("MariaDB port %d is outside 1-65535", c.MariaDB.Port)
 		}
+		if c.MariaDB.InitAttempts < 1 || c.MariaDB.InitAttempts > 100 {
+			return fmt.Errorf("MariaDB init attempts %d is outside 1-100", c.MariaDB.InitAttempts)
+		}
 		if strings.TrimSpace(c.MariaDB.Database) == "" {
 			return errors.New("MariaDB database must not be empty")
 		}
@@ -240,6 +262,8 @@ Flags:
   -log-level string    debug, info, warn or error (default info)
   -log-format string   json or text (default json)
   -secure-cookies      mark cookies Secure; enable when served over HTTPS
+  -mariadb-init-attempts int
+                       guild-store initialization attempts before exiting (default 3)
   -consolidate-items   consolidate active duplicate item stacks to one row and exit
   -dry-run             report -consolidate-items groups without writing
   -consolidate-actor   audit username for -consolidate-items (default system)
@@ -251,6 +275,6 @@ Environment (flags override environment):
 Development bootstrap only, superseded by Settings in Phase 3:
   GUILDBANK_MARIADB_HOST, GUILDBANK_MARIADB_PORT,
   GUILDBANK_MARIADB_DATABASE, GUILDBANK_MARIADB_USERNAME,
-  GUILDBANK_MARIADB_PASSWORD
+  GUILDBANK_MARIADB_PASSWORD, GUILDBANK_MARIADB_INIT_ATTEMPTS
 `
 }

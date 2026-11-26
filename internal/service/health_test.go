@@ -13,6 +13,15 @@ type fakePinger struct{ err error }
 
 func (f fakePinger) PingContext(context.Context) error { return f.err }
 
+// fakeStatus is a supervisor-style status probe whose answer can change, which
+// is how /readyz observes a store that recovers after a failed startup.
+type fakeStatus struct {
+	ready bool
+	err   error
+}
+
+func (f *fakeStatus) Status() (bool, error) { return f.ready, f.err }
+
 type fakeSetup struct {
 	state domain.SetupState
 	err   error
@@ -66,15 +75,40 @@ func TestReadyNotReadyCases(t *testing.T) {
 			wantReason: "not configured",
 		},
 		{
-			name: "mariadb startup failure",
+			name: "mariadb initializing",
 			deps: HealthDeps{
 				SQLite:            fakePinger{},
 				Setup:             fakeSetup{state: domain.SetupComplete},
+				MariaDB:           fakePinger{},
 				MariaDBConfigured: true,
-				MariaDBErr:        errors.New("connection refused"),
+				MariaDBStatus:     &fakeStatus{},
+			},
+			wantStatus: "initializing",
+			wantReason: "initialization in progress",
+		},
+		{
+			name: "mariadb unreachable",
+			deps: HealthDeps{
+				SQLite:            fakePinger{},
+				Setup:             fakeSetup{state: domain.SetupComplete},
+				MariaDB:           fakePinger{},
+				MariaDBConfigured: true,
+				MariaDBStatus:     &fakeStatus{err: errors.New("connection refused")},
 			},
 			wantStatus: "error",
 			wantReason: "connection refused",
+		},
+		{
+			name: "mariadb ready but ping fails",
+			deps: HealthDeps{
+				SQLite:            fakePinger{},
+				Setup:             fakeSetup{state: domain.SetupComplete},
+				MariaDB:           fakePinger{err: errors.New("connection reset")},
+				MariaDBConfigured: true,
+				MariaDBStatus:     &fakeStatus{ready: true},
+			},
+			wantStatus: "error",
+			wantReason: "connection reset",
 		},
 		{
 			name: "sqlite failure",
@@ -115,6 +149,33 @@ func TestReadyNotReadyCases(t *testing.T) {
 				t.Fatalf("no check with status %q and reason %q: %+v", tc.wantStatus, tc.wantReason, got.Checks)
 			}
 		})
+	}
+}
+
+// A failure observed at startup must never be cached: once the supervisor
+// reports a successful initialization, readiness turns healthy without a
+// process restart (the 2026-11-25 startup-order incident).
+func TestReadyReflectsCurrentMariaDBState(t *testing.T) {
+	status := &fakeStatus{err: errors.New("dial tcp: connection refused")}
+	h := NewHealthService(HealthDeps{
+		SQLite:            fakePinger{},
+		Setup:             fakeSetup{state: domain.SetupComplete},
+		MariaDB:           fakePinger{},
+		MariaDBConfigured: true,
+		MariaDBStatus:     status,
+	})
+
+	if got := h.Ready(context.Background()); got.Ready {
+		t.Fatalf("Ready = true while the store is unavailable: %+v", got.Checks)
+	}
+
+	status.ready, status.err = true, nil
+	got := h.Ready(context.Background())
+	if !got.Ready {
+		t.Fatalf("Ready = false after the store recovered: %+v", got.Checks)
+	}
+	if got.Checks[2].Status != "ok" {
+		t.Fatalf("mariadb check = %+v, want ok", got.Checks[2])
 	}
 }
 
