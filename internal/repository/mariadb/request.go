@@ -167,6 +167,23 @@ func normalizeRequestFilter(filter domain.RequestFilter) (domain.RequestFilter, 
 	return filter, nil
 }
 
+// requestLikePattern builds a contains pattern for a LIKE ... ESCAPE '!'
+// predicate. The escape character is deliberately not a backslash so the
+// pattern behaves the same whatever the server's NO_BACKSLASH_ESCAPES setting.
+func requestLikePattern(value string) string {
+	var pattern strings.Builder
+	pattern.Grow(len(value) + 2)
+	pattern.WriteByte('%')
+	for _, r := range value {
+		if r == '!' || r == '%' || r == '_' {
+			pattern.WriteByte('!')
+		}
+		pattern.WriteRune(r)
+	}
+	pattern.WriteByte('%')
+	return pattern.String()
+}
+
 func requestWhere(filter domain.RequestFilter) (string, []any) {
 	where := []string{"1 = 1"}
 	args := make([]any, 0, 8)
@@ -187,12 +204,12 @@ func requestWhere(filter domain.RequestFilter) (string, []any) {
 		args = append(args, filter.GuildBankItemID)
 	}
 	if filter.CharacterName != "" {
-		where = append(where, "r.CharacterName = ?")
-		args = append(args, filter.CharacterName)
+		where = append(where, "LOWER(r.CharacterName) LIKE LOWER(?) ESCAPE '!'")
+		args = append(args, requestLikePattern(filter.CharacterName))
 	}
 	if filter.ItemName != "" {
-		where = append(where, "r.ItemName = ?")
-		args = append(args, filter.ItemName)
+		where = append(where, "LOWER(r.ItemName) LIKE LOWER(?) ESCAPE '!'")
+		args = append(args, requestLikePattern(filter.ItemName))
 	}
 	if !filter.From.IsZero() {
 		where = append(where, "r.CreatedAt >= ?")

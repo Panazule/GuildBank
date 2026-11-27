@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Panazule/guildbank/internal/domain"
@@ -263,10 +264,12 @@ func (f *fakeAdmin) ListRequests(ctx context.Context, filter domain.RequestFilte
 		if filter.GuildBankItemID > 0 && request.GuildBankItemID != filter.GuildBankItemID {
 			continue
 		}
-		if filter.CharacterName != "" && request.CharacterName != filter.CharacterName {
+		if filter.CharacterName != "" &&
+			!strings.Contains(strings.ToLower(request.CharacterName), strings.ToLower(filter.CharacterName)) {
 			continue
 		}
-		if filter.ItemName != "" && request.ItemName != filter.ItemName {
+		if filter.ItemName != "" &&
+			!strings.Contains(strings.ToLower(request.ItemName), strings.ToLower(filter.ItemName)) {
 			continue
 		}
 		if !filter.From.IsZero() && request.CreatedAt.Before(filter.From) {

@@ -95,6 +95,51 @@ func TestAdminRequestQueueDefaultsToPendingOldestFirst(t *testing.T) {
 	}
 }
 
+func TestAdminRequestQueueFiltersCharacterAndItemCaseInsensitively(t *testing.T) {
+	store := newMovementFakeStore()
+	requestTestStoreLot(store)
+	requester := int64(7)
+	for _, row := range []struct {
+		id        int64
+		character string
+		item      string
+		status    domain.RequestStatus
+		kind      domain.RequesterKind
+	}{
+		{1, "Franz", "Blade of Carnage", domain.RequestPending, domain.RequesterMember},
+		{2, "Frostreaver", "Blade of War", domain.RequestPending, domain.RequesterMember},
+		{3, "Frantic", "Blade of Tactics", domain.RequestCompleted, domain.RequesterMember},
+		{4, "Thorin", "Blade of Carnage", domain.RequestPending, domain.RequesterPublic},
+	} {
+		store.requests = append(store.requests, domain.InventoryRequest{
+			RequestID: row.id, GuildBankItemID: 1, EQUID: 100, ItemName: row.item,
+			RequestedQuantity: 1, OnHandAtCreate: 1, CharacterName: row.character,
+			RequesterKind: row.kind, RequesterUserID: &requester, RequesterUserName: "member1",
+			Status: row.status, CreatedAt: adminRequestTestNow.Add(-time.Duration(row.id) * time.Hour),
+		})
+	}
+	h := newAdminRequestTestHandler(store)
+
+	c, recorder := newAdminRequestTestContext(http.MethodGet,
+		"/admin/requests?character=FR&item=BLADE&kind=Member", "", nil)
+	h.queue(c)
+	c.Writer.WriteHeaderNow()
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	for _, id := range []string{"1", "2"} {
+		if !strings.Contains(body, `href="/admin/requests/`+id+`"`) {
+			t.Fatalf("queue missing filtered request %s:\n%s", id, body)
+		}
+	}
+	for _, id := range []string{"3", "4"} {
+		if strings.Contains(body, `href="/admin/requests/`+id+`"`) {
+			t.Fatalf("queue leaked request %s past the combined filters:\n%s", id, body)
+		}
+	}
+}
+
 func TestAdminRequestDetailCoveredShowsNoQuantityField(t *testing.T) {
 	store := newMovementFakeStore()
 	requestTestStoreLot(store)

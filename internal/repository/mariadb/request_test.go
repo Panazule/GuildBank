@@ -1,10 +1,13 @@
 package mariadb
 
 import (
+	"database/sql"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/Panazule/guildbank/internal/domain"
 )
@@ -59,7 +62,9 @@ func TestRequestWhereUsesParameterizedPredicates(t *testing.T) {
 	})
 	for _, fragment := range []string{
 		"r.Status = ?", "r.RequesterKind = ?", "r.RequesterUserID = ?",
-		"r.GuildBankItemID = ?", "r.CharacterName = ?", "r.ItemName = ?",
+		"r.GuildBankItemID = ?",
+		"LOWER(r.CharacterName) LIKE LOWER(?) ESCAPE '!'",
+		"LOWER(r.ItemName) LIKE LOWER(?) ESCAPE '!'",
 		"r.CreatedAt >= ?", "r.CreatedAt <= ?",
 	} {
 		if !strings.Contains(where, fragment) {
@@ -72,10 +77,119 @@ func TestRequestWhereUsesParameterizedPredicates(t *testing.T) {
 	if strings.Contains(where, "DROP TABLE") {
 		t.Fatalf("caller text leaked into SQL: %q", where)
 	}
+	if got, want := args[4], "%Bob'; DROP TABLE InventoryRequest; --%"; got != want {
+		t.Fatalf("character pattern = %q, want %q", got, want)
+	}
+	if got, want := args[5], "%Sword%"; got != want {
+		t.Fatalf("item pattern = %q, want %q", got, want)
+	}
 
 	empty, emptyArgs := requestWhere(domain.RequestFilter{})
 	if empty != "1 = 1" || len(emptyArgs) != 0 {
 		t.Fatalf("empty where = %q %#v", empty, emptyArgs)
+	}
+}
+
+func TestRequestLikePatternEscapesWildcards(t *testing.T) {
+	for input, want := range map[string]string{
+		"Blade":        "%Blade%",
+		"100% Rune":    "%100!% Rune%",
+		"Rune _ Stone": "%Rune !_ Stone%",
+		"Exact!":       "%Exact!!%",
+	} {
+		if got := requestLikePattern(input); got != want {
+			t.Fatalf("requestLikePattern(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// TestRequestWherePartialTextMatching executes the generated predicate against
+// an in-memory database so the contains, case-fold and escape behaviour is
+// asserted as SQL rather than only as a string. SQLite implements the same
+// LOWER/LIKE/ESCAPE semantics used by MariaDB for these ASCII values.
+func TestRequestWherePartialTextMatching(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE InventoryRequest (
+		RequestID INTEGER PRIMARY KEY,
+		CharacterName TEXT NOT NULL,
+		ItemName TEXT NOT NULL,
+		Status TEXT NOT NULL,
+		RequesterKind TEXT NOT NULL,
+		RequesterUserID INTEGER,
+		GuildBankItemID INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	seed := []struct {
+		id        int64
+		character string
+		item      string
+		status    string
+		kind      string
+	}{
+		{1, "Franz", "Blade of Carnage", "Pending", "Member"},
+		{2, "Frostreaver", "Blade of War", "Pending", "Member"},
+		{3, "Frantic", "Blade of Tactics", "Completed", "Member"},
+		{4, "Thorin", "Blade of Carnage", "Pending", "Public"},
+		{5, "Percent", "100% Rune", "Pending", "Member"},
+		{6, "Underscore", "Rune _ Stone", "Pending", "Member"},
+	}
+	for _, row := range seed {
+		if _, err := db.Exec(`INSERT INTO InventoryRequest
+			(RequestID, CharacterName, ItemName, Status, RequesterKind, RequesterUserID, GuildBankItemID)
+			VALUES (?, ?, ?, ?, ?, 7, 1)`,
+			row.id, row.character, row.item, row.status, row.kind); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cases := []struct {
+		name   string
+		filter domain.RequestFilter
+		want   []string
+	}{
+		{"partial character", domain.RequestFilter{CharacterName: "Fr"},
+			[]string{"Franz", "Frostreaver", "Frantic"}},
+		{"partial item", domain.RequestFilter{ItemName: "Blade"},
+			[]string{"Franz", "Frostreaver", "Frantic", "Thorin"}},
+		{"case-insensitive", domain.RequestFilter{CharacterName: "fRaNz", ItemName: "CARN"},
+			[]string{"Franz"}},
+		{"combined filters", domain.RequestFilter{
+			Status: domain.RequestPending, RequesterKind: domain.RequesterMember,
+			CharacterName: "fr", ItemName: "blade",
+		}, []string{"Franz", "Frostreaver"}},
+		{"percent is literal", domain.RequestFilter{ItemName: "%"}, []string{"Percent"}},
+		{"underscore is literal", domain.RequestFilter{ItemName: "_"}, []string{"Underscore"}},
+		{"no match", domain.RequestFilter{CharacterName: "zzz"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			where, args := requestWhere(tc.filter)
+			rows, err := db.Query(`SELECT r.CharacterName FROM InventoryRequest r
+				WHERE `+where+` ORDER BY r.RequestID`, args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			var got []string
+			for rows.Next() {
+				var character string
+				if err := rows.Scan(&character); err != nil {
+					t.Fatal(err)
+				}
+				got = append(got, character)
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("matches = %v, want %v (where %q args %#v)", got, tc.want, where, args)
+			}
+		})
 	}
 }
 
