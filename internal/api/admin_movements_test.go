@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -194,6 +195,7 @@ func (f *movementFakeStore) RequestByIdempotencyKey(ctx context.Context, key str
 func (f *movementFakeStore) ListRequests(ctx context.Context, filter domain.RequestFilter) (domain.RequestPage, error) {
 	matches := make([]domain.InventoryRequest, 0, len(f.requests))
 	for _, request := range f.requests {
+		projected := f.projectRequest(request)
 		if filter.Status != "" && request.Status != filter.Status {
 			continue
 		}
@@ -207,8 +209,36 @@ func (f *movementFakeStore) ListRequests(ctx context.Context, filter domain.Requ
 		if filter.GuildBankItemID > 0 && request.GuildBankItemID != filter.GuildBankItemID {
 			continue
 		}
-		matches = append(matches, f.projectRequest(request))
+		if filter.CharacterName != "" && request.CharacterName != filter.CharacterName {
+			continue
+		}
+		if filter.ItemName != "" && request.ItemName != filter.ItemName {
+			continue
+		}
+		if !filter.From.IsZero() && request.CreatedAt.Before(filter.From) {
+			continue
+		}
+		if !filter.To.IsZero() && request.CreatedAt.After(filter.To) {
+			continue
+		}
+		if filter.Actionable && (request.Status != domain.RequestPending ||
+			!projected.LotActive || projected.CurrentOnHand == 0) {
+			continue
+		}
+		matches = append(matches, projected)
 	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		if filter.OldestFirst {
+			if !matches[i].CreatedAt.Equal(matches[j].CreatedAt) {
+				return matches[i].CreatedAt.Before(matches[j].CreatedAt)
+			}
+			return matches[i].RequestID < matches[j].RequestID
+		}
+		if !matches[i].CreatedAt.Equal(matches[j].CreatedAt) {
+			return matches[i].CreatedAt.After(matches[j].CreatedAt)
+		}
+		return matches[i].RequestID > matches[j].RequestID
+	})
 	page := domain.RequestPage{
 		Requests: matches, Total: len(matches), Page: filter.Page, PageSize: filter.PageSize,
 		Filter: filter,
@@ -261,7 +291,7 @@ func (f *movementFakeStore) PendingRequestsForLot(ctx context.Context, guildBank
 		if request.Status != domain.RequestPending || request.GuildBankItemID != guildBankItemID {
 			continue
 		}
-		requests = append(requests, request)
+		requests = append(requests, f.projectRequest(request))
 	}
 	if limit > 0 && len(requests) > limit {
 		requests = requests[:limit]

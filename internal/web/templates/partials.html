@@ -20,6 +20,7 @@
       <a href="/my/requests">My requests</a>
       <a href="/account/profile">Profile</a>
       {{if .User.CanAdministerInventory}}
+        <a href="/admin/requests">Requests{{if .PendingRequestCount}} <span class="nav-count" aria-label="{{.PendingRequestCount}} pending">{{.PendingRequestCount}}</span>{{end}}</a>
         <a href="/admin/inventory">Admin inventory</a>
         <a href="/admin/imports">Imports</a>
         <a href="/admin/audit">Audit</a>

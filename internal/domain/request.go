@@ -246,6 +246,32 @@ type ApproveRequestInput struct {
 	SourceIP      string
 }
 
+// Validate checks the approval command. The lot version is required because an
+// approval issues stock: the officer must confirm the lot state they saw. The
+// optional note is bounded by the same 255-rune rule as every request note.
+func (in ApproveRequestInput) Validate() error {
+	fields := make(map[string]string)
+	if in.RequestID <= 0 {
+		fields["requestId"] = "requestId must be a positive integer"
+	}
+	if in.Actor.UserID <= 0 || strings.TrimSpace(in.Actor.UserName) == "" {
+		fields["actor"] = "an authenticated officer is required"
+	}
+	if in.ExpectedModAt.IsZero() {
+		fields["expectedModAt"] = "expectedModAt is required"
+	}
+	if problem := requestTextProblem(in.Note, RequestMaxNoteRunes); problem != "" {
+		fields["note"] = problem
+	}
+	if strings.TrimSpace(in.CorrelationID) == "" {
+		fields["correlationId"] = "correlationId is required"
+	}
+	if len(fields) > 0 {
+		return &ValidationError{Fields: fields}
+	}
+	return nil
+}
+
 // DenyRequestInput is the denial command. Reason is required so a denied member
 // learns why and the audit row explains itself.
 type DenyRequestInput struct {
@@ -254,6 +280,30 @@ type DenyRequestInput struct {
 	Actor         Actor
 	CorrelationID string
 	SourceIP      string
+}
+
+// Validate checks the denial command. The reason is mandatory: a denied member
+// must be told why, and the audit row must be self-explanatory.
+func (in DenyRequestInput) Validate() error {
+	fields := make(map[string]string)
+	if in.RequestID <= 0 {
+		fields["requestId"] = "requestId must be a positive integer"
+	}
+	if in.Actor.UserID <= 0 || strings.TrimSpace(in.Actor.UserName) == "" {
+		fields["actor"] = "an authenticated officer is required"
+	}
+	if problem := requestTextProblem(in.Reason, RequestMaxNoteRunes); problem != "" {
+		fields["reason"] = problem
+	} else if strings.TrimSpace(in.Reason) == "" {
+		fields["reason"] = "reason is required"
+	}
+	if strings.TrimSpace(in.CorrelationID) == "" {
+		fields["correlationId"] = "correlationId is required"
+	}
+	if len(fields) > 0 {
+		return &ValidationError{Fields: fields}
+	}
+	return nil
 }
 
 // CancelRequestInput is the requester's withdrawal command. The actor must match
@@ -325,6 +375,13 @@ type RequestFilter struct {
 	To              time.Time
 	Page            int
 	PageSize        int
+	// Actionable restricts the queue to rows an officer can still act on: the
+	// lot is active and at least one unit is on hand. A row with nothing on
+	// hand can only be denied, so it is excluded by the toggle.
+	Actionable bool
+	// OldestFirst orders the officer queue so the oldest request cannot
+	// starve. The member list keeps the default newest-first order.
+	OldestFirst bool
 }
 
 // RequestPage is one request page plus the total from the same snapshot.

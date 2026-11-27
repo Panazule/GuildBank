@@ -133,6 +133,7 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 		auth: deps.Auth, views: viewSet, logger: deps.Logger}
 	requestsHandler := &requestHandler{requests: deps.Requests, views: viewSet, logger: deps.Logger}
 	adminHandler := &adminInventoryHandler{admin: deps.Admin, views: viewSet, logger: deps.Logger}
+	adminRequestsHandler := &adminRequestHandler{admin: deps.Admin, views: viewSet, logger: deps.Logger}
 	usersHandler := &usersHandler{users: deps.Users, characters: deps.Characters, discord: deps.Discord,
 		views: viewSet, logger: deps.Logger}
 	profileHandler := &profileHandler{characters: deps.Characters, discord: deps.Discord, views: viewSet, logger: deps.Logger}
@@ -260,6 +261,13 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	officer.POST("/admin/inventory/:id/issue", adminHandler.issueForm)
 	officer.POST("/admin/inventory/:id/return", adminHandler.returnForm)
 	officer.POST("/admin/inventory/movements/:movementID/return", adminHandler.returnIssuanceForm)
+
+	// Request decisions are Officer work: approving issues inventory through the
+	// same ledger path as a manual issue, and denying records the reason.
+	officer.GET("/admin/requests", adminRequestsHandler.queue)
+	officer.GET("/admin/requests/:id", adminRequestsHandler.detail)
+	officer.POST("/admin/requests/:id/approve", adminRequestsHandler.approve)
+	officer.POST("/admin/requests/:id/deny", adminRequestsHandler.deny)
 
 	officer.GET("/admin/audit", adminHandler.auditPage)
 	officer.GET("/api/v1/admin/items", adminHandler.list)

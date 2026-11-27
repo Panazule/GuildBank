@@ -1,0 +1,126 @@
+{{define "admin_requests.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-card">
+    <p class="eyebrow">Administration · Officer queue</p>
+    <h1>Requests</h1>
+    <p class="muted">Oldest first so no request starves. Approving a request issues the item in the same transaction; there is no approved-but-unissued state.</p>
+
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <form method="get" action="/admin/requests" class="inventory-filters">
+      <div class="filter-grid admin-filter-grid">
+        <label>Status
+          <select name="status">
+            {{range .StatusOpts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Requester kind
+          <select name="kind">
+            {{range .KindOpts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Character
+          <input name="character" type="search" maxlength="64" value="{{.Filter.Character}}" autocomplete="off">
+        </label>
+        <label>Item
+          <input name="item" type="search" maxlength="128" value="{{.Filter.Item}}" autocomplete="off">
+        </label>
+        <label>From
+          <input name="from" type="date" value="{{.Filter.From}}">
+        </label>
+        <label>To
+          <input name="to" type="date" value="{{.Filter.To}}">
+        </label>
+        <label>Page size
+          <select name="pageSize">
+            {{range .PageSizeOpts}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="actionable" value="1"{{if .Filter.Actionable}} checked{{end}}>
+          Only actionable (on hand ≥ 1)
+        </label>
+        <div class="filter-actions">
+          <button type="submit" class="primary">Apply</button>
+          <a class="link" href="{{.ClearURL}}">Clear</a>
+        </div>
+      </div>
+    </form>
+
+    <p class="result-summary" aria-live="polite">
+      {{if .Total}}{{.Total}} request{{if ne .Total 1}}s{{end}} · page {{.Page}} of {{.TotalPages}}{{else}}No matching requests{{end}}
+    </p>
+
+    {{if .BeyondLast}}
+      <div class="alert alert-warn" role="status">This page is beyond the available results.
+        {{if .LastPageURL}}<a href="{{.LastPageURL}}">Go to the last page</a>.{{end}}
+      </div>
+    {{end}}
+
+    {{if .Empty}}
+      <div class="empty-state">
+        <p>{{if .Filtered}}No requests match these filters.{{else}}No requests are waiting for a decision.{{end}}</p>
+        <p><a href="{{.ClearURL}}">Clear filters</a></p>
+      </div>
+    {{else}}
+      <div class="table-scroll" role="region" aria-label="Request queue" tabindex="0">
+        <table class="inventory-table">
+          <caption class="sr-only">Pending and historical inventory requests, oldest first</caption>
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">Created</th>
+              <th scope="col">Requester</th>
+              <th scope="col">Item</th>
+              <th scope="col">Qty</th>
+              <th scope="col">On hand</th>
+              <th scope="col">Status</th>
+              <th scope="col">Age</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Requests}}
+              <tr>
+                <td class="cell-nowrap"><a href="{{.DetailURL}}">#{{.ID}}</a></td>
+                <td class="cell-nowrap"><time datetime="{{.CreatedAtISO}}">{{.CreatedAtText}}</time></td>
+                <td>
+                  {{.Character}}
+                  {{if .IsPublic}}<span class="chip">Public</span>{{end}}
+                  {{if .IsSelf}}<span class="chip">You</span>{{end}}
+                  {{if eq .RequesterKind "Member"}}<span class="muted">{{.RequesterName}}</span>{{end}}
+                </td>
+                <td><a href="/admin/inventory/{{.ItemID}}">{{.ItemName}}</a></td>
+                <td class="cell-nowrap">{{.Quantity}}{{if .ShortStock}} · {{.OnHand}} avail{{end}}</td>
+                <td class="cell-nowrap">{{if .LotActive}}{{.OnHand}}{{else}}<span class="muted">unavailable</span>{{end}}</td>
+                <td class="cell-nowrap"><span class="status-badge status-{{.StatusClass}} request-status-{{.StatusClass}}">{{.StatusLabel}}</span></td>
+                <td class="cell-nowrap"><span class="{{.AgeClass}}" title="Age since the request was created">{{.AgeText}}</span></td>
+                <td class="cell-nowrap"><a class="link" href="{{.DetailURL}}">Review</a></td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+
+      {{if gt .TotalPages 1}}
+        <nav class="inventory-pager" aria-label="Request pages">
+          {{if .FirstURL}}<a href="{{.FirstURL}}">First</a>{{end}}
+          {{if .PrevURL}}<a href="{{.PrevURL}}" rel="prev">Previous</a>{{end}}
+          {{range .PageLinks}}
+            {{if .Current}}<span class="current" aria-current="page">{{.Page}}</span>{{else}}<a href="{{.URL}}">{{.Page}}</a>{{end}}
+          {{end}}
+          {{if .NextURL}}<a href="{{.NextURL}}" rel="next">Next</a>{{end}}
+          {{if .LastURL}}<a href="{{.LastURL}}">Last</a>{{end}}
+        </nav>
+      {{end}}
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

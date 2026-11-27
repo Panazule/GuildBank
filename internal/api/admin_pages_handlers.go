@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -176,13 +177,24 @@ func (h *adminInventoryHandler) detailPage(c *gin.Context) {
 		nameWarning = "The name you entered differs from this item's metadata name. " +
 			"The record is stored with the metadata name shown above, because item metadata always takes precedence."
 	}
+	pendingRows := make([]adminRequestRowView, 0, 4)
+	pending, err := h.admin.PendingRequestsForLot(ctx, id, 10)
+	if err != nil {
+		h.logger.Warn("pending requests for lot unavailable", "request_id", GetRequestID(c), "error", err)
+	}
+	now := time.Now().UTC()
+	for _, request := range pending {
+		pendingRows = append(pendingRows, adminRequestRowOf(request, 0, now))
+	}
 	h.views.adminInventoryDetail(c, http.StatusOK, adminDetailPageData{
-		pageData:    pageData{Title: item.Name, CSRF: CSRF(c), User: currentUserPointer(c)},
-		Item:        adminItemViewOf(item),
-		History:     entries,
-		Notice:      adminNotice(c.Query("notice")),
-		ReturnTo:    adminReturnTo(c),
-		NameWarning: nameWarning,
+		pageData:           pageData{Title: item.Name, CSRF: CSRF(c), User: currentUserPointer(c)},
+		Item:               adminItemViewOf(item),
+		History:            entries,
+		Notice:             adminNotice(c.Query("notice")),
+		ReturnTo:           adminReturnTo(c),
+		NameWarning:        nameWarning,
+		PendingRequests:    pendingRows,
+		PendingRequestsURL: "/admin/requests?item=" + url.QueryEscape(item.Name),
 	})
 }
 

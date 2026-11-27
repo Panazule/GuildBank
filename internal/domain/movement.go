@@ -199,6 +199,10 @@ type IssueItemInput struct {
 	Actor           Actor
 	CorrelationID   string
 	SourceIP        string
+	// RequestID is set only by a request approval, so the ISSUE movement is
+	// linked to the InventoryRequest it satisfied. Manual issues leave it zero
+	// and store NULL.
+	RequestID int64
 }
 
 // ReturnItemInput is the approved return command shape. Dates are copied from

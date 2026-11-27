@@ -54,7 +54,7 @@ func TestNavigationVisibilityFollowsRole(t *testing.T) {
 	}
 
 	officer := renderNav(t, &domain.User{UserName: "officer1", AccessLevel: "Officer"})
-	for _, href := range []string{`href="/admin/inventory"`, `href="/admin/imports"`, `href="/admin/audit"`} {
+	for _, href := range []string{`href="/admin/requests"`, `href="/admin/inventory"`, `href="/admin/imports"`, `href="/admin/audit"`} {
 		if !bytes.Contains([]byte(officer), []byte(href)) {
 			t.Fatalf("officer navigation missing %s", href)
 		}
@@ -65,7 +65,7 @@ func TestNavigationVisibilityFollowsRole(t *testing.T) {
 
 	admin := renderNav(t, &domain.User{UserName: "admin", AccessLevel: domain.AccessAdmin})
 	for _, href := range []string{
-		`href="/admin/inventory"`, `href="/admin/imports"`,
+		`href="/admin/requests"`, `href="/admin/inventory"`, `href="/admin/imports"`,
 		`href="/admin/audit"`, `href="/admin/users"`, `href="/admin/settings"`,
 	} {
 		if !bytes.Contains([]byte(admin), []byte(href)) {

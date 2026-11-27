@@ -105,6 +105,9 @@ func movementFields(movement *domain.InventoryMovement) map[string]any {
 	if movement.RelatedMovementID != nil {
 		fields["relatedMovementId"] = *movement.RelatedMovementID
 	}
+	if movement.RequestID != nil {
+		fields["requestId"] = *movement.RequestID
+	}
 	return fields
 }
 
@@ -252,6 +255,12 @@ func (s *AdminInventoryService) issueLocked(ctx context.Context, tx AdminWriteTx
 	movement := newMovement(current, domain.MovementIssue, in.Quantity, remaining,
 		in.Recipient, current.SourceLocation, "", in.Note, in.Actor, at,
 		in.CorrelationID, in.IdempotencyKey)
+	// Approval sets RequestID so the ledger row names the workflow row it
+	// satisfied; the manual Issue path leaves it nil and stores NULL.
+	if in.RequestID > 0 {
+		requestID := in.RequestID
+		movement.RequestID = &requestID
+	}
 	movementID, err := tx.InsertMovement(ctx, movement)
 	if err != nil {
 		return domain.AdminInventoryItem{}, domain.InventoryMovement{}, err

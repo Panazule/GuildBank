@@ -61,6 +61,32 @@
       <a class="link" href="/admin/inventory/{{.Item.ID}}/movements{{if .ReturnTo}}?returnTo={{.ReturnTo | urlquery}}{{end}}">Movement history</a>
     </div>
 
+    <h2>Pending requests for this item</h2>
+    {{if .PendingRequests}}
+      <div class="table-scroll" role="region" aria-label="Pending requests for this item" tabindex="0">
+        <table class="inventory-table">
+          <thead>
+            <tr><th scope="col">#</th><th scope="col">Character</th><th scope="col">Quantity</th><th scope="col">Requested</th><th scope="col">Age</th><th scope="col">Action</th></tr>
+          </thead>
+          <tbody>
+            {{range .PendingRequests}}
+              <tr>
+                <td>#{{.ID}}</td>
+                <td>{{.Character}}{{if .IsPublic}} <span class="chip">Public</span>{{end}}</td>
+                <td>{{.Quantity}}</td>
+                <td class="cell-nowrap"><time datetime="{{.CreatedAtISO}}">{{.CreatedAtText}}</time></td>
+                <td class="cell-nowrap"><span class="{{.AgeClass}}">{{.AgeText}}</span></td>
+                <td><a class="link" href="{{.DetailURL}}">Review</a></td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      <p><a class="link" href="{{.PendingRequestsURL}}">Open these requests in the queue</a></p>
+    {{else}}
+      <p class="muted">No pending requests for this item.</p>
+    {{end}}
+
     <h2>Recent history</h2>
     {{if .History}}
       <div class="table-scroll" role="region" aria-label="Recent audit history" tabindex="0">

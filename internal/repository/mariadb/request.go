@@ -87,10 +87,17 @@ func (s *Store) ListRequests(ctx context.Context, filter domain.RequestFilter) (
 		page.TotalPages = (total + normalized.PageSize - 1) / normalized.PageSize
 	}
 	queryArgs := append(append([]any(nil), args...), normalized.PageSize, (normalized.Page-1)*normalized.PageSize)
+	// The officer queue reads oldest-first so the oldest request cannot starve;
+	// every other caller keeps newest-first. The order is fixed per call and is
+	// not caller-selectable beyond this documented switch.
+	order := " ORDER BY r.CreatedAt DESC, r.RequestID DESC"
+	if normalized.OldestFirst {
+		order = " ORDER BY r.CreatedAt ASC, r.RequestID ASC"
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT `+requestReadColumns+`
 		FROM InventoryRequest r
 		LEFT JOIN GuildBankItems g ON g.GuildBankItemID = r.GuildBankItemID
-		WHERE `+where+` ORDER BY r.CreatedAt DESC, r.RequestID DESC LIMIT ? OFFSET ?`, queryArgs...)
+		WHERE `+where+order+` LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
 		return domain.RequestPage{}, mapStoreError("list requests", err)
 	}
@@ -194,6 +201,15 @@ func requestWhere(filter domain.RequestFilter) (string, []any) {
 	if !filter.To.IsZero() {
 		where = append(where, "r.CreatedAt <= ?")
 		args = append(args, filter.To.UTC())
+	}
+	// The actionable predicate is an EXISTS subquery rather than a join
+	// predicate so the same WHERE text is valid for the COUNT and the page
+	// query, which already joins the lot for its projection.
+	if filter.Actionable {
+		where = append(where,
+			`r.Status = 'Pending' AND EXISTS (SELECT 1 FROM GuildBankItems ag
+			 WHERE ag.GuildBankItemID = r.GuildBankItemID
+			 AND ag.DeletedFg = 0 AND ag.Quantity >= 1)`)
 	}
 	return strings.Join(where, " AND "), args
 }

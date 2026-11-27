@@ -120,6 +120,12 @@ var routeMatrix = map[string]routeClass{
 	"POST /admin/inventory/:id/return":                   classOfficer,
 	"POST /admin/inventory/movements/:movementID/return": classOfficer,
 
+	// Officer request workflow: queue, decision page, approve and deny.
+	"GET /admin/requests":              classOfficer,
+	"GET /admin/requests/:id":          classOfficer,
+	"POST /admin/requests/:id/approve": classOfficer,
+	"POST /admin/requests/:id/deny":    classOfficer,
+
 	"GET /admin/audit":                        classOfficer,
 	"GET /api/v1/admin/items":                 classOfficer,
 	"GET /api/v1/admin/items/:id":             classOfficer,

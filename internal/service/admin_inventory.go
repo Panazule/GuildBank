@@ -63,9 +63,10 @@ var OfficerAuditEventTypes = []string{
 	"ITEM_CREATED", "ITEM_UPDATED", "ITEM_REMOVED", "IMPORT_CREATED", "IMPORT_COMMITTED",
 	"ITEM_ISSUED", "ITEM_RETURNED", "ITEM_RECEIVED", "ITEM_WRITTEN_OFF",
 	"ITEM_MOVED", "ITEM_MERGED",
-	// Request lifecycle. Phase 3 writes creation and cancellation; Phase 4
-	// adds the two officer decision events.
-	"REQUEST_CREATED", "REQUEST_CANCELLED",
+	// Request lifecycle: creation and cancellation by the requester, plus the
+	// two officer decision events. These are Officer work because a request
+	// decision issues or refuses inventory.
+	"REQUEST_CREATED", "REQUEST_CANCELLED", "REQUEST_COMPLETED", "REQUEST_DENIED",
 }
 
 // UserAuditEventTypes are the account-administration and profile events. They

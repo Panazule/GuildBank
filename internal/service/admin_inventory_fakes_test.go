@@ -249,6 +249,7 @@ func (f *fakeAdmin) RequestByIdempotencyKey(ctx context.Context, key string) (do
 func (f *fakeAdmin) ListRequests(ctx context.Context, filter domain.RequestFilter) (domain.RequestPage, error) {
 	matches := make([]domain.InventoryRequest, 0, len(f.requests))
 	for _, request := range f.sortedRequests() {
+		projected := f.projectRequest(request)
 		if filter.Status != "" && request.Status != filter.Status {
 			continue
 		}
@@ -274,7 +275,19 @@ func (f *fakeAdmin) ListRequests(ctx context.Context, filter domain.RequestFilte
 		if !filter.To.IsZero() && request.CreatedAt.After(filter.To) {
 			continue
 		}
-		matches = append(matches, f.projectRequest(request))
+		if filter.Actionable && (request.Status != domain.RequestPending ||
+			!projected.LotActive || projected.CurrentOnHand == 0) {
+			continue
+		}
+		matches = append(matches, projected)
+	}
+	if filter.OldestFirst {
+		sort.SliceStable(matches, func(i, j int) bool {
+			if !matches[i].CreatedAt.Equal(matches[j].CreatedAt) {
+				return matches[i].CreatedAt.Before(matches[j].CreatedAt)
+			}
+			return matches[i].RequestID < matches[j].RequestID
+		})
 	}
 	page := domain.RequestPage{
 		Requests: matches, Total: len(matches), Page: filter.Page,

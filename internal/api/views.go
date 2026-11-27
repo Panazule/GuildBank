@@ -49,6 +49,9 @@ type pageData struct {
 	Error       string
 	Notice      string
 	ErrorFields map[string]string
+	// PendingRequestCount is the Officer navigation badge. It is populated by
+	// the request pages; other pages leave it zero and render no badge.
+	PendingRequestCount int
 }
 
 type loginPageData struct {
@@ -314,6 +317,9 @@ type adminDetailPageData struct {
 	// NameWarning is the non-blocking advisory shown when a created name
 	// differed from the item metadata name.
 	NameWarning string
+	// PendingRequests is the bounded "pending requests for this item" panel.
+	PendingRequests    []adminRequestRowView
+	PendingRequestsURL string
 }
 
 type adminRemovePageData struct {
@@ -714,6 +720,14 @@ func (v *views) adminMovementHistory(c *gin.Context, status int, data adminMovem
 
 func (v *views) adminAudit(c *gin.Context, status int, data adminAuditPageData) {
 	v.render(c, status, "admin_audit.html", data)
+}
+
+func (v *views) adminRequests(c *gin.Context, status int, data adminRequestsPageData) {
+	v.render(c, status, "admin_requests.html", data)
+}
+
+func (v *views) adminRequestDetail(c *gin.Context, status int, data adminRequestDetailPageData) {
+	v.render(c, status, "admin_request_detail.html", data)
 }
 
 func (v *views) errorPage(c *gin.Context, status int, message string) {
