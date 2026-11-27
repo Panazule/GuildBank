@@ -126,18 +126,20 @@
               <td class="cell-nowrap">{{if .IssuedURL}}<a class="status-badge {{.StatusClass}}" href="{{.IssuedURL}}">{{.StatusLabel}}</a>{{else}}<span class="status-badge {{.StatusClass}}">{{.StatusLabel}}</span>{{end}}</td>
               <td class="cell-nowrap">{{.ModAtText}}</td>
               <td class="cell-nowrap actions-cell">
+                <div class="action-links">
                 {{if .MovementBacked}}
-                  <a href="{{.ReturnURL}}?returnTo={{$.SelfURL | urlquery}}">Return</a>
-                  <a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">History</a>
-                  <a href="/admin/inventory/{{.ID}}/movements?returnTo={{$.SelfURL | urlquery}}">Movements</a>
+                  <a class="action-link" href="{{.ReturnURL}}?returnTo={{$.SelfURL | urlquery}}" title="Return">{{template "actionIconReturn"}}<span class="sr-only">Return</span></a>
+                  <a class="action-link" href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}" title="History">{{template "actionIconHistory"}}<span class="sr-only">History</span></a>
+                  <a class="action-link" href="/admin/inventory/{{.ID}}/movements?returnTo={{$.SelfURL | urlquery}}" title="Movements">{{template "actionIconMovements"}}<span class="sr-only">Movements</span></a>
                 {{else}}
-                  <a href="/admin/inventory/{{.ID}}/edit?returnTo={{$.SelfURL | urlquery}}">Edit</a>
-                  <a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">History</a>
-                  <a href="/admin/inventory/{{.ID}}/movements?returnTo={{$.SelfURL | urlquery}}">Movements</a>
-                  {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/issue?returnTo={{$.SelfURL | urlquery}}">Issue</a>{{else}}{{if .GivenTo}}<a href="/admin/inventory/{{.ID}}/return?returnTo={{$.SelfURL | urlquery}}">Return</a>{{end}}{{end}}
-                  {{if not .Deleted}}<a href="/admin/inventory/{{.ID}}/remove?returnTo={{$.SelfURL | urlquery}}">Remove</a>{{end}}
-                  {{if .Restorable}}<a href="/admin/inventory/{{.ID}}/restore?returnTo={{$.SelfURL | urlquery}}">Restore</a>{{end}}
+                  <a class="action-link" href="/admin/inventory/{{.ID}}/edit?returnTo={{$.SelfURL | urlquery}}" title="Edit">{{template "actionIconEdit"}}<span class="sr-only">Edit</span></a>
+                  <a class="action-link" href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}" title="History">{{template "actionIconHistory"}}<span class="sr-only">History</span></a>
+                  <a class="action-link" href="/admin/inventory/{{.ID}}/movements?returnTo={{$.SelfURL | urlquery}}" title="Movements">{{template "actionIconMovements"}}<span class="sr-only">Movements</span></a>
+                  {{if not .Deleted}}<a class="action-link" href="/admin/inventory/{{.ID}}/issue?returnTo={{$.SelfURL | urlquery}}" title="Issue">{{template "actionIconIssue"}}<span class="sr-only">Issue</span></a>{{else}}{{if .GivenTo}}<a class="action-link" href="/admin/inventory/{{.ID}}/return?returnTo={{$.SelfURL | urlquery}}" title="Return">{{template "actionIconReturn"}}<span class="sr-only">Return</span></a>{{end}}{{end}}
+                  {{if not .Deleted}}<a class="action-link" href="/admin/inventory/{{.ID}}/remove?returnTo={{$.SelfURL | urlquery}}" title="Remove">{{template "actionIconRemove"}}<span class="sr-only">Remove</span></a>{{end}}
+                  {{if .Restorable}}<a class="action-link" href="/admin/inventory/{{.ID}}/restore?returnTo={{$.SelfURL | urlquery}}" title="Restore">{{template "actionIconRestore"}}<span class="sr-only">Restore</span></a>{{end}}
                 {{end}}
+                </div>
               </td>
             </tr>
             {{end}}

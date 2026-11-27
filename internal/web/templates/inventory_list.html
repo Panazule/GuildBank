@@ -92,7 +92,7 @@
                 {{.ClassText}}
                 {{if and .MetadataNote .ClassUnknown}}<span class="unknown-note">{{.MetadataNote}}</span>{{end}}
               </td>
-              <td class="cell-nowrap{{if .RaceUnknown}} unknown{{end}}">
+              <td class="cell-nowrap{{if .RaceUnknown}} unknown{{end}}"{{if .RaceTitle}} title="{{.RaceTitle}}"{{end}}>
                 {{.RaceText}}
                 {{if and .MetadataNote .RaceUnknown}}<span class="unknown-note">{{.MetadataNote}}</span>{{end}}
               </td>

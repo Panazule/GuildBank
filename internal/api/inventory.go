@@ -293,13 +293,16 @@ type inventoryPageLink struct {
 }
 
 type inventoryItemView struct {
-	ID                int64
-	EQUID             uint64
-	Name              string
-	ItemType          domain.ItemType
-	Quantity          uint32
-	ClassText         string
-	RaceText          string
+	ID        int64
+	EQUID     uint64
+	Name      string
+	ItemType  domain.ItemType
+	Quantity  uint32
+	ClassText string
+	RaceText  string
+	// RaceTitle carries the full race names for the grid's abbreviation
+	// tooltip. It is empty on the detail page, which shows full names.
+	RaceTitle         string
 	ClassUnknown      bool
 	RaceUnknown       bool
 	MetadataNote      string
@@ -317,13 +320,18 @@ type inventoryItemView struct {
 func inventoryItemViewOf(item domain.PublicInventoryItem, detail bool) inventoryItemView {
 	classText, classUnknown := inventoryRestrictionText(item.ClassString, detail, "classes")
 	raceText, raceUnknown := inventoryRestrictionText(item.RaceString, detail, "races")
+	raceTitle := ""
+	if !detail && !raceUnknown {
+		raceTitle = raceText
+		raceText = inventoryRaceGridText(item.RaceString, raceText)
+	}
 	note := ""
 	if item.MetadataMissing {
 		note = "Metadata unavailable; restrictions may be unknown."
 	}
 	view := inventoryItemView{
 		ID: item.ID, EQUID: item.EQUID, Name: item.Name, ItemType: item.ItemType,
-		Quantity: item.Quantity, ClassText: classText, RaceText: raceText,
+		Quantity: item.Quantity, ClassText: classText, RaceText: raceText, RaceTitle: raceTitle,
 		ClassUnknown: classUnknown, RaceUnknown: raceUnknown, MetadataNote: note,
 		DateAddedISO: item.DateAdded.Format("2006-01-02"), DateAddedText: item.DateAdded.Format("Jan 2, 2006"),
 		DateOpenISO: item.DateOpen.Format("2006-01-02"), DateOpenText: item.DateOpen.Format("Jan 2, 2006"),
@@ -334,6 +342,53 @@ func inventoryItemViewOf(item domain.PublicInventoryItem, detail bool) inventory
 	// Bazaar); the JSON availability enum is unchanged.
 	view.AvailabilityLabel = availabilityLabel(item.Availability)
 	return view
+}
+
+// raceGridAbbreviations is the player-facing race shorthand used by the grids
+// (UX review round 1). The selectable filter lists continue to use the full
+// canonical names from service.RaceValues, and the detail page is unchanged.
+var raceGridAbbreviations = map[string]string{
+	"barbarian": "BAR",
+	"dark elf":  "DEF",
+	"dark-elf":  "DEF",
+	"drakkin":   "DRK",
+	"dwarf":     "DWF",
+	"erudite":   "ERU",
+	"froglok":   "FRG",
+	"gnome":     "GNM",
+	"half elf":  "HEF",
+	"half-elf":  "HEF",
+	"halfling":  "HFL",
+	"high elf":  "HIE",
+	"high-elf":  "HIE",
+	"human":     "HUM",
+	"iksar":     "IKS",
+	"ogre":      "OGR",
+	"troll":     "TRL",
+	"vah shir":  "VAH",
+	"vah-shir":  "VAH",
+	"wood elf":  "ELF",
+	"wood-elf":  "ELF",
+}
+
+// inventoryRaceGridText abbreviates each recognized race in a stored
+// comma-separated RaceString. Unrecognized tokens are preserved verbatim so no
+// data is hidden by the presentation change.
+func inventoryRaceGridText(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "ALL") {
+		return fallback
+	}
+	parts := strings.Split(value, ",")
+	for i, part := range parts {
+		label := strings.TrimSpace(part)
+		if abbreviation, ok := raceGridAbbreviations[strings.ToLower(label)]; ok {
+			parts[i] = abbreviation
+			continue
+		}
+		parts[i] = label
+	}
+	return strings.Join(parts, ", ")
 }
 
 func inventoryRestrictionText(value string, detail bool, noun string) (string, bool) {
@@ -382,7 +437,7 @@ func inventoryListPageDataOf(result domain.PublicInventoryPage, user *domain.Use
 		{Value: string(domain.ItemTypeSpell), Label: "Spells", Selected: data.Filter.ItemType == string(domain.ItemTypeSpell)},
 	}
 	sortLabels := map[domain.InventorySort]string{
-		domain.InventorySortName: "Name (natural)", domain.InventorySortNameDesc: "Name (reverse natural)",
+		domain.InventorySortName: "Name (ascending)", domain.InventorySortNameDesc: "Name (descending)",
 		domain.InventorySortDateAdded: "Date added (oldest)", domain.InventorySortDateAddedDesc: "Date added (newest)",
 		domain.InventorySortDateOpen: "Open date (earliest)", domain.InventorySortDateOpenDesc: "Open date (latest)",
 		domain.InventorySortDateBazaar: "Bazaar date (earliest)", domain.InventorySortDateBazaarDesc: "Bazaar date (latest)",

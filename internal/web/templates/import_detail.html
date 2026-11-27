@@ -34,18 +34,26 @@
       <div class="import-layout">
         <aside class="location-panel" aria-labelledby="location-heading">
           <h2 id="location-heading">Locations</h2>
-          <p class="help">The selector is built from normalized LocationGroup values. All Hoard variants appear as one Hoard group. Checking a group keeps its rows in scope and selects them; unchecking hides the group's rows and clears them from the selection. The <em>Unselected</em> row filter ignores this scope so no row is lost from review.</p>
-          <p class="help">Default selection: container rows in General, Bank and SharedBank are not selected because they are the bags occupying a slot. Hoard rows are always selected. Rows whose location is not a bank location are excluded from review and cannot be selected.</p>
           <div id="location-list" class="location-list"></div>
           {{if not .Batch.ReadOnly}}
-          <div class="wizard-actions">
-            <button type="button" class="secondary" id="check-all-locations">Check all locations</button>
-            <button type="button" class="secondary" id="uncheck-all-locations">Uncheck all locations</button>
-          </div>
-          <div class="wizard-actions">
-            <button type="button" class="secondary" id="select-all">Select all in scope</button>
-            <button type="button" class="secondary" id="clear-all">Clear scope</button>
-            <button type="button" class="secondary" id="reset-defaults">Reset to defaults</button>
+          <div class="location-actions">
+            <div class="action-group">
+              <span class="action-group-label">Locations</span>
+              <div class="button-group" role="group" aria-label="Location checkboxes">
+                <button type="button" class="secondary" id="check-all-locations">Check all</button>
+                <button type="button" class="secondary" id="uncheck-all-locations">Uncheck all</button>
+              </div>
+            </div>
+            <div class="action-group">
+              <span class="action-group-label">Scope</span>
+              <div class="button-group" role="group" aria-label="Row selection scope">
+                <button type="button" class="secondary" id="select-all">Select all</button>
+                <button type="button" class="secondary" id="clear-all">Clear</button>
+              </div>
+            </div>
+            <div class="action-group action-group-reset">
+              <button type="button" class="secondary" id="reset-defaults">Reset to defaults</button>
+            </div>
           </div>
           {{end}}
         </aside>

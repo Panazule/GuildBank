@@ -25,7 +25,6 @@
         Quantity
         <input type="number" name="quantity" value="{{.Quantity}}" min="1" max="{{.Item.Quantity}}"
                inputmode="numeric" required>
-        <span class="help">1–{{.Item.Quantity}}</span>
       </label>
       {{with index .ErrorFields "quantity"}}<p class="field-error">{{.}}</p>{{end}}
 
@@ -57,7 +56,7 @@
 
       <label>
         Note (optional)
-        <textarea name="note" rows="4" maxlength="255">{{.Note}}</textarea>
+        <textarea name="note" rows="8" maxlength="255">{{.Note}}</textarea>
         <span class="help">Up to 255 characters. Officers see this note.</span>
       </label>
       {{with index .ErrorFields "note"}}<p class="field-error">{{.}}</p>{{end}}

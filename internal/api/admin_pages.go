@@ -215,12 +215,12 @@ func adminStatusTabs(filter domain.AdminInventoryFilter) []adminStatusTab {
 func adminSortOptions(selected domain.AdminInventorySort) []inventorySortOption {
 	labels := map[domain.AdminInventorySort]string{
 		domain.AdminSortModifiedNewest: "Modified (newest)", domain.AdminSortModifiedOldest: "Modified (oldest)",
-		domain.AdminSortName: "Name", domain.AdminSortNameDesc: "Name (reverse)",
+		domain.AdminSortName: "Name (ascending)", domain.AdminSortNameDesc: "Name (descending)",
 		domain.AdminSortLocation: "Location", domain.AdminSortQuantity: "Quantity",
 		domain.AdminSortDateAdded: "Date added (oldest)", domain.AdminSortDateAddedDesc: "Date added (newest)",
 		domain.AdminSortDateOpen: "Open date (earliest)", domain.AdminSortDateOpenDesc: "Open date (latest)",
 		domain.AdminSortDateBazaar: "Bazaar date (earliest)", domain.AdminSortDateBazaarDesc: "Bazaar date (latest)",
-		domain.AdminSortRecipient: "Recipient", domain.AdminSortRecipientDesc: "Recipient (reverse)",
+		domain.AdminSortRecipient: "Recipient (ascending)", domain.AdminSortRecipientDesc: "Recipient (descending)",
 	}
 	out := make([]inventorySortOption, 0, len(domain.AdminInventorySorts))
 	for _, sort := range domain.AdminInventorySorts {

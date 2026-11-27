@@ -106,7 +106,19 @@ input {
   color: var(--text);
   font: inherit;
 }
-input:focus {
+textarea {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #10130e;
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+input:focus, textarea:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
   border-color: var(--accent);
@@ -228,6 +240,12 @@ button.danger:hover { border-color: var(--danger); background: rgba(239, 138, 12
 .import-layout { display: grid; grid-template-columns: minmax(13rem, 17rem) minmax(0, 1fr); gap: 1.25rem; margin-top: 1.5rem; align-items: start; }
 .location-panel, .row-panel { min-width: 0; }
 .location-list { display: grid; gap: 0.35rem; max-height: 34rem; overflow: auto; padding-right: 0.25rem; }
+.location-actions { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem 1rem; margin-top: 1rem; }
+.action-group { display: flex; flex-direction: column; gap: 0.25rem; }
+.action-group-label { color: var(--muted); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.button-group { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.location-actions button { padding: 0.4rem 0.65rem; font-size: 0.82rem; }
+.action-group-reset { margin-left: auto; }
 .location-item { padding: 0.35rem 0.45rem; border: 1px solid var(--border); border-radius: 6px; }
 .location-toggle { font-weight: 500; }
 .location-toggle input { margin-right: 0.35rem; }
@@ -245,6 +263,7 @@ button:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
   .import-layout { grid-template-columns: 1fr; }
   .location-list { max-height: none; }
   .commit-bar { align-items: flex-start; flex-direction: column; }
+  .action-group-reset { margin-left: 0; }
 }
 
 .sr-only {
@@ -349,7 +368,34 @@ main.card.admin-home {
 .admin-filter-grid .filter-actions { min-height: 2.6rem; }
 
 .admin-table { min-width: 72rem; }
-.actions-cell a { margin-right: 0.6rem; white-space: nowrap; }
+/* UX review round 1: action links are compact icons with native tooltips. The
+   final column is sticky so a narrow window can scroll the data while the
+   actions stay reachable. */
+.actions-cell { text-align: right; }
+.action-links { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.25rem; }
+.action-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+.action-link:hover { border-color: var(--accent); background: rgba(199, 168, 90, 0.12); color: #fff0c0; }
+.action-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.action-icon-svg { display: block; }
+.admin-table th:last-child, .admin-table td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--panel);
+  box-shadow: -1px 0 0 var(--border);
+}
+.admin-table th:last-child { background: #171b13; }
+.account-actions { margin-bottom: 1.25rem; }
 .group-badge {
   display: inline-block;
   padding: 0.1rem 0.45rem;
@@ -486,4 +532,5 @@ main.card.admin-home {
 .age-warning { color: #f0d693; font-weight: 600; }
 .age-critical { color: var(--danger); font-weight: 700; }
 .checkbox-row { display: flex; align-items: center; gap: 0.45rem; min-height: 2.6rem; }
+.checkbox-row span { line-height: 1.25; }
 .checkbox-row input[type="checkbox"] { width: auto; margin: 0; }

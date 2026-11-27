@@ -43,7 +43,7 @@
         </label>
         <label class="checkbox-row">
           <input type="checkbox" name="actionable" value="1"{{if .Filter.Actionable}} checked{{end}}>
-          Only actionable (on hand ≥ 1)
+          <span>Only actionable<br>(on hand ≥ 1)</span>
         </label>
         <div class="filter-actions">
           <button type="submit" class="primary">Apply</button>
@@ -90,10 +90,9 @@
                 <td class="cell-nowrap"><a href="{{.DetailURL}}">#{{.ID}}</a></td>
                 <td class="cell-nowrap"><time datetime="{{.CreatedAtISO}}">{{.CreatedAtText}}</time></td>
                 <td>
-                  {{.Character}}
+                  {{.Character}}{{if and (eq .RequesterKind "Member") .RequesterName}} ({{.RequesterName}}){{end}}
                   {{if .IsPublic}}<span class="chip">Public</span>{{end}}
                   {{if .IsSelf}}<span class="chip">You</span>{{end}}
-                  {{if eq .RequesterKind "Member"}}<span class="muted">{{.RequesterName}}</span>{{end}}
                 </td>
                 <td><a href="/admin/inventory/{{.ItemID}}">{{.ItemName}}</a></td>
                 <td class="cell-nowrap">{{.Quantity}}{{if .ShortStock}} · {{.OnHand}} avail{{end}}</td>
