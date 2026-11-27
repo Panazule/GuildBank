@@ -89,6 +89,11 @@ func TestRouteMatrixEnforcement(t *testing.T) {
 		{"admin", 3, false},
 	}
 
+	// Account routes are probed against a Member so the rank ceiling (an Officer
+	// may not touch an Administrator) cannot masquerade as a route denial; the
+	// ceiling itself is covered by dedicated tests.
+	accountProbeID := h.userID(t, "member1")
+
 	for _, identity := range identities {
 		if identity.anonymous {
 			h.logout(t)
@@ -106,6 +111,9 @@ func TestRouteMatrixEnforcement(t *testing.T) {
 				t.Fatalf("malformed matrix key %q", key)
 			}
 			probePath := concretePath(path)
+			if strings.Contains(probePath, "/users/") {
+				probePath = strings.Replace(probePath, "/users/1", "/users/"+itoa(accountProbeID), 1)
+			}
 			accept := "text/html"
 			if strings.HasPrefix(probePath, "/api/") || probePath == "/healthz" || probePath == "/readyz" {
 				accept = "application/json"

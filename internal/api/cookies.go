@@ -88,10 +88,11 @@ func minimumRoleForPage(target string) (domain.Role, bool) {
 	}
 	path := parsed.Path
 	switch {
-	case pageWithin(path, "/admin/settings"), pageWithin(path, "/admin/users"):
+	case pageWithin(path, "/admin/settings"):
 		return domain.RoleAdmin, true
 	case path == "/admin", pageWithin(path, "/admin/inventory"),
-		pageWithin(path, "/admin/imports"), pageWithin(path, "/admin/audit"):
+		pageWithin(path, "/admin/imports"), pageWithin(path, "/admin/audit"),
+		pageWithin(path, "/admin/users"):
 		return domain.RoleOfficer, true
 	}
 	return "", false

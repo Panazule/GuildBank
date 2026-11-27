@@ -142,7 +142,7 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	registrationHandler := &registrationHandler{registration: deps.Registration, auth: deps.Auth,
 		state: discordState, ticketSigner: ticketSigner, csrfMgr: csrf, views: viewSet,
 		logger: deps.Logger, secure: deps.SecureCookies}
-	ui := &uiHandler{views: viewSet}
+	ui := &uiHandler{admin: deps.Admin, users: deps.Users, views: viewSet}
 
 	// Public forms (login and setup) need a CSRF token even though no session
 	// exists yet. Protected routes authenticate first so an absent session
@@ -223,7 +223,7 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	officer := r.Group("")
 	officer.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequirePasswordChanged(),
 		RequireRole(domain.RoleOfficer), csrf.middleware())
-	officer.GET("/admin", ui.adminRoot)
+	officer.GET("/admin", ui.adminHome)
 	officer.GET("/admin/imports", importHandler.page)
 	officer.GET("/admin/imports/:batchID", importHandler.detailPage)
 	officer.GET("/api/v1/imports", importHandler.list)
@@ -284,7 +284,32 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	officer.GET("/api/v1/audit", adminHandler.auditList)
 	officer.GET("/api/v1/audit/:id", adminHandler.auditEntry)
 
-	// Application configuration and account administration are
+	// Account administration (P2) is Officer work: Officers approve pending
+	// accounts and manage users up to their own rank. The service and store
+	// refuse any action on an Administrator by a non-Administrator, and an
+	// Officer cannot create or promote to Administrator. The HTML pages and the
+	// JSON API share one service, so a form and an API client cannot diverge.
+	officer.GET("/admin/users", usersHandler.page)
+	officer.GET("/admin/users/new", usersHandler.newPage)
+	officer.GET("/admin/users/:id", usersHandler.detailPage)
+	officer.POST("/admin/users", usersHandler.createForm)
+	officer.POST("/admin/users/:id", usersHandler.updateForm)
+	officer.POST("/admin/users/:id/password", usersHandler.resetForm)
+	officer.POST("/admin/users/:id/delete", usersHandler.deleteForm)
+	// Approval is an explicit action rather than a third value in the status
+	// select, so each call maps to exactly one audit event (D-SR §8.2).
+	officer.POST("/admin/users/:id/approve", usersHandler.approveForm)
+	officer.POST("/admin/users/:id/withdraw-approval", usersHandler.withdrawApprovalForm)
+	officer.GET("/api/v1/users", usersHandler.list)
+	officer.POST("/api/v1/users", usersHandler.create)
+	officer.PUT("/api/v1/users/:id", usersHandler.update)
+	officer.POST("/api/v1/users/:id", usersHandler.update)
+	officer.POST("/api/v1/users/:id/password", usersHandler.resetPassword)
+	officer.POST("/api/v1/users/:id/approve", usersHandler.approveAPI)
+	officer.POST("/api/v1/users/:id/withdraw-approval", usersHandler.withdrawApprovalAPI)
+	officer.DELETE("/api/v1/users/:id", usersHandler.remove)
+
+	// Application configuration and character-name removal stay
 	// Administrator-only.
 	admin := r.Group("")
 	admin.Use(RequireAuth(deps.Auth, deps.SecureCookies), RequirePasswordChanged(),
@@ -296,27 +321,6 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	// handler and service, preserving the D-03 single write path.
 	admin.POST("/api/v1/settings", settingsHandler.update)
 
-	// Account administration (P2). The HTML pages and the JSON API share one
-	// service, so a form and an API client cannot diverge.
-	admin.GET("/admin/users", usersHandler.page)
-	admin.GET("/admin/users/new", usersHandler.newPage)
-	admin.GET("/admin/users/:id", usersHandler.detailPage)
-	admin.POST("/admin/users", usersHandler.createForm)
-	admin.POST("/admin/users/:id", usersHandler.updateForm)
-	admin.POST("/admin/users/:id/password", usersHandler.resetForm)
-	admin.POST("/admin/users/:id/delete", usersHandler.deleteForm)
-	// Approval is an explicit action rather than a third value in the status
-	// select, so each call maps to exactly one audit event (D-SR §8.2).
-	admin.POST("/admin/users/:id/approve", usersHandler.approveForm)
-	admin.POST("/admin/users/:id/withdraw-approval", usersHandler.withdrawApprovalForm)
-	admin.GET("/api/v1/users", usersHandler.list)
-	admin.POST("/api/v1/users", usersHandler.create)
-	admin.PUT("/api/v1/users/:id", usersHandler.update)
-	admin.POST("/api/v1/users/:id", usersHandler.update)
-	admin.POST("/api/v1/users/:id/password", usersHandler.resetPassword)
-	admin.POST("/api/v1/users/:id/approve", usersHandler.approveAPI)
-	admin.POST("/api/v1/users/:id/withdraw-approval", usersHandler.withdrawApprovalAPI)
-	admin.DELETE("/api/v1/users/:id", usersHandler.remove)
 	// Administrators may remove a character name from any account but cannot
 	// move it to another account (owner decision D4).
 	admin.POST("/admin/users/:id/characters/:characterID/delete", usersHandler.removeCharacterForm)

@@ -1,0 +1,76 @@
+{{define "admin_home.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card admin-home">
+    <p class="eyebrow">Administration</p>
+    <h1>Administration</h1>
+    <p class="muted">Every officer and administrator workflow in one place. Member actions stay in the main navigation.</p>
+    <p class="muted">Looking for your own requests? Use <a href="/my/requests">My requests</a>.</p>
+
+    <section class="admin-home-section" aria-labelledby="admin-home-requests">
+      <h2 id="admin-home-requests">Request management</h2>
+      <div class="admin-home-grid">
+        <a class="admin-home-card" href="/admin/requests">
+          <span class="admin-home-title">Requests</span>
+          <span class="admin-home-copy">Review member and public requests, oldest first. Approving issues the item in the same step.</span>
+          <span class="admin-home-stat">
+            {{if .RequestCountKnown}}
+              {{if .PendingRequests}}<span class="nav-count">{{.PendingRequests}}</span> pending{{else}}<span class="admin-home-clear">No pending requests</span>{{end}}
+            {{else}}<span class="muted">Pending count unavailable</span>{{end}}
+          </span>
+        </a>
+      </div>
+    </section>
+
+    <section class="admin-home-section" aria-labelledby="admin-home-inventory">
+      <h2 id="admin-home-inventory">Inventory administration</h2>
+      <div class="admin-home-grid">
+        <a class="admin-home-card" href="/admin/inventory">
+          <span class="admin-home-title">Admin inventory</span>
+          <span class="admin-home-copy">Add, edit, issue, return, remove and restore records. Movement history opens from each record.</span>
+          <span class="admin-home-stat">Stock workspace</span>
+        </a>
+        <a class="admin-home-card" href="/admin/imports">
+          <span class="admin-home-title">Imports</span>
+          <span class="admin-home-copy">Upload and commit guild inventory imports, with row-level review before anything is written.</span>
+          <span class="admin-home-stat">Import workspace</span>
+        </a>
+      </div>
+    </section>
+
+    <section class="admin-home-section" aria-labelledby="admin-home-system">
+      <h2 id="admin-home-system">Account and system administration</h2>
+      <div class="admin-home-grid">
+        {{if .User.CanManageUsers}}
+        <a class="admin-home-card" href="/admin/users">
+          <span class="admin-home-title">Accounts</span>
+          <span class="admin-home-copy">Approve new accounts, assign roles, reset passwords and review account status.</span>
+          <span class="admin-home-stat">
+            {{if .AccountCountKnown}}
+              {{if .PendingAccounts}}<span class="nav-count">{{.PendingAccounts}}</span> awaiting approval{{else}}<span class="admin-home-clear">No accounts awaiting approval</span>{{end}}
+            {{else}}<span class="muted">Approval count unavailable</span>{{end}}
+          </span>
+        </a>
+        {{end}}
+        <a class="admin-home-card" href="/admin/audit">
+          <span class="admin-home-title">Audit</span>
+          <span class="admin-home-copy">Inspect the append-only activity history for inventory, requests and account changes.</span>
+          <span class="admin-home-stat">Activity history</span>
+        </a>
+        {{if .User.CanManageSettings}}
+        <a class="admin-home-card" href="/admin/settings">
+          <span class="admin-home-title">Settings</span>
+          <span class="admin-home-copy">Configure the guild, Discord sign-in, registration and application options.</span>
+          <span class="admin-home-stat">Application configuration</span>
+        </a>
+        {{end}}
+      </div>
+    </section>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

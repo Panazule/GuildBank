@@ -50,8 +50,20 @@ type pageData struct {
 	Notice      string
 	ErrorFields map[string]string
 	// PendingRequestCount is the Officer navigation badge. It is populated by
-	// the request pages; other pages leave it zero and render no badge.
+	// the request pages and the Administration landing; other pages leave it
+	// zero and render no badge.
 	PendingRequestCount int
+}
+
+// adminHomePageData backs the single Administration entry point. The counts are
+// advisory and independently optional: an unavailable store leaves the link in
+// place and the page says the count is unavailable instead of failing.
+type adminHomePageData struct {
+	pageData
+	PendingRequests   int
+	RequestCountKnown bool
+	PendingAccounts   int
+	AccountCountKnown bool
 }
 
 type loginPageData struct {
@@ -490,7 +502,11 @@ type userRowView struct {
 	IsSelf             bool
 	// Locked marks the last enabled Administrator: the UI disables role, status
 	// and delete controls, and the store refuses the same changes.
-	Locked     bool
+	Locked bool
+	// OutOfReach marks an account ranked above the signed-in actor. An Officer
+	// may read an Administrator's page but every control is withheld, matching
+	// the service's rank ceiling.
+	OutOfReach bool
 	CanDisable bool
 	CanDelete  bool
 	// CanApprove marks a pending account whose approval the detail page may
@@ -499,6 +515,10 @@ type userRowView struct {
 	// administrator.
 	CanApprove          bool
 	CanWithdrawApproval bool
+	// CanManageCharacters marks the profile-name removal control. Deleting a
+	// character name stays Administrator-only, so an Officer's account pages
+	// never offer it.
+	CanManageCharacters bool
 }
 
 // roleSelectOption is one entry of the role picker.
@@ -556,6 +576,10 @@ type accountPasswordPageData struct {
 	Setting bool
 	// Action is the form target: the set or the change endpoint (D-SR-19).
 	Action string
+}
+
+func (v *views) adminHome(c *gin.Context, status int, data adminHomePageData) {
+	v.render(c, status, "admin_home.html", data)
 }
 
 func (v *views) adminUsers(c *gin.Context, status int, data usersPageData) {

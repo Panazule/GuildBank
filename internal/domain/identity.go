@@ -235,8 +235,10 @@ func (u User) CanAdministerInventory() bool { return u.IsOfficer() }
 // excluded from the Officer view by the audit scope filter.
 func (u User) CanViewAudit() bool { return u.IsOfficer() }
 
-// CanManageUsers reports whether the account may administer accounts.
-func (u User) CanManageUsers() bool { return u.IsAdmin() }
+// CanManageUsers reports whether the account may administer accounts. Account
+// administration is Officer work; the service applies a rank ceiling so an
+// Officer cannot create, promote or modify an Administrator.
+func (u User) CanManageUsers() bool { return u.IsOfficer() }
 
 // CanManageSettings reports whether the account may change application
 // configuration.

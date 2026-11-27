@@ -306,12 +306,14 @@ func (h *usersHandler) page(c *gin.Context) {
 		return
 	}
 	actorID := int64(0)
+	actorRole := domain.RoleMember
 	if session, ok := CurrentSession(c); ok {
 		actorID = session.User.ID
+		actorRole = session.User.Role()
 	}
 	rows := make([]userRowView, 0, len(users))
 	for _, user := range users {
-		rows = append(rows, userRowViewOf(user, actorID, enabledAdmins))
+		rows = append(rows, userRowViewOf(user, actorID, actorRole, enabledAdmins))
 	}
 	data := usersPageData{
 		pageData: pageData{Title: "Accounts", CSRF: CSRF(c), User: currentUserPointer(c)},
@@ -400,7 +402,7 @@ func (h *usersHandler) renderCreate(c *gin.Context, status int, form userFormVal
 			Error: message, ErrorFields: fields,
 		},
 		Form:  form,
-		Roles: userRoleOptions(selected),
+		Roles: userRoleOptions(selected, assignableRoles(c)),
 	})
 }
 
@@ -441,17 +443,19 @@ func (h *usersHandler) loadCharacters(c *gin.Context, userID int64) ([]character
 func (h *usersHandler) renderDetail(c *gin.Context, status int, user domain.User,
 	enabledAdmins int, characters []characterView, message string, fields map[string]string) {
 	actorID := int64(0)
+	actorRole := domain.RoleMember
 	if session, ok := CurrentSession(c); ok {
 		actorID = session.User.ID
+		actorRole = session.User.Role()
 	}
-	row := userRowViewOf(user, actorID, enabledAdmins)
+	row := userRowViewOf(user, actorID, actorRole, enabledAdmins)
 	row.DiscordUserName = h.discordName(c, user.ID)
 	data := userDetailPageData{
 		pageData: pageData{
 			Title: user.UserName, CSRF: CSRF(c), User: currentUserPointer(c),
 			Error: message, ErrorFields: fields,
 		},
-		Row: row, Roles: userRoleOptions(row.Role), EnabledAdmins: enabledAdmins,
+		Row: row, Roles: userRoleOptions(row.Role, assignableRoles(c)), EnabledAdmins: enabledAdmins,
 		Form:       userFormValues{UserName: user.UserName, AccessLevel: user.AccessLevel},
 		Characters: characters,
 	}
@@ -809,9 +813,12 @@ func (h *usersHandler) passwordFailure(c *gin.Context, user domain.User, setting
 
 // userRowViewOf builds the shared account presentation. locked marks the last
 // enabled Administrator, whose role, status and delete controls must stay
-// disabled in the UI as well as in the store.
-func userRowViewOf(u domain.User, actorID int64, enabledAdmins int) userRowView {
+// disabled in the UI as well as in the store. outOfReach marks an account above
+// the actor's own rank: an Officer may read an Administrator's row but cannot
+// change anything about it, because the service refuses the request.
+func userRowViewOf(u domain.User, actorID int64, actorRole domain.Role, enabledAdmins int) userRowView {
 	locked := u.Role() == domain.RoleAdmin && !u.Disabled && enabledAdmins <= 1
+	outOfReach := u.Role().Rank() > actorRole.Rank()
 	isSelf := u.ID == actorID
 	row := userRowView{
 		ID: u.ID, UserName: u.UserName, Role: u.Role(), RoleLabel: userRoleLabel(u.Role()),
@@ -820,12 +827,13 @@ func userRowViewOf(u domain.User, actorID int64, enabledAdmins int) userRowView 
 		MustChangePassword: u.MustChangePassword,
 		LastLoginText:      userTimeText(u.LastLogin),
 		CreatedText:        u.CreatedAt.UTC().Format("2006-01-02"),
-		ModBy:              u.ModBy, IsSelf: isSelf, Locked: locked,
+		ModBy:              u.ModBy, IsSelf: isSelf, Locked: locked, OutOfReach: outOfReach,
 	}
-	row.CanDisable = !row.IsSelf && !locked
-	row.CanDelete = !row.IsSelf && !locked
-	row.CanApprove = row.Pending && !locked
-	row.CanWithdrawApproval = !row.Pending && !row.IsSelf && !locked
+	row.CanDisable = !row.IsSelf && !locked && !outOfReach
+	row.CanDelete = !row.IsSelf && !locked && !outOfReach
+	row.CanApprove = row.Pending && !locked && !outOfReach
+	row.CanWithdrawApproval = !row.Pending && !row.IsSelf && !locked && !outOfReach
+	row.CanManageCharacters = actorRole.Rank() >= domain.RoleAdmin.Rank()
 	return row
 }
 
@@ -856,9 +864,27 @@ func userRoleLabel(role domain.Role) string {
 	}
 }
 
-func userRoleOptions(selected domain.Role) []roleSelectOption {
-	out := make([]roleSelectOption, 0, len(domain.Roles))
+// assignableRoles returns the roles the signed-in actor may grant. An actor
+// never assigns a role above their own, so an Officer cannot create or promote an
+// Administrator; the service enforces the same ceiling. A request without a
+// session fails closed to Member.
+func assignableRoles(c *gin.Context) []domain.Role {
+	actorRole := domain.RoleMember
+	if session, ok := CurrentSession(c); ok {
+		actorRole = session.User.Role()
+	}
+	out := make([]domain.Role, 0, len(domain.Roles))
 	for _, role := range domain.Roles {
+		if actorRole.AtLeast(role) {
+			out = append(out, role)
+		}
+	}
+	return out
+}
+
+func userRoleOptions(selected domain.Role, allowed []domain.Role) []roleSelectOption {
+	out := make([]roleSelectOption, 0, len(allowed))
+	for _, role := range allowed {
 		out = append(out, roleSelectOption{
 			Value: string(role), Label: userRoleLabel(role), Selected: role == selected,
 		})

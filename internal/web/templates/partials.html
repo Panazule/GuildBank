@@ -20,16 +20,7 @@
       <a href="/my/requests">My requests</a>
       <a href="/account/profile">Profile</a>
       {{if .User.CanAdministerInventory}}
-        <a href="/admin/requests">Requests{{if .PendingRequestCount}} <span class="nav-count" aria-label="{{.PendingRequestCount}} pending">{{.PendingRequestCount}}</span>{{end}}</a>
-        <a href="/admin/inventory">Admin inventory</a>
-        <a href="/admin/imports">Imports</a>
-        <a href="/admin/audit">Audit</a>
-      {{end}}
-      {{if .User.CanManageUsers}}
-        <a href="/admin/users">Accounts</a>
-      {{end}}
-      {{if .User.CanManageSettings}}
-        <a href="/admin/settings">Settings</a>
+        <a href="/admin">Administration{{if .PendingRequestCount}} <span class="nav-count" aria-label="{{.PendingRequestCount}} pending requests">{{.PendingRequestCount}}</span>{{end}}</a>
       {{end}}
       <form method="post" action="/api/v1/auth/logout" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">

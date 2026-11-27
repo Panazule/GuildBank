@@ -317,7 +317,7 @@ func TestPublicInventoryHTMLRenderingAndSessionParity(t *testing.T) {
 		t.Fatalf("authenticated projection changed: %s", authBody)
 	}
 	adminPage, adminBody := h.request(http.MethodGet, "/", "", nil, "text/html")
-	if adminPage.StatusCode != http.StatusOK || !bytes.Contains(adminBody, []byte(`href="/admin/settings"`)) {
+	if adminPage.StatusCode != http.StatusOK || !bytes.Contains(adminBody, []byte(`href="/admin"`)) {
 		t.Fatalf("authenticated navigation missing: %s", adminBody)
 	}
 

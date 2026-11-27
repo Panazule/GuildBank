@@ -144,9 +144,20 @@ func TestResetUserPasswordRevokesSessionsAndRequiresChange(t *testing.T) {
 		t.Fatalf("admin sessions = %d, want 1", n)
 	}
 
-	if _, err := store.ResetUserPassword(ctx, targetID, "hash",
-		now, domain.Actor{UserID: 9, UserName: "officer", Role: domain.RoleOfficer}); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("non-admin actor = %v, want ErrForbidden", err)
+	// Members can never reset a password, and the rank ceiling stops an Officer
+	// from touching an Administrator even though Officer-rank work is normally
+	// theirs.
+	memberActor := domain.Actor{UserID: 9, UserName: "member", Role: domain.RoleMember}
+	if _, err := store.ResetUserPassword(ctx, targetID, "hash", now, memberActor); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("member actor = %v, want ErrForbidden", err)
+	}
+	resetterID := insertUserForTest(t, store, "Resetter", domain.RoleOfficer, false)
+	officerActor := domain.Actor{UserID: resetterID, UserName: "Resetter", Role: domain.RoleOfficer}
+	if _, err := store.ResetUserPassword(ctx, targetID, "$2a$04$officerreset", now, officerActor); err != nil {
+		t.Fatalf("officer resetting an equal-rank account: %v", err)
+	}
+	if _, err := store.ResetUserPassword(ctx, adminID, "hash", now, officerActor); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("officer resetting an administrator = %v, want ErrForbidden", err)
 	}
 	if _, err := store.ResetUserPassword(ctx, 999, "hash", now, adminActorForTest()); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown account = %v, want ErrNotFound", err)

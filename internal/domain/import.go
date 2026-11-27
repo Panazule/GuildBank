@@ -36,6 +36,30 @@ func (a Actor) CanManageInventory() bool {
 	return a.IsAdmin
 }
 
+// CanManageUsers reports whether the actor may administer accounts. Officers and
+// Administrators hold the capability; the rank ceiling in CanManageRole decides
+// which accounts and role assignments they may touch.
+func (a Actor) CanManageUsers() bool {
+	if a.Role != "" {
+		return a.Role.AtLeast(RoleOfficer)
+	}
+	return a.IsAdmin
+}
+
+// CanManageRole reports whether the actor may manage accounts holding role, or
+// assign role. An actor never reaches above their own rank, so an Officer cannot
+// create, promote to, or modify an Administrator. A legacy snapshot carries only
+// IsAdmin, which is the Administrator rank.
+func (a Actor) CanManageRole(role Role) bool {
+	if !a.CanManageUsers() {
+		return false
+	}
+	if a.Role == "" {
+		return true
+	}
+	return a.Role.AtLeast(role)
+}
+
 // ImportBatch is one uploaded file and its durable lifecycle state.
 type ImportBatch struct {
 	ImportBatchID    int64

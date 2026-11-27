@@ -219,12 +219,33 @@ func TestCreateUserRefusals(t *testing.T) {
 	in := domain.CreateUserInput{UserName: "Keeper", Password: "a temporary password",
 		ConfirmPassword: "a temporary password"}
 
+	// An Officer may add Members and Officers, but never an Administrator.
 	officer := domain.Actor{UserID: 2, UserName: "officer", Role: domain.RoleOfficer}
-	if _, err := svc.Create(ctx, in, officer, "", ""); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("non-admin create = %v, want ErrForbidden", err)
+	memberIn := domain.CreateUserInput{UserName: "Recruit", Password: "a temporary password",
+		ConfirmPassword: "a temporary password"}
+	if _, err := svc.Create(ctx, memberIn, officer, "", ""); err != nil {
+		t.Fatalf("officer create Member = %v, want success", err)
 	}
-	if len(store.users) != 1 {
+	if len(store.users) != 2 {
+		t.Fatalf("the officer create did not add an account: %+v", store.users)
+	}
+
+	adminIn := memberIn
+	adminIn.UserName = "Overlord"
+	adminIn.AccessLevel = string(domain.RoleAdmin)
+	if _, err := svc.Create(ctx, adminIn, officer, "", ""); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("officer create Admin = %v, want ErrForbidden", err)
+	}
+	if len(store.users) != 2 {
 		t.Fatalf("a forbidden create added an account: %+v", store.users)
+	}
+
+	// A Member has no account-administration rights at all.
+	memberActor := domain.Actor{UserID: 3, UserName: "member", Role: domain.RoleMember}
+	recruit := memberIn
+	recruit.UserName = "Another"
+	if _, err := svc.Create(ctx, recruit, memberActor, "", ""); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("member create = %v, want ErrForbidden", err)
 	}
 
 	// The password policy is applied with the username, so the equality rule is

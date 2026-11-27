@@ -58,7 +58,7 @@ func TestLoginNextRespectsRole(t *testing.T) {
 		{"member1", "/admin/inventory", "/"},
 		{"member1", "/admin/users", "/"},
 		{"officer1", "/admin/settings", "/"},
-		{"officer1", "/admin/users", "/"},
+		{"officer1", "/admin/users", "/admin/users"},
 		// Open redirects stay rejected.
 		{"member1", "//evil.example/path", "/"},
 		{"member1", "https://evil.example/path", "/"},

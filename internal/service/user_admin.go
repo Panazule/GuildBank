@@ -151,7 +151,9 @@ func (s *UserAdminService) Create(ctx context.Context, in domain.CreateUserInput
 	if err := s.requireReady(); err != nil {
 		return domain.User{}, err
 	}
-	if !actor.IsAdmin {
+	// An actor never creates an account above their own rank: an Officer may add
+	// Members and Officers, an Administrator may add anything.
+	if !actor.CanManageRole(in.RoleValue()) {
 		return domain.User{}, domain.ErrForbidden
 	}
 	if err := in.Validate(); err != nil {
@@ -198,12 +200,16 @@ func (s *UserAdminService) setAccountStatus(ctx context.Context, id int64, statu
 	if err := s.requireReady(); err != nil {
 		return domain.User{}, err
 	}
-	if !actor.IsAdmin {
+	if !actor.CanManageUsers() {
 		return domain.User{}, domain.ErrForbidden
 	}
 	current, err := s.store.GetUserByID(ctx, id)
 	if err != nil {
 		return domain.User{}, err
+	}
+	// An Officer cannot approve, withdraw or otherwise act on an Administrator.
+	if !actor.CanManageRole(current.Role()) {
+		return domain.User{}, domain.ErrForbidden
 	}
 	// Withdrawing an operator's own approval would end their own session
 	// mid-request, exactly like disabling their own account.
@@ -243,16 +249,24 @@ func (s *UserAdminService) SetRole(ctx context.Context, id int64, roleValue stri
 	if err := s.requireReady(); err != nil {
 		return domain.User{}, err
 	}
-	if !actor.IsAdmin {
+	if !actor.CanManageUsers() {
 		return domain.User{}, domain.ErrForbidden
 	}
 	role, err := domain.ParseRoleInput(roleValue)
 	if err != nil {
 		return domain.User{}, err
 	}
+	// The rank ceiling applies to both sides: an Officer may not touch an
+	// Administrator, nor promote anyone (including themselves) to Administrator.
+	if !actor.CanManageRole(role) {
+		return domain.User{}, domain.ErrForbidden
+	}
 	current, err := s.store.GetUserByID(ctx, id)
 	if err != nil {
 		return domain.User{}, err
+	}
+	if !actor.CanManageRole(current.Role()) {
+		return domain.User{}, domain.ErrForbidden
 	}
 	if current.Role() == role {
 		current.PasswordHash = ""
@@ -279,12 +293,15 @@ func (s *UserAdminService) SetDisabled(ctx context.Context, id int64, disabled b
 	if err := s.requireReady(); err != nil {
 		return domain.User{}, err
 	}
-	if !actor.IsAdmin {
+	if !actor.CanManageUsers() {
 		return domain.User{}, domain.ErrForbidden
 	}
 	current, err := s.store.GetUserByID(ctx, id)
 	if err != nil {
 		return domain.User{}, err
+	}
+	if !actor.CanManageRole(current.Role()) {
+		return domain.User{}, domain.ErrForbidden
 	}
 	if disabled && current.ID == actor.UserID {
 		return domain.User{}, fmt.Errorf("%w: you cannot disable your own account", domain.ErrConflict)
@@ -316,7 +333,7 @@ func (s *UserAdminService) ResetPassword(ctx context.Context, id int64, in domai
 	if err := s.requireReady(); err != nil {
 		return domain.User{}, err
 	}
-	if !actor.IsAdmin {
+	if !actor.CanManageUsers() {
 		return domain.User{}, domain.ErrForbidden
 	}
 	if err := in.Validate(); err != nil {
@@ -325,6 +342,9 @@ func (s *UserAdminService) ResetPassword(ctx context.Context, id int64, in domai
 	target, err := s.store.GetUserByID(ctx, id)
 	if err != nil {
 		return domain.User{}, err
+	}
+	if !actor.CanManageRole(target.Role()) {
+		return domain.User{}, domain.ErrForbidden
 	}
 	hash, err := HashUserPassword(target.UserName, in.Password)
 	if err != nil {
@@ -348,12 +368,15 @@ func (s *UserAdminService) Delete(ctx context.Context, id int64, in domain.Delet
 	if err := s.requireReady(); err != nil {
 		return err
 	}
-	if !actor.IsAdmin {
+	if !actor.CanManageUsers() {
 		return domain.ErrForbidden
 	}
 	target, err := s.store.GetUserByID(ctx, id)
 	if err != nil {
 		return err
+	}
+	if !actor.CanManageRole(target.Role()) {
+		return domain.ErrForbidden
 	}
 	if target.ID == actor.UserID {
 		return fmt.Errorf("%w: you cannot delete your own account", domain.ErrConflict)

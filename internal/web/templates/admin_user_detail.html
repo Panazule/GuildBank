@@ -13,6 +13,7 @@
       last login {{.Row.LastLoginText}} · created {{.Row.CreatedText}}{{if .Row.ModBy}} · last changed by {{.Row.ModBy}}{{end}}
     </p>
     {{if .Row.Locked}}<div class="alert alert-warn" role="status">This is the last enabled administrator. The role, status and delete actions are unavailable until another enabled administrator exists.</div>{{end}}
+    {{if .Row.OutOfReach}}<div class="alert alert-warn" role="status">This account outranks yours. You can review it, but only an Administrator can change its role, status, password or characters.</div>{{end}}
     {{if .Row.Pending}}<div class="alert alert-warn" role="status">This account is waiting for approval. It cannot sign in and cannot use character names yet.</div>{{end}}
     {{if .Row.MustChangePassword}}<div class="alert alert-warn" role="status">The account must change its password at the next sign-in.</div>{{end}}
     {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
@@ -46,26 +47,30 @@
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <label>
         Role
-        <select name="accessLevel"{{if or .Row.Locked .Row.Pending}} disabled{{end}}>
+        <select name="accessLevel"{{if or .Row.Locked .Row.Pending .Row.OutOfReach}} disabled{{end}}>
           {{range .Roles}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
         </select>
         {{if .Row.Pending}}<span class="help">Approve the account before assigning a role.</span>{{end}}
+        {{if .Row.OutOfReach}}<span class="help">You cannot assign a role at or above your own rank from here.</span>{{end}}
       </label>
       <label>
         Status
-        <select name="status"{{if .Row.Locked}} disabled{{end}}>
+        <select name="status"{{if or .Row.Locked .Row.OutOfReach}} disabled{{end}}>
           <option value="active"{{if not .Row.Disabled}} selected{{end}}>Active</option>
           <option value="disabled"{{if .Row.Disabled}} selected{{end}}>Disabled</option>
         </select>
         <span class="help">Disabling signs the account out everywhere. Re-enabling does not restore a session.</span>
       </label>
       <div class="wizard-actions">
-        <button type="submit" class="primary"{{if .Row.Locked}} disabled{{end}}>Save changes</button>
+        <button type="submit" class="primary"{{if or .Row.Locked .Row.OutOfReach}} disabled{{end}}>Save changes</button>
       </div>
     </form>
 
     <h2>Reset password</h2>
     <p class="muted">Sets a temporary password, requires a change at the next sign-in and signs the account out everywhere.</p>
+    {{if .Row.OutOfReach}}
+    <p class="muted">Only an Administrator can reset the password of an account that outranks them.</p>
+    {{else}}
     <form method="post" action="/admin/users/{{.Row.ID}}/password" class="stack">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <label>
@@ -81,6 +86,7 @@
         <button type="submit" class="secondary">Reset password</button>
       </div>
     </form>
+    {{end}}
 
     <h2>Characters</h2>
     <p class="muted">Profile names this account can use as a requester. Administrators may remove a name but cannot move it to another account.</p>
@@ -95,10 +101,14 @@
             <td>{{.Name}}</td>
             <td>{{.CreatedText}}</td>
             <td>
+              {{if $.Row.CanManageCharacters}}
               <form method="post" action="/admin/users/{{$.Row.ID}}/characters/{{.ID}}/delete" class="inline-form">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button type="submit" class="link-button">Remove</button>
               </form>
+              {{else}}
+              <span class="muted">Administrator only</span>
+              {{end}}
             </td>
           </tr>
           {{end}}

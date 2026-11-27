@@ -53,26 +53,31 @@ func TestNavigationVisibilityFollowsRole(t *testing.T) {
 		t.Fatal("member navigation is missing sign out")
 	}
 
+	// Officers and Administrators get one entry. The individual operational
+	// destinations live on /admin, so the header cannot grow with every tool.
 	officer := renderNav(t, &domain.User{UserName: "officer1", AccessLevel: "Officer"})
-	for _, href := range []string{`href="/admin/requests"`, `href="/admin/inventory"`, `href="/admin/imports"`, `href="/admin/audit"`} {
-		if !bytes.Contains([]byte(officer), []byte(href)) {
-			t.Fatalf("officer navigation missing %s", href)
-		}
+	if !bytes.Contains([]byte(officer), []byte(`href="/admin"`)) {
+		t.Fatal("officer navigation is missing the administration entry")
 	}
-	if bytes.Contains([]byte(officer), []byte(`href="/admin/settings"`)) {
-		t.Fatal("officer navigation exposes settings")
-	}
-
-	admin := renderNav(t, &domain.User{UserName: "admin", AccessLevel: domain.AccessAdmin})
 	for _, href := range []string{
 		`href="/admin/requests"`, `href="/admin/inventory"`, `href="/admin/imports"`,
 		`href="/admin/audit"`, `href="/admin/users"`, `href="/admin/settings"`,
 	} {
-		if !bytes.Contains([]byte(admin), []byte(href)) {
-			t.Fatalf("administrator navigation missing %s", href)
+		if bytes.Contains([]byte(officer), []byte(href)) {
+			t.Fatalf("officer navigation exposes the operational link %s directly", href)
 		}
 	}
-	if bytes.Contains([]byte(officer), []byte(`href="/admin/users"`)) {
-		t.Fatal("officer navigation exposes account management")
+
+	admin := renderNav(t, &domain.User{UserName: "admin", AccessLevel: domain.AccessAdmin})
+	if !bytes.Contains([]byte(admin), []byte(`href="/admin"`)) {
+		t.Fatal("administrator navigation is missing the administration entry")
+	}
+	for _, href := range []string{
+		`href="/admin/requests"`, `href="/admin/inventory"`, `href="/admin/imports"`,
+		`href="/admin/audit"`, `href="/admin/users"`, `href="/admin/settings"`,
+	} {
+		if bytes.Contains([]byte(admin), []byte(href)) {
+			t.Fatalf("administrator navigation exposes the operational link %s directly", href)
+		}
 	}
 }

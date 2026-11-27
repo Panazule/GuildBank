@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -60,28 +61,55 @@ func TestDisabledAccountCannotLogin(t *testing.T) {
 	}
 }
 
-// The /admin landing is role-aware and an Officer is refused the
-// Administrator-only settings page.
-func TestAdminLandingFollowsRole(t *testing.T) {
+// The Administration landing is role-aware: an Officer sees operational
+// inventory, import, request, audit and account destinations, while settings
+// administration remains an Administrator-only set within the same page.
+func TestAdministrationLandingFollowsRole(t *testing.T) {
 	h := newHarness(t, false)
 	h.completeSetup()
 	h.seedUser(t, "officer1", domain.RoleOfficer, false)
 
 	h.loginAs(t, "officer1")
-	resp, _ := h.request(http.MethodGet, "/admin", "", nil, "text/html")
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/admin/inventory" {
-		t.Fatalf("officer /admin = %d %q, want 303 /admin/inventory",
-			resp.StatusCode, resp.Header.Get("Location"))
+	resp, body := h.request(http.MethodGet, "/admin", "", nil, "text/html")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("officer /admin = %d: %s", resp.StatusCode, body)
 	}
+	for _, want := range []string{
+		"<h1>Administration</h1>",
+		`href="/admin/requests"`, `href="/admin/inventory"`,
+		`href="/admin/imports"`, `href="/admin/audit"`, `href="/admin/users"`,
+	} {
+		if !bytes.Contains(body, []byte(want)) {
+			t.Fatalf("officer administration page missing %q\n%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{`href="/admin/settings"`} {
+		if bytes.Contains(body, []byte(unwanted)) {
+			t.Fatalf("officer administration page exposes %s\n%s", unwanted, body)
+		}
+	}
+
+	// Accounts are Officer work; Settings remain closed to them.
+	if resp, page := h.request(http.MethodGet, "/admin/users", "", nil, "text/html"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("officer /admin/users = %d: %s", resp.StatusCode, page)
+	}
+
 	resp, _ = h.request(http.MethodGet, "/admin/settings", "", nil, "text/html")
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("officer settings = %d, want 403", resp.StatusCode)
 	}
 
 	h.loginAs(t, "admin")
-	resp, _ = h.request(http.MethodGet, "/admin", "", nil, "text/html")
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/admin/settings" {
-		t.Fatalf("admin /admin = %d %q, want 303 /admin/settings",
-			resp.StatusCode, resp.Header.Get("Location"))
+	resp, body = h.request(http.MethodGet, "/admin", "", nil, "text/html")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin /admin = %d: %s", resp.StatusCode, body)
+	}
+	for _, want := range []string{
+		`href="/admin/users"`, `href="/admin/settings"`,
+		`href="/admin/audit"`, `href="/admin/requests"`,
+	} {
+		if !bytes.Contains(body, []byte(want)) {
+			t.Fatalf("administrator administration page missing %q\n%s", want, body)
+		}
 	}
 }

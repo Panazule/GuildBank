@@ -75,7 +75,7 @@ func TestAdministratorNavigationAndSettingsPage(t *testing.T) {
 	if bytes.Contains(body, []byte(`href="/login"`)) {
 		t.Fatalf("authenticated navigation still offers login: %s", body)
 	}
-	navLinkOrder(t, body, "/", "/account/profile", "/admin/inventory", "/admin/imports", "/admin/audit", "/admin/users", "/admin/settings")
+	navLinkOrder(t, body, "/", "/my/requests", "/account/profile", "/admin")
 	if !bytes.Contains(body, []byte("Sign out")) {
 		t.Fatalf("authenticated navigation missing sign out: %s", body)
 	}

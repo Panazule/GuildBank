@@ -141,31 +141,34 @@ var routeMatrix = map[string]routeClass{
 	"GET /api/v1/audit":                       classOfficer,
 	"GET /api/v1/audit/:id":                   classOfficer,
 
-	// Administrator: application configuration and account administration.
+	// Administrator: application configuration only.
 	"GET /admin/settings":   classAdmin,
 	"GET /api/v1/settings":  classAdmin,
 	"PUT /api/v1/settings":  classAdmin,
 	"POST /api/v1/settings": classAdmin,
 
-	"GET /admin/users":                classAdmin,
-	"GET /admin/users/new":            classAdmin,
-	"GET /admin/users/:id":            classAdmin,
-	"POST /admin/users":               classAdmin,
-	"POST /admin/users/:id":           classAdmin,
-	"POST /admin/users/:id/password":  classAdmin,
-	"POST /admin/users/:id/delete":    classAdmin,
-	"GET /api/v1/users":               classAdmin,
-	"POST /api/v1/users":              classAdmin,
-	"PUT /api/v1/users/:id":           classAdmin,
-	"POST /api/v1/users/:id":          classAdmin,
-	"DELETE /api/v1/users/:id":        classAdmin,
-	"POST /api/v1/users/:id/password": classAdmin,
+	// Officer: account administration. The service applies a rank ceiling so an
+	// Officer cannot create, promote or modify an Administrator; Settings stays
+	// Administrator-only.
+	"GET /admin/users":                classOfficer,
+	"GET /admin/users/new":            classOfficer,
+	"GET /admin/users/:id":            classOfficer,
+	"POST /admin/users":               classOfficer,
+	"POST /admin/users/:id":           classOfficer,
+	"POST /admin/users/:id/password":  classOfficer,
+	"POST /admin/users/:id/delete":    classOfficer,
+	"GET /api/v1/users":               classOfficer,
+	"POST /api/v1/users":              classOfficer,
+	"PUT /api/v1/users/:id":           classOfficer,
+	"POST /api/v1/users/:id":          classOfficer,
+	"DELETE /api/v1/users/:id":        classOfficer,
+	"POST /api/v1/users/:id/password": classOfficer,
 
 	// Approval is an explicit action, one request per audit event.
-	"POST /admin/users/:id/approve":            classAdmin,
-	"POST /admin/users/:id/withdraw-approval":  classAdmin,
-	"POST /api/v1/users/:id/approve":           classAdmin,
-	"POST /api/v1/users/:id/withdraw-approval": classAdmin,
+	"POST /admin/users/:id/approve":            classOfficer,
+	"POST /admin/users/:id/withdraw-approval":  classOfficer,
+	"POST /api/v1/users/:id/approve":           classOfficer,
+	"POST /api/v1/users/:id/withdraw-approval": classOfficer,
 
 	// Administrators may remove a character name from any account (D4).
 	"POST /admin/users/:id/characters/:characterID/delete": classAdmin,

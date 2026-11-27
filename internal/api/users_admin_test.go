@@ -71,6 +71,26 @@ func (h *harness) userID(t *testing.T, name string) int64 {
 	return id
 }
 
+// userExists reports whether an account row with the name is present.
+func (h *harness) userExists(t *testing.T, name string) bool {
+	t.Helper()
+	var n int
+	if err := h.store.DB().QueryRow(`SELECT COUNT(1) FROM Users WHERE UserName = ?`, name).Scan(&n); err != nil {
+		t.Fatalf("count user %s: %v", name, err)
+	}
+	return n > 0
+}
+
+// userRole reads the stored access level for a name.
+func (h *harness) userRole(t *testing.T, name string) domain.Role {
+	t.Helper()
+	var level string
+	if err := h.store.DB().QueryRow(`SELECT AccessLevel FROM Users WHERE UserName = ?`, name).Scan(&level); err != nil {
+		t.Fatalf("role for %s: %v", name, err)
+	}
+	return domain.ParseRole(level)
+}
+
 func (h *harness) sessionCount(t *testing.T, userID int64) int {
 	t.Helper()
 	var n int
@@ -96,37 +116,150 @@ func (h *harness) createAccount(t *testing.T, name, role, password string) int64
 	return env.Data.User.ID
 }
 
-// TestUserAdministrationIsAdministratorOnly proves the account routes inherit
-// the Administrator gate, for both the pages and the API.
-func TestUserAdministrationIsAdministratorOnly(t *testing.T) {
+// TestAccountAdministrationRequiresOfficer proves the account routes refuse a
+// Member, for both the pages and the API. Account administration used to be
+// Administrator-only; Members must still be turned away.
+func TestAccountAdministrationRequiresOfficer(t *testing.T) {
 	h := newHarness(t, false)
 	h.completeSetup()
 	h.seedUser(t, "member1", domain.RoleMember, false)
-	h.seedUser(t, "officer1", domain.RoleOfficer, false)
 
-	for _, name := range []string{"member1", "officer1"} {
-		h.loginAs(t, name)
-		for _, probe := range []struct {
-			method string
-			path   string
-			accept string
-		}{
-			{http.MethodGet, "/api/v1/users", "application/json"},
-			{http.MethodGet, "/admin/users", "text/html"},
-			{http.MethodGet, "/admin/users/new", "text/html"},
-			{http.MethodGet, "/admin/users/1", "text/html"},
-		} {
-			resp, _ := h.request(probe.method, probe.path, "", nil, probe.accept)
-			if resp.StatusCode != http.StatusForbidden {
-				t.Fatalf("%s %s as %s = %d, want 403", probe.method, probe.path, name, resp.StatusCode)
-			}
-		}
-		body, _ := json.Marshal(map[string]string{"userName": "Intruder", "accessLevel": "Admin",
-			"password": "a temporary password", "confirmPassword": "a temporary password"})
-		resp, _ := h.request(http.MethodPost, "/api/v1/users", h.csrf(), body, "application/json")
+	h.loginAs(t, "member1")
+	for _, probe := range []struct {
+		method string
+		path   string
+		accept string
+	}{
+		{http.MethodGet, "/api/v1/users", "application/json"},
+		{http.MethodGet, "/admin/users", "text/html"},
+		{http.MethodGet, "/admin/users/new", "text/html"},
+		{http.MethodGet, "/admin/users/1", "text/html"},
+	} {
+		resp, _ := h.request(probe.method, probe.path, "", nil, probe.accept)
 		if resp.StatusCode != http.StatusForbidden {
-			t.Fatalf("create as %s = %d, want 403", name, resp.StatusCode)
+			t.Fatalf("%s %s as member = %d, want 403", probe.method, probe.path, resp.StatusCode)
 		}
+	}
+	body, _ := json.Marshal(map[string]string{"userName": "Intruder", "accessLevel": "Member",
+		"password": "a temporary password", "confirmPassword": "a temporary password"})
+	resp, _ := h.request(http.MethodPost, "/api/v1/users", h.csrf(), body, "application/json")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("create as member = %d, want 403", resp.StatusCode)
+	}
+}
+
+// TestOfficerAdministersAccountsWithinRankCeiling covers the widened gate: an
+// Officer runs day-to-day accounts, but the rank ceiling stops every path to
+// creating, promoting or touching an Administrator, and Settings stay closed.
+func TestOfficerAdministersAccountsWithinRankCeiling(t *testing.T) {
+	h := newHarness(t, false)
+	h.completeSetup()
+	const temporary = "a temporary password"
+	h.seedUser(t, "officer1", domain.RoleOfficer, false)
+	adminID := h.userID(t, "admin")
+
+	h.loginAs(t, "officer1")
+
+	// Pages and the list API open for an Officer.
+	for _, probe := range []struct {
+		method string
+		path   string
+		accept string
+	}{
+		{http.MethodGet, "/api/v1/users", "application/json"},
+		{http.MethodGet, "/admin/users", "text/html"},
+		{http.MethodGet, "/admin/users/new", "text/html"},
+		{http.MethodGet, "/admin/users/" + itoa(adminID), "text/html"},
+	} {
+		resp, data := h.request(probe.method, probe.path, "", nil, probe.accept)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s %s as officer = %d: %s", probe.method, probe.path, resp.StatusCode, data)
+		}
+	}
+
+	// The pages explain the ceiling rather than offering controls that would fail.
+	_, listPage := h.request(http.MethodGet, "/admin/users", "", nil, "text/html")
+	if !strings.Contains(string(listPage), "outranks yours") {
+		t.Fatalf("officer account list does not mark the Administrator as out of reach: %s", listPage)
+	}
+	_, newPage := h.request(http.MethodGet, "/admin/users/new", "", nil, "text/html")
+	if strings.Contains(string(newPage), `<option value="Admin"`) {
+		t.Fatalf("officer create form offers an Administrator role: %s", newPage)
+	}
+	if !strings.Contains(string(newPage), `<option value="Officer"`) {
+		t.Fatalf("officer create form does not offer the Officer role: %s", newPage)
+	}
+	_, adminPage := h.request(http.MethodGet, "/admin/users/"+itoa(adminID), "", nil, "text/html")
+	if !strings.Contains(string(adminPage), "This account outranks yours.") {
+		t.Fatalf("officer detail page for an Administrator lacks the out-of-reach notice: %s", adminPage)
+	}
+	if !strings.Contains(string(adminPage), `<select name="accessLevel" disabled>`) {
+		t.Fatalf("officer detail page leaves the Administrator role select enabled: %s", adminPage)
+	}
+
+	// Settings remain Administrator-only.
+	for _, path := range []string{"/admin/settings"} {
+		if resp, _ := h.request(http.MethodGet, path, "", nil, "text/html"); resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("officer %s = %d, want 403", path, resp.StatusCode)
+		}
+	}
+
+	// Creating Members and Officers succeeds.
+	h.createAccount(t, "Recruit", "Member", temporary)
+	h.createAccount(t, "Lieutenant", "Officer", temporary)
+
+	// Creating an Administrator does not.
+	body, _ := json.Marshal(map[string]string{"userName": "Overlord", "accessLevel": "Admin",
+		"password": temporary, "confirmPassword": temporary})
+	resp, data := h.request(http.MethodPost, "/api/v1/users", h.csrf(), body, "application/json")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("officer create Admin = %d, want 403: %s", resp.StatusCode, data)
+	}
+	if h.userExists(t, "Overlord") {
+		t.Fatal("a refused Administrator create still added the account")
+	}
+
+	// Promoting someone to Administrator does not.
+	recruitID := h.userID(t, "Recruit")
+	roleBody, _ := json.Marshal(map[string]string{"accessLevel": "Admin"})
+	resp, data = h.request(http.MethodPut, "/api/v1/users/"+itoa(recruitID), h.csrf(), roleBody, "application/json")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("officer promote to Admin = %d, want 403: %s", resp.StatusCode, data)
+	}
+	if role := h.userRole(t, "Recruit"); role != domain.RoleMember {
+		t.Fatalf("Recruit role = %q after the refused promotion", role)
+	}
+
+	// Promoting a Member to Officer is inside the ceiling.
+	officerBody, _ := json.Marshal(map[string]string{"accessLevel": "Officer"})
+	resp, data = h.request(http.MethodPut, "/api/v1/users/"+itoa(recruitID), h.csrf(), officerBody, "application/json")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("officer promote to Officer = %d: %s", resp.StatusCode, data)
+	}
+
+	// An Administrator account is out of reach: demote, disable, reset and delete.
+	demote, _ := json.Marshal(map[string]string{"accessLevel": "Member"})
+	resp, data = h.request(http.MethodPut, "/api/v1/users/"+itoa(adminID), h.csrf(), demote, "application/json")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("officer demote Admin = %d, want 403: %s", resp.StatusCode, data)
+	}
+	disable, _ := json.Marshal(map[string]bool{"disabled": true})
+	resp, data = h.request(http.MethodPost, "/api/v1/users/"+itoa(adminID), h.csrf(), disable, "application/json")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("officer disable Admin = %d, want 403: %s", resp.StatusCode, data)
+	}
+	reset, _ := json.Marshal(map[string]string{"password": temporary, "confirmPassword": temporary})
+	resp, data = h.request(http.MethodPost, "/api/v1/users/"+itoa(adminID)+"/password", h.csrf(), reset, "application/json")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("officer reset Admin password = %d, want 403: %s", resp.StatusCode, data)
+	}
+	confirm, _ := json.Marshal(map[string]string{"confirmUserName": "admin"})
+	resp, data = h.request(http.MethodDelete, "/api/v1/users/"+itoa(adminID), h.csrf(), confirm, "application/json")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("officer delete Admin = %d, want 403: %s", resp.StatusCode, data)
+	}
+	if role := h.userRole(t, "admin"); role != domain.RoleAdmin {
+		t.Fatalf("admin role = %q after the refused modifications", role)
 	}
 }
 

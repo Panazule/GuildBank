@@ -284,10 +284,11 @@ func (s *Store) CreateRegisteredUser(ctx context.Context, u domain.User,
 // SetUserAccountStatus approves or withdraws approval of one account. Moving an
 // account out of Approved deletes every session for it in the same transaction,
 // mirroring disabling, so a withdrawn approval cannot keep an authenticated
-// browser. The actor must be an Administrator.
+// browser. The actor needs account-administration rights and must not be acting
+// on an account above their own rank.
 func (s *Store) SetUserAccountStatus(ctx context.Context, userID int64, status domain.AccountStatus,
 	at time.Time, actor domain.Actor) (domain.User, error) {
-	if !actor.IsAdmin {
+	if !actor.CanManageUsers() {
 		return domain.User{}, domain.ErrForbidden
 	}
 	if !status.Valid() {
@@ -303,6 +304,9 @@ func (s *Store) SetUserAccountStatus(ctx context.Context, userID int64, status d
 	current, err := getUserByID(ctx, tx, userID)
 	if err != nil {
 		return domain.User{}, err
+	}
+	if !actor.CanManageRole(current.Role()) {
+		return domain.User{}, domain.ErrForbidden
 	}
 	if current.Status() == status {
 		return current, nil
@@ -396,13 +400,14 @@ func getUserByID(ctx context.Context, q rowQuerier, userID int64) (domain.User, 
 
 // SetUserAccessLevel changes one account's role. It runs in a single
 // transaction and refuses to remove the last enabled Administrator. The actor
-// must be an Administrator; the route layer already enforces the same rule.
+// needs account-administration rights, may not assign a role above their own and
+// may not change an account above their own rank.
 func (s *Store) SetUserAccessLevel(ctx context.Context, userID int64, role domain.Role,
 	at time.Time, actor domain.Actor) (domain.User, error) {
 	if !role.Valid() {
 		return domain.User{}, domain.NewValidationError("role", "role must be Admin, Officer or Member")
 	}
-	if !actor.IsAdmin {
+	if !actor.CanManageRole(role) {
 		return domain.User{}, domain.ErrForbidden
 	}
 
@@ -415,6 +420,9 @@ func (s *Store) SetUserAccessLevel(ctx context.Context, userID int64, role domai
 	current, err := getUserByID(ctx, tx, userID)
 	if err != nil {
 		return domain.User{}, err
+	}
+	if !actor.CanManageRole(current.Role()) {
+		return domain.User{}, domain.ErrForbidden
 	}
 	// Approval and promotion stay two separately audited acts: a pending account
 	// may not be handed a role by the same submit that admits it.
@@ -447,10 +455,11 @@ func (s *Store) SetUserAccessLevel(ctx context.Context, userID int64, role domai
 
 // SetUserDisabled enables or disables one account. Disabling revokes that
 // account's sessions in the same transaction and is refused when it would leave
-// no enabled Administrator. The actor must be an Administrator.
+// no enabled Administrator. The actor needs account-administration rights and may
+// not act on an account above their own rank.
 func (s *Store) SetUserDisabled(ctx context.Context, userID int64, disabled bool,
 	at time.Time, actor domain.Actor) (domain.User, error) {
-	if !actor.IsAdmin {
+	if !actor.CanManageUsers() {
 		return domain.User{}, domain.ErrForbidden
 	}
 
@@ -463,6 +472,9 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID int64, disabled bool
 	current, err := getUserByID(ctx, tx, userID)
 	if err != nil {
 		return domain.User{}, err
+	}
+	if !actor.CanManageRole(current.Role()) {
+		return domain.User{}, domain.ErrForbidden
 	}
 	if disabled && !current.Disabled && current.Role() == domain.RoleAdmin {
 		remaining, err := countEnabledAdmins(ctx, tx, userID)
@@ -495,12 +507,13 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID int64, disabled bool
 
 // ResetUserPassword stores an administrator-supplied temporary password,
 // requires a change at the next sign-in and revokes every session for the
-// account, all in one transaction. The actor must be an Administrator; the route
-// layer enforces the same rule. HasPassword becomes true: the account now owns a
-// password the user can type, even if it is only temporary.
+// account, all in one transaction. The actor needs account-administration rights
+// and may not act on an account above their own rank. HasPassword becomes true:
+// the account now owns a password the user can type, even if it is only
+// temporary.
 func (s *Store) ResetUserPassword(ctx context.Context, userID int64, passwordHash string,
 	at time.Time, actor domain.Actor) (domain.User, error) {
-	if !actor.IsAdmin {
+	if !actor.CanManageUsers() {
 		return domain.User{}, domain.ErrForbidden
 	}
 	if strings.TrimSpace(passwordHash) == "" {
@@ -513,8 +526,12 @@ func (s *Store) ResetUserPassword(ctx context.Context, userID int64, passwordHas
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := getUserByID(ctx, tx, userID); err != nil {
+	current, err := getUserByID(ctx, tx, userID)
+	if err != nil {
 		return domain.User{}, err
+	}
+	if !actor.CanManageRole(current.Role()) {
+		return domain.User{}, domain.ErrForbidden
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE Users SET PasswordHash = ?, MustChangePassword = 1, HasPassword = 1, ModAt = ?, ModBy = ?
@@ -581,9 +598,10 @@ func (s *Store) SetOwnPassword(ctx context.Context, userID int64, passwordHash s
 
 // DeleteUser permanently removes an account together with its sessions. Removing
 // the last enabled Administrator is refused: the role would otherwise disappear
-// from the deployment. The actor must be an Administrator.
+// from the deployment. The actor needs account-administration rights and may not
+// act on an account above their own rank.
 func (s *Store) DeleteUser(ctx context.Context, userID int64, actor domain.Actor) error {
-	if !actor.IsAdmin {
+	if !actor.CanManageUsers() {
 		return domain.ErrForbidden
 	}
 
@@ -596,6 +614,9 @@ func (s *Store) DeleteUser(ctx context.Context, userID int64, actor domain.Actor
 	current, err := getUserByID(ctx, tx, userID)
 	if err != nil {
 		return err
+	}
+	if !actor.CanManageRole(current.Role()) {
+		return domain.ErrForbidden
 	}
 	if current.Role() == domain.RoleAdmin && !current.Disabled {
 		remaining, err := countEnabledAdmins(ctx, tx, userID)

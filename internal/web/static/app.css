@@ -302,6 +302,46 @@ main.card.admin-card {
   width: min(120rem, calc(100% - 1.5rem));
 }
 
+/* Administration landing: one navigation entry for every operational tool.
+   Cards are links, so the whole tile is a comfortable target and the section
+   headings provide the information architecture without another menu layer. */
+main.card.admin-home {
+  width: min(82rem, calc(100% - 2rem));
+}
+.admin-home-section { margin-top: 1.75rem; }
+.admin-home-section h2 { margin: 0 0 0.75rem; }
+.admin-home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.85rem;
+}
+.admin-home-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 9rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.14);
+  color: var(--text);
+  text-decoration: none;
+}
+.admin-home-card:hover {
+  border-color: var(--accent);
+  background: rgba(199, 168, 90, 0.08);
+  color: var(--text);
+}
+.admin-home-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.admin-home-title {
+  color: var(--accent-strong);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.2rem;
+}
+.admin-home-copy { flex: 1; color: var(--muted); font-size: 0.9rem; }
+.admin-home-stat { color: var(--text); font-size: 0.85rem; }
+.admin-home-clear { color: var(--ok); }
+
 /* PD5-35: one compact multi-column filter grid for the admin screens. */
 .admin-filter-grid {
   grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));

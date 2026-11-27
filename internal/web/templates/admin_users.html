@@ -50,6 +50,7 @@
               {{.StatusLabel}}
               {{if .MustChangePassword}}<span class="muted">· must change password</span>{{end}}
               {{if .Locked}}<span class="muted">· last administrator</span>{{end}}
+              {{if .OutOfReach}}<span class="muted">· outranks yours</span>{{end}}
             </td>
             <td>{{.LastLoginText}}</td>
             <td>{{.CreatedText}}</td>

@@ -50,14 +50,51 @@ func TestUserCapabilitiesFollowRole(t *testing.T) {
 	if !officer.IsOfficer() || !officer.CanAdministerInventory() || !officer.CanViewAudit() {
 		t.Fatal("Officer is missing an inventory or audit capability")
 	}
-	if officer.IsAdmin() || officer.CanManageSettings() || officer.CanManageUsers() {
-		t.Fatal("Officer was granted an Administrator capability")
+	// Account administration is Officer work; Settings stays Administrator-only.
+	if !officer.CanManageUsers() {
+		t.Fatal("Officer was denied account administration")
+	}
+	if officer.IsAdmin() || officer.CanManageSettings() {
+		t.Fatal("Officer was granted an Administrator-only capability")
 	}
 	if !admin.IsAdmin() || !admin.IsOfficer() || !admin.CanManageSettings() || !admin.CanManageUsers() {
 		t.Fatal("Admin is missing a capability")
 	}
-	if unknown.IsOfficer() || unknown.CanAdministerInventory() || unknown.CanManageSettings() {
+	if unknown.IsOfficer() || unknown.CanAdministerInventory() || unknown.CanManageSettings() || unknown.CanManageUsers() {
 		t.Fatal("an unknown access level must fail closed to Member")
+	}
+}
+
+// The role ceiling is what keeps account administration from becoming a path to
+// Administrator: an Officer may manage accounts up to their own rank and may
+// grant no role above it.
+func TestActorManageRoleRespectsRankCeiling(t *testing.T) {
+	officer := Actor{UserID: 2, UserName: "officer", Role: RoleOfficer}
+	if !officer.CanManageRole(RoleMember) || !officer.CanManageRole(RoleOfficer) {
+		t.Fatal("an Officer must be able to manage Members and Officers")
+	}
+	if officer.CanManageRole(RoleAdmin) {
+		t.Fatal("an Officer must not be able to manage or grant Administrator")
+	}
+
+	admin := Actor{UserID: 1, UserName: "admin", IsAdmin: true, Role: RoleAdmin}
+	for _, role := range Roles {
+		if !admin.CanManageRole(role) {
+			t.Fatalf("an Administrator must be able to grant %q", role)
+		}
+	}
+
+	member := Actor{UserID: 3, UserName: "member", Role: RoleMember}
+	if member.CanManageRole(RoleMember) {
+		t.Fatal("a Member must not administer accounts at all")
+	}
+
+	// A legacy snapshot carries only IsAdmin, which is the Administrator rank.
+	if !(Actor{IsAdmin: true}).CanManageRole(RoleAdmin) {
+		t.Fatal("a legacy admin actor lost account administration")
+	}
+	if (Actor{IsAdmin: false}).CanManageRole(RoleMember) {
+		t.Fatal("a legacy non-admin actor was granted account administration")
 	}
 }
 
