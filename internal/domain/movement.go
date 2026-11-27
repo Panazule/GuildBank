@@ -91,9 +91,13 @@ type InventoryMovement struct {
 	// closes. It is nil on ISSUE rows and on returns that have no issuance
 	// behind them (a stock return against an active lot).
 	RelatedMovementID *int64
-	Note              string
-	CorrelationID     string
-	IdempotencyKey    string
+	// RequestID attributes the ISSUE written by a request approval to the
+	// InventoryRequest it satisfied. It is nil for every manual issue, because
+	// the column is nullable and its unique index therefore tolerates them.
+	RequestID      *int64
+	Note           string
+	CorrelationID  string
+	IdempotencyKey string
 }
 
 // Validate checks the ledger row against the approved schema constraints.
@@ -128,6 +132,9 @@ func (m InventoryMovement) Validate() error {
 	}
 	if m.RelatedMovementID != nil && *m.RelatedMovementID <= 0 {
 		fields["relatedMovementId"] = "relatedMovementId must be a positive integer when supplied"
+	}
+	if m.RequestID != nil && *m.RequestID <= 0 {
+		fields["requestId"] = "requestId must be a positive integer when supplied"
 	}
 	if len([]rune(m.Recipient)) > 128 {
 		fields["recipient"] = "recipient must be at most 128 characters"

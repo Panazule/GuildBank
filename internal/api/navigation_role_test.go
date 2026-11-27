@@ -35,6 +35,9 @@ func TestNavigationVisibilityFollowsRole(t *testing.T) {
 	if bytes.Contains([]byte(anonymous), []byte(`href="/account/profile"`)) {
 		t.Fatal("anonymous navigation exposes the profile link")
 	}
+	if bytes.Contains([]byte(anonymous), []byte(`href="/my/requests"`)) {
+		t.Fatal("anonymous navigation exposes the member request list")
+	}
 
 	member := renderNav(t, &domain.User{UserName: "member1", AccessLevel: "Member"})
 	if bytes.Contains([]byte(member), []byte(`href="/admin/`)) {
@@ -42,6 +45,9 @@ func TestNavigationVisibilityFollowsRole(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(member), []byte(`href="/account/profile"`)) {
 		t.Fatal("member navigation is missing the profile link")
+	}
+	if !bytes.Contains([]byte(member), []byte(`href="/my/requests"`)) {
+		t.Fatal("member navigation is missing the request list link")
 	}
 	if !bytes.Contains([]byte(member), []byte("Sign out")) {
 		t.Fatal("member navigation is missing sign out")

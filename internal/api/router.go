@@ -32,6 +32,7 @@ type Deps struct {
 	Settings       *service.SettingsService
 	Imports        *service.ImportService
 	Inventory      *service.InventoryService
+	Requests       *service.RequestService
 	Admin          *service.AdminInventoryService
 	Users          *service.UserAdminService
 	Characters     *service.CharacterService
@@ -71,6 +72,11 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	}
 	if deps.Discord == nil {
 		deps.Discord = service.NewDiscordService(nil, nil, nil, nil, nil, deps.Logger)
+	}
+	if deps.Requests == nil {
+		// A degraded request service keeps the member routes answering 503
+		// rather than panicking when the guild store is absent.
+		deps.Requests = service.NewRequestService(nil, nil, nil, deps.Logger)
 	}
 	if deps.Registration == nil {
 		// Self-registration degrades to "unavailable" when it is not wired; the
@@ -123,7 +129,9 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	setupHandler := &setupHandler{setup: deps.Setup, auth: authHandler, views: viewSet, logger: deps.Logger}
 	settingsHandler := &settingsHandler{settings: deps.Settings, views: viewSet, logger: deps.Logger}
 	importHandler := &importsHandler{imports: deps.Imports, views: viewSet, logger: deps.Logger}
-	inventoryHandler := &inventoryHandler{inventory: deps.Inventory, auth: deps.Auth, views: viewSet, logger: deps.Logger}
+	inventoryHandler := &inventoryHandler{inventory: deps.Inventory, requests: deps.Requests,
+		auth: deps.Auth, views: viewSet, logger: deps.Logger}
+	requestsHandler := &requestHandler{requests: deps.Requests, views: viewSet, logger: deps.Logger}
 	adminHandler := &adminInventoryHandler{admin: deps.Admin, views: viewSet, logger: deps.Logger}
 	usersHandler := &usersHandler{users: deps.Users, characters: deps.Characters, discord: deps.Discord,
 		views: viewSet, logger: deps.Logger}
@@ -192,6 +200,14 @@ func NewRouter(deps Deps) (*gin.Engine, error) {
 	member.DELETE("/api/v1/me/characters/:id", profileHandler.remove)
 	// HTML forms cannot issue DELETE; this is a thin adapter onto the same service.
 	member.POST("/api/v1/me/characters/:id/delete", profileHandler.removeForm)
+	// Member request workflow (Phase 3). Officer decisions and the public form
+	// are later phases; /request/new is member-only until Phase 5 makes it the
+	// shared public entry point.
+	member.GET("/request/new", requestsHandler.newForm)
+	member.POST("/request/new", requestsHandler.create)
+	member.GET("/my/requests", requestsHandler.mine)
+	member.GET("/my/requests/:id", requestsHandler.mineDetail)
+	member.POST("/my/requests/:id/cancel", requestsHandler.cancel)
 	// Discord account linking (P3 Phase B). There is no Discord login route: the
 	// callback only attaches an identity to this existing session.
 	// The browser starts the flow with a GET navigation (like sign-in) because a

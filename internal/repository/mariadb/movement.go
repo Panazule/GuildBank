@@ -20,7 +20,7 @@ const (
 // no update or delete statement exists in this package.
 const movementColumns = `MovementID, GuildBankItemID, EQUID, MovementType, Quantity,
 	Recipient, ActorUserID, ActorName, OccurredAt, FromLocation, ToLocation,
-	RemainingQuantity, RelatedItemID, RelatedMovementID, Note, CorrelationID, IdempotencyKey`
+	RemainingQuantity, RelatedItemID, RelatedMovementID, RequestID, Note, CorrelationID, IdempotencyKey`
 
 // ListMovements reads one bounded page from one read-only snapshot.
 func (s *Store) ListMovements(ctx context.Context, filter domain.MovementFilter) (domain.MovementPage, error) {
@@ -180,14 +180,15 @@ func (c *adminWriteTx) InsertMovement(ctx context.Context, movement domain.Inven
 	result, err := c.tx.ExecContext(ctx, `INSERT INTO InventoryMovement
 		(GuildBankItemID, EQUID, MovementType, Quantity, Recipient, ActorUserID,
 		 ActorName, OccurredAt, FromLocation, ToLocation, RemainingQuantity,
-		 RelatedItemID, RelatedMovementID, Note, CorrelationID, IdempotencyKey)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 RelatedItemID, RelatedMovementID, RequestID, Note, CorrelationID, IdempotencyKey)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		movement.GuildBankItemID, movement.EQUID, string(movement.MovementType),
 		movement.Quantity, nullableString(movement.Recipient),
 		nullableInt64Ptr(movement.ActorUserID), movement.ActorUserName,
 		movement.OccurredAt.UTC(), nullableString(movement.FromLocation),
 		nullableString(movement.ToLocation), movement.RemainingQuantity,
 		nullableInt64Ptr(movement.RelatedItemID), nullableInt64Ptr(movement.RelatedMovementID),
+		nullableInt64Ptr(movement.RequestID),
 		nullableString(movement.Note),
 		nullableString(movement.CorrelationID), nullableString(movement.IdempotencyKey))
 	if err != nil {
@@ -302,6 +303,7 @@ func scanMovement(scanner interface{ Scan(...any) error }) (domain.InventoryMove
 		toLocation     sql.NullString
 		relatedItemID  sql.NullInt64
 		relatedMoveID  sql.NullInt64
+		requestID      sql.NullInt64
 		note           sql.NullString
 		correlationID  sql.NullString
 		idempotencyKey sql.NullString
@@ -309,7 +311,7 @@ func scanMovement(scanner interface{ Scan(...any) error }) (domain.InventoryMove
 	if err := scanner.Scan(&movement.MovementID, &movement.GuildBankItemID, &equid,
 		&movementType, &quantity, &recipient, &actorUserID, &movement.ActorUserName,
 		&movement.OccurredAt, &fromLocation, &toLocation, &remaining, &relatedItemID,
-		&relatedMoveID, &note, &correlationID, &idempotencyKey); err != nil {
+		&relatedMoveID, &requestID, &note, &correlationID, &idempotencyKey); err != nil {
 		if errorsIsNoRows(err) {
 			return domain.InventoryMovement{}, domain.ErrNotFound
 		}
@@ -344,6 +346,10 @@ func scanMovement(scanner interface{ Scan(...any) error }) (domain.InventoryMove
 	if relatedMoveID.Valid {
 		value := relatedMoveID.Int64
 		movement.RelatedMovementID = &value
+	}
+	if requestID.Valid {
+		value := requestID.Int64
+		movement.RequestID = &value
 	}
 	return movement, nil
 }

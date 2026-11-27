@@ -1,6 +1,7 @@
 # Request System (Design Proposal)
 
 **Status:** design proposal only — nothing in this document is implemented. No code, schema or template change accompanies it.
+**Revision:** incorporates the owner's design decisions C1–C10 (§17.1) and the confirmed recommendations OD-R1…OD-R13 (§17.2). One decision remains open: OD-R14 (§17.3).
 **Scope:** the primary member workflow: request one inventory item, track it, and have an officer approve (which issues the item) or deny it.
 **Builds on:** inventory, the append-only movement ledger, the movement-derived issued projection, roles, character profiles, Discord linking/login, self-registration, account approval and the password capability.
 **Non-goals:** shopping carts, multi-item requests, an "Approved but not yet issued" state, fulfilment scheduling, automatic expiry, Discord DM/e-mail notifications, requests for items that are not in inventory, and officer-initiated requests on behalf of another person.
@@ -15,11 +16,14 @@
 | One request = how many items? | Exactly one lot (`GuildBankItemID`) and one quantity. No line items, no cart | §2.2 |
 | Status values | `Pending`, `Completed`, `Denied`, `Cancelled`. No `Approved` | §3, §4 |
 | What does Approve do? | Issues the item and completes the request in **one** transaction, writing the `ISSUE` movement, the lot update, the request transition and the audit rows together | §9.2 |
-| Who may approve? | Officer and Administrator (inventory work is Officer-level today); never the requester's own request | §8.6 |
-| Character attribution for members | Dropdown of the account's profile characters; no free text. Server re-validates ownership | §5.2 |
+| Who may approve? | Officer and Administrator (inventory work is Officer-level today). An officer **may** approve their own request; the audit rows record both identities | §8.6 |
+| Duplicate rule | Reject only when the same character already holds a `Pending` request for the same item. Other characters, other items, and any request after the previous one ended are all allowed | §2.2, §7.4 |
+| Stock short of the request | The officer is warned and may issue the available quantity (or deny). No extra status and no remainder tracking | §4.4, §8.4 |
+| Issue quantity | When the lot covers the request, approval issues the requested quantity automatically and shows **no** quantity field. A reduced quantity is offered only when on-hand is below the request | §4.4, §8.3 |
+| Character attribution for members | Dropdown of the account's profile characters; no free-text alternative while the profile has characters. Server re-validates ownership | §5.2 |
 | Character attribution for members with no characters | Free-text name, same 3–15 letter rule, with a link to `/account/profile` | §5.3 |
 | Character attribution for public requests | Free-text name, same rule | §5.4 |
-| Public requester identity | Character name is required; one optional contact field (Discord handle); no account is created | §6.2 |
+| Public requester identity | Character name required, plus a required Discord handle for officer contact (OD-R2); no account is created | §6.2 |
 | Can the public track a request? | Not in v1. The confirmation page returns a request number and states how officers will make contact | §6.5 |
 | Does a return reopen a request? | No. A return is an inventory action; the request stays `Completed` | §9.5 |
 | New settings | `PublicRequestsEnabled` (boolean, default `false`) | §11.3 |
@@ -27,7 +31,7 @@
 | Migrations | One additive MariaDB migration (`0008_inventory_request.sql`); no SQLite migration | §11 |
 | Transport | Server-rendered HTML forms plus a small JSON API, both on the same service (existing D-03 single-write-path rule) | §12 |
 | Implementation phases | Five phases, each independently releasable and testable | §16 |
-| Owner decisions | Twelve decisions, each with a recommendation | §17 |
+| Owner decisions | Ten confirmed design decisions (§17.1), thirteen confirmed recommendations (§17.2), one still open (§17.3) | §17 |
 
 ---
 
@@ -93,11 +97,14 @@ CREATE TABLE IF NOT EXISTS InventoryRequest (
     PRIMARY KEY (RequestID),
     -- MariaDB has no partial indexes. A STORED generated column collapses to NULL
     -- for every non-pending row, and a UNIQUE index tolerates repeated NULLs, so
-    -- this enforces "at most one Pending request per member per lot" in the engine.
-    PendingUserKey      BIGINT UNSIGNED
-                        AS (CASE WHEN Status = 'Pending' THEN RequesterUserID ELSE NULL END) STORED,
+    -- this enforces "at most one Pending request per character per item" in the
+    -- engine, for member and public requests alike. The column inherits the table
+    -- collation (utf8mb4_unicode_ci), so the duplicate test is case-insensitive,
+    -- matching how character names are compared everywhere else.
+    PendingCharacterKey VARCHAR(64)
+                        AS (CASE WHEN Status = 'Pending' THEN CharacterName ELSE NULL END) STORED,
     UNIQUE KEY uq_request_movement (CompletedMovementID),
-    UNIQUE KEY uq_request_pending (GuildBankItemID, PendingUserKey),
+    UNIQUE KEY uq_request_pending (GuildBankItemID, PendingCharacterKey),
     UNIQUE KEY uq_request_idempotency (IdempotencyKey),
     KEY ix_request_status_time (Status, CreatedAt),
     KEY ix_request_requester_time (RequesterUserID, CreatedAt),
@@ -110,6 +117,8 @@ CREATE TABLE IF NOT EXISTS InventoryRequest (
         REFERENCES InventoryMovement (MovementID) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT ck_request_quantity CHECK (RequestedQuantity > 0),
     CONSTRAINT ck_request_issued CHECK (IssuedQuantity IS NULL OR IssuedQuantity > 0),
+    CONSTRAINT ck_request_issued_le CHECK (
+        IssuedQuantity IS NULL OR IssuedQuantity <= RequestedQuantity),
     CONSTRAINT ck_request_completed CHECK (
         Status <> 'Completed' OR (CompletedMovementID IS NOT NULL AND IssuedQuantity IS NOT NULL)),
     CONSTRAINT ck_request_decided CHECK (
@@ -124,15 +133,15 @@ CREATE TABLE IF NOT EXISTS InventoryRequest (
 | `GuildBankItemID` | The single inventory item the request is for. Presentational identity comes from the lot; the FK makes an orphan impossible |
 | `EQUID`, `ItemName`, `OnHandAtCreate` | Immutable snapshots so the request still reads correctly after a rename, a consolidation, or a lot that has since been issued. `OnHandAtCreate` lets an officer judge staleness at a glance |
 | `RequestedQuantity` | What the member asked for; never rewritten |
-| `IssuedQuantity` | What was actually issued. Equal to `RequestedQuantity` under the recommended strict rule (§9.3); kept separate so a future partial-approval decision needs no migration |
+| `IssuedQuantity` | What was actually issued. Equal to `RequestedQuantity` whenever the lot covered the request; **lower** only when it could not, and then only as much as the officer confirmed (§4.4). Never `0`, never above `RequestedQuantity` (`ck_request_issued_le`), and only set when a movement exists |
 | `CharacterName` | Attribution. A name, not a FK: characters live in SQLite and can be deleted |
 | `RequesterKind` | `Member` vs `Public`. Derivable from `RequesterUserID` in principle, but stored so the queue can index and filter it and so a deleted account never changes the historical classification |
 | `RequesterUserID`, `RequesterUserName` | Account snapshot. No FK (different database). `NULL` for public |
 | `ContactDiscord` | Public only; how an officer reaches a visitor. Never rendered on a public page |
 | `Note` | The requester's free text, ≤255 runes — the same bound as a movement note, so approval can carry it into the ledger without truncation |
 | `Status` | The four-state lifecycle (§4) |
-| `PendingUserKey` | Generated `Status='Pending' ? RequesterUserID : NULL`. Exists only so a unique index can express "one Pending request per member per lot" without partial indexes. Never read by application code |
-| `DecisionNote` | Denial reason, or the officer's completion remark. Visible to the requester (§17, OD-R8) |
+| `PendingCharacterKey` | Generated `Status='Pending' ? CharacterName : NULL`. Exists only so a unique index can express "one Pending request per character per item" without partial indexes. Never read by application code. Keying on the character rather than the account is what allows one member to ask for the same item for two different characters |
+| `DecisionNote` | Denial reason, or the officer's completion remark. Visible to the requester — confirmed, not optional (OD-R8) |
 | `CompletedMovementID` | The `ISSUE` movement produced by approval. Unique, so one movement can never complete two requests |
 | `CorrelationID` | The creation request's correlation ID, reused by the approval's movement so the audit viewer's correlation filter shows the whole lifecycle in one list |
 | `IdempotencyKey` | Hidden per-form key on creation; a duplicated POST returns the original request instead of queuing a second one |
@@ -211,6 +220,15 @@ type CreateRequestInput struct {
 type ApproveRequestInput struct {
     RequestID     int64
     ExpectedModAt time.Time // the lot version shown on the approve page
+
+    // IssueQuantity is posted only when the lot cannot cover the request, where
+    // the officer is offered a reduced amount. Zero means "no quantity was
+    // prompted": the service issues min(RequestedQuantity, on-hand), which is
+    // RequestedQuantity whenever stock is sufficient. A non-zero value is
+    // honoured only when on-hand < RequestedQuantity and must be
+    // 1..on-hand; see §4.4. The service never issues zero units.
+    IssueQuantity uint32
+
     Note          string
     Actor         Actor
     CorrelationID string
@@ -244,7 +262,7 @@ type RequestFilter struct {
 }
 ```
 
-Validation lives in the domain, following `InventoryMovement.Validate` and `ValidateCharacterName`: quantities `> 0` and `<= OnHandAtCreate`; note and reasons ≤255 runes with no control characters; character name 3–15 ASCII letters; `ContactDiscord` trimmed, ≤64 runes, no control characters; `RequesterKind` must be `Public` when `Actor.UserID == 0` and `Member` otherwise.
+Validation lives in the domain, following `InventoryMovement.Validate` and `ValidateCharacterName`: quantities `> 0` and `<= OnHandAtCreate`; note and reasons ≤255 runes with no control characters; character name 3–15 ASCII letters; `ContactDiscord` trimmed, ≤64 runes, no control characters; `RequesterKind` must be `Public` when `Actor.UserID == 0` and `Member` otherwise. The approve command is validated separately (§4.4): `IssueQuantity == 0` means "issue `min(RequestedQuantity, on-hand)`"; a non-zero `IssueQuantity` is accepted only when on-hand is below the request and must be `1..on-hand`; anything else is `422 validation_error` on the `issuedQuantity` field.
 
 ### 2.5 Read projections
 
@@ -252,7 +270,21 @@ Validation lives in the domain, following `InventoryMovement.Validate` and `Vali
 - **Officer queue/detail**: joins `GuildBankItems` for `Quantity`, `DeletedFg` and `GivenTo`, so one page answers "can I approve this right now?".
 - **Audit**: `Audit.TableName = 'InventoryRequest'`, `Audit.RecordID = <RequestID>`; the existing audit viewer already filters on both.
 
-### 2.6 What is deliberately not modelled
+### 2.6 Historical fidelity (why the snapshots exist)
+
+A request must still read correctly years later, after accounts are deleted, characters are renamed, lots are consolidated and items are renamed in a later metadata refresh. The design therefore stores request-time values rather than depending on live rows:
+
+| Value | Stored as | Survives |
+|---|---|---|
+| Item identity | `EQUID` + `ItemName` on the row | lot rename, lot consolidation, soft delete, a later metadata import |
+| Character attributed | `CharacterName` string, never a `Characters.CharacterID` FK | character deletion or rename, profile edits, account deletion |
+| Requester | `RequesterUserID` (nullable) **and** `RequesterUserName` | account rename or deletion; public requests simply have no ID |
+| Stock context | `OnHandAtCreate`, plus `IssuedQuantity` and `CompletedMovementID` | later issues, returns and adjustments to the same lot |
+| Actors | `CreatedByName`, `DecidedByName` alongside the IDs | the same rename/deletion cases as above |
+
+The rule that follows: **no read path joins to SQLite to render a request, and no read path requires the lot to still exist.** A `GuildBankItemID` is a link for provenance and for the approve action; presentation and reporting use the snapshots. `ItemName` is captured at creation and is never rewritten on completion, so a request created before a rename keeps the name the member actually saw.
+
+### 2.7 What is deliberately not modelled
 
 - No `RequestLine` table, no cart, no "items per request" collection.
 - No `Approved` status, no `IssuedAt` separate from the movement, no `ApprovedBy` separate from `DecidedBy`.
@@ -280,11 +312,11 @@ Validation lives in the domain, following `InventoryMovement.Validate` and `Vali
 
 | From | Action | Actor | To | Side effects |
 |---|---|---|---|---|
-| — | Create (member) | any authenticated Member+ | `Pending` | Row inserted; `REQUEST_CREATED` audit; item page shows "Your request is pending" |
+| — | Create (member) | any authenticated Member+ | `Pending` | Row inserted; `REQUEST_CREATED` audit; item page shows a "pending request for this item" note |
 | — | Create (public) | anonymous, CSRF-validated | `Pending` | Row inserted with `RequesterKind='Public'`; `REQUEST_CREATED` audit |
-| `Pending` | Approve | Officer/Admin, not the requester | `Completed` | `ISSUE` movement + lot quantity reduction in the **same** transaction; `REQUEST_COMPLETED` audit; request/movement linked |
-| `Pending` | Deny | Officer/Admin, not the requester | `Denied` | `DecisionNote` required; no inventory touch; `REQUEST_DENIED` audit |
-| `Pending` | Cancel | the requester | `Cancelled` | Optional reason; no inventory touch; `REQUEST_CANCELLED` audit |
+| `Pending` | Approve | Officer/Admin, **including the requester** | `Completed` | `ISSUE` movement + lot quantity reduction in the **same** transaction; issues the requested quantity, or a reduced one only when stock is short (§4.4); `REQUEST_COMPLETED` audit; request/movement linked |
+| `Pending` | Deny | Officer/Admin, including the requester | `Denied` | `DecisionNote` required; no inventory touch; `REQUEST_DENIED` audit |
+| `Pending` | Cancel | the authenticated requester only | `Cancelled` | Optional reason; no inventory touch; `REQUEST_CANCELLED` audit. A public requester has no account and therefore cannot cancel — an officer denies on their behalf |
 | any terminal | *nothing* | — | — | Terminal states are immutable. A member who wants the item again creates a new request |
 
 ### 3.2 Explicitly absent transitions
@@ -292,7 +324,7 @@ Validation lives in the domain, following `InventoryMovement.Validate` and `Vali
 - **No `Pending → Approved`.** Approval that does not issue is not a state the guild wants; it would create an unbounded liability (approved items that nobody issued).
 - **No `Cancelled → Pending`** (un-cancel) and **no `Denied → Pending`** (re-open). Re-requesting is a new row, which keeps the queue and the audit history honest.
 - **No `Completed → …`** at all. A return is an inventory movement (§9.5), not a request transition.
-- **No automatic expiry.** A `Pending` request never becomes `Cancelled` by a timer; an officer denies it (with a reason) or the member cancels it (§17, OD-R7).
+- **No automatic expiry.** A `Pending` request never becomes `Cancelled` by a timer; an officer denies it (with a reason) or the member cancels it — confirmed (OD-R7).
 
 ### 3.3 Transition enforcement
 
@@ -316,7 +348,7 @@ UPDATE InventoryRequest
 | Status | Meaning | Terminal | Inventory effect |
 |---|---|---|---|
 | `Pending` | Awaiting an officer decision | No | None |
-| `Completed` | Approved and **issued** | Yes | Lot quantity reduced; `ISSUE` movement written |
+| `Completed` | Approved and **issued**. The issued quantity is normally the requested quantity and may be lower when stock was short (§4.4) | Yes | Lot quantity reduced by the issued quantity; `ISSUE` movement written |
 | `Denied` | Refused by an officer, with a reason | Yes | None |
 | `Cancelled` | Withdrawn by the requester | Yes | None |
 
@@ -327,9 +359,9 @@ An `Approved` status would have to mean one of two things, and both are wrong he
 1. *"Approved, item not yet issued"* — a promise against stock that can be issued to somebody else in the meantime; the queue would need a second, invisible backlog and a resolution flow.
 2. *"Approved and issued"* — identical to `Completed`, so it is a synonym, not a state.
 
-The single fact that matters to an officer reading the queue is whether the stock still exists. Making approval atomic with issuance means the answer is always yes at the moment of the transition. If the item is gone, approval fails with `409 insufficient_stock` and the officer denies the request with a reason instead — the honest outcome.
+Because approval issues, the queue never holds an approved-but-unissued promise. When stock is short the officer has exactly two honest outcomes: issue what exists (§4.4) or deny with a reason. There is no state in which the guild owes an item it does not have, and no second backlog to reconcile.
 
-Should a partial-fulfilment need appear later, `IssuedQuantity` already exists, so the extension is a new status value rather than a redesign (§17, OD-R4).
+Partial issuance is therefore **not** a new status (§4.4); it is the same `Completed` transition with a smaller `IssuedQuantity`, which the column already carries.
 
 ### 4.3 Derived display state
 
@@ -339,9 +371,34 @@ The UI shows a badge from `Status` plus the **availability** of the lot (a proje
 |---|---|---|
 | Pending | yes | `Pending` |
 | Pending | no | `Pending · item unavailable` |
-| Completed | — | `Completed` |
+| Completed | — | `Completed`, or `Completed · 4 of 5` when `IssuedQuantity < RequestedQuantity` |
 | Denied | — | `Denied` |
 | Cancelled | — | `Cancelled` |
+
+The short badge is not decoration: it is the only place a member learns that the guild gave them four of the five they asked for, without opening the detail page.
+
+### 4.4 Issue quantity: automatic when covered, reduced only when short
+
+`IssuedQuantity` is set on completion, and there are only two ways to arrive at it — plus the empty-lot case, where there is no path at all:
+
+| On hand now | What the officer is asked | What approval issues |
+|---|---|---|
+| `>= requested` | **Nothing** — no quantity field is rendered at all. One button: "Approve and issue 5 × Cloak of Flames" | `RequestedQuantity`, automatically |
+| `1 … requested-1` | A **reduced quantity**, prefilled with the whole available amount, minimum 1, maximum on-hand, behind an explicit warning | Whatever the officer confirms, `1..on-hand`, so `IssuedQuantity < RequestedQuantity` |
+| `0` | Nothing to approve — the approve form is not rendered; Deny is the only action | — |
+
+The ordinary case therefore carries no number an officer could mistype: the request already states what was asked for, and the lot can cover it, so approval issues exactly that. The quantity field exists for one situation only — the bank cannot fully supply the request — and it arrives prefilled with everything that is there, so even then the common action is a single click.
+
+Rules that keep this honest:
+
+- The officer **sees** the shortfall before acting: "Requested 5 · Available 4" on the decision page, and the queue's on-hand column shows the same comparison (§8.3).
+- `IssuedQuantity` records what actually left the bank, so "asked for 5, got 4" stays visible on the request, on the member's detail page and in the audit row. Nothing is inferred later.
+- **No remainder is tracked.** The request is finished, not partially open. If the member still wants the missing unit they create a new request once stock returns — permitted, because the earlier request is no longer `Pending` (§7.4).
+- Issuing `0` is not a completion: `ck_request_issued` forbids it, and a zero-unit `ISSUE` movement is not a thing this ledger can express. Zero stock means deny with a reason, or wait.
+- The movement note states the shortfall so the ledger explains itself: `request #123: 4 of 5 — <note>` (OD-R9, confirmed).
+- **A reduced issue is never offered while stock covers the request.** A hand-crafted POST carrying `IssueQuantity < RequestedQuantity` against a lot that could cover the request is rejected with `422 validation_error` on `issuedQuantity` — not silently widened to the full amount and not honoured. Honouring it would create a second, undocumented way to under-issue that the UI never shows. An officer who wants to split a stack across members uses the manual Issue form (§5.7), which produces a movement with no request attached.
+
+Why not a `PartiallyFulfilled` status: it would be a second terminal state meaning "closed but still owed", which is exactly the unbounded liability §4.2 rejects. The guild either issues units or records a decision. It does not carry debts.
 
 ---
 
@@ -363,7 +420,7 @@ Character attribution is recorded as a **name snapshot** on the request. Whether
 - The form renders a single text input, `Character Name [__________]`, with the profile rule applied (3–15 ASCII letters).
 - Alongside it, one line of help: "Add characters to your profile so you can pick them from a list next time." linking to `/account/profile`.
 - This is not a free-for-all: the entered name is validated with the *same* rule the profile uses, so the character vocabulary stays consistent across the product.
-- Deliberately **not** auto-creating a profile character from the entered name. Creating identity records as a side effect of a request would make the profile page's contents depend on unrelated activity, and the owner has already chosen explicit character management (OD-R6 asks for confirmation).
+- Deliberately **not** auto-creating a profile character from the entered name. Creating identity records as a side effect of a request would make the profile page's contents depend on unrelated activity, and the owner has already chosen explicit character management (C2 in §17.1).
 
 ### 5.4 Public visitor
 
@@ -431,10 +488,10 @@ Anonymous visitors cannot reach the member flow, and authenticated members do no
 | Quantity | yes | `1 ≤ qty ≤ current on-hand` | Never promises more than exists |
 | Character Name | yes | 3–15 ASCII letters | Attribution; the officer needs to know whom to mail |
 | Note | no | ≤255 runes | Why they want it, or a meeting time |
-| Discord handle | yes (recommended) | ≤64 runes, `^[A-Za-z0-9._#-]{2,64}$` | **The only way an officer can reach a visitor.** Without it a public request cannot be reliably fulfilled |
+| Discord handle | yes — confirmed (OD-R2) | ≤64 runes, `^[A-Za-z0-9._#-]{2,64}$` | **The only way an officer can reach a visitor.** Without it a public request cannot be reliably fulfilled |
 | Real name / e-mail / phone | not collected | — | No outbound e-mail exists in this product; collecting one would be a promise the system cannot keep |
 
-If the owner prefers not to require a Discord handle, the honest alternative is to disable public requests (OD-R2).
+A Discord handle is therefore mandatory, not optional (OD-R2). An optional handle would mean officers guess at contact details or deny for lack of them, which is worse than not accepting the request at all. If the guild ever wants a public form without a contact field, the honest alternative is to turn public requests off.
 
 ### 6.3 Submission steps
 
@@ -456,7 +513,7 @@ Public creation is the only write an unauthenticated visitor can reach besides r
 3. **Honeypot** hidden field plus a minimum fill time (2 s) carried in a signed field; failing either yields the normal success page with **no** row inserted, so a bot cannot learn the rule.
 4. **Server-side length and content validation**, never trusting HTML `maxlength`.
 5. **On-hand snapshot check**: quantity must be ≤ on-hand at submit time, which also stops a request for 999,999 units.
-6. **Per-requester pending budget**: at most 3 Pending public requests for the same character name (case-insensitive); excess gets the generic rate-limited page.
+6. **Per-character pending budget**: at most 3 Pending public requests for the same character name (case-insensitive), and the same character name may not hold two Pending requests for the same item — `uq_request_pending` keys on the character, not the account, so it constrains anonymous rows exactly as it constrains members. Excess gets the generic rate-limited page, never a message that reveals the rule.
 7. **Minimal PII** — a Discord handle and a note, both of which the officer needs. Nothing is written to application logs except identifiers; the audit row carries the standard nullable `SourceIP` like every other write in the app.
 
 ### 6.5 Tracking a public request (decision)
@@ -467,7 +524,7 @@ The recommendation is **no public status page** in v1:
 - A tokenised URL would need a token column, a resend flow and an e-mail — none of which exist.
 - The guild's real contact channel is Discord, and the officer contacts the requester there.
 
-The confirmation page therefore says: "Keep this number. An officer will contact you on Discord once your request has been reviewed." OD-R3 offers the tokenised alternative if the owner wants public self-service tracking.
+The confirmation page therefore says: "Keep this number. An officer will contact you on Discord once your request has been reviewed." A tokenised status page was considered and declined for v1 (OD-R3).
 
 ### 6.6 Public request visibility
 
@@ -488,8 +545,8 @@ The confirmation page therefore says: "Keep this number. An officer will contact
 |---|---|
 | `/inventory/:id` | "Request this item" button (always on for an authenticated user) |
 | `/my/requests` | The account's own requests, newest first |
-| `/my/requests/:id` | Detail: item, quantity, character, note, status, decision note, and a link to the resulting movement when `Completed` |
-| Item detail (authenticated) | If a Pending request by this user already exists for that lot, the button becomes "You have a pending request — view" |
+| `/my/requests/:id` | Detail: item, requested quantity, character, note, status, decision note, the issued quantity when it differs from the requested one ("Requested 5, issued 4"), and a link to the resulting movement when `Completed` |
+| Item detail (authenticated) | Informational note: "You already have a pending request for this item (Icefear)". The button stays enabled, because the same member may legitimately request the item for a second character |
 
 ### 7.2 Form contents
 
@@ -515,13 +572,16 @@ POST /my/requests/:id/cancel   → guarded UPDATE → 303 detail?notice=cancelle
 
 ### 7.4 Post-creation behaviour
 
-- The item page shows the pending indicator instead of the button, so the member cannot double-submit through the UI (the idempotency key covers the HTTP duplicate).
+- The item page shows a pending note for the member's own characters, so the duplicate is not attempted through the UI (the idempotency key covers the HTTP duplicate).
 - A member may hold at most **5** Pending requests (`RequestMaxPendingPerUser`, a constant). No shopping cart, but also no queue abuse.
-- A member may hold only **one** Pending request per lot (`409 request_already_pending`). Two pending requests for the same lot is either a mistake or a hoard attempt.
+- **A character may hold only one Pending request per item** → `409 request_already_pending`, enforced by `uq_request_pending` on `(GuildBankItemID, PendingCharacterKey)`. The rule is stated in exactly those three dimensions:
+  - same character + same item + `Pending` → rejected;
+  - same item for a **different** character (same account or not) → allowed;
+  - same character + same item after the earlier request reached `Completed`, `Denied` or `Cancelled` → allowed, because only `Pending` rows occupy the unique key.
 
 ### 7.5 Notification
 
-No e-mail, no DM. Status is visible on `/my/requests`, and the nav shows the member's own pending count (informational, not an alert). Discord DMs are out of scope for v1 (§17, OD-R10).
+No e-mail, no DM. Status is visible on `/my/requests`, and the nav shows the member's own pending count (informational, not an alert). Discord DMs are out of scope for v1, confirmed (OD-R10).
 
 ---
 
@@ -541,9 +601,9 @@ The nav entry must be added to `navigation_role_test.go` expectations in the sam
 
 ### 8.2 Queue contents (one row per request)
 
-Columns: `#`, Created (relative, with an exact-value tooltip), Requester (character name, plus a `Public` chip), Item, Qty, On-hand now, Age (colour banded at 2 and 7 days), Actions.
+Columns: `#`, Created (relative, with an exact-value tooltip), Requester (character name, plus a `Public` chip and a `You` chip for the officer's own), Item, Qty (shown as `5` or `5 · 4 avail` when the lot cannot cover it), On-hand now, Age (colour banded at 2 and 7 days), Actions.
 
-Sorting: `CreatedAt ASC` by default so the oldest request cannot starve. Filters: status, kind (Member/Public), character name, item name, date range, and an "Only available" toggle (lot active and on-hand ≥ requested). Paging follows the existing `AdminMaxPageSize` / `AdminDefaultPageSize` conventions.
+Sorting: `CreatedAt ASC` by default so the oldest request cannot starve. Filters: status, kind (Member/Public), character name, item name, date range, and an "Only actionable" toggle (lot active and on-hand ≥ 1 — the rows an officer can still do something with; a row with nothing on hand can only be denied). Paging follows the existing `AdminMaxPageSize` / `AdminDefaultPageSize` conventions.
 
 ### 8.3 Decision page
 
@@ -551,9 +611,15 @@ Shows everything needed to decide without a second click:
 
 - The request (character, quantity, note, requester kind, created, age).
 - The **live** lot: current quantity, location, given-to, last modification, and the movement that produced it.
-- If on-hand is now below the requested quantity, an explicit red line: "Only 2 on hand — this request cannot be approved as-is."
+- If on-hand is now below the requested quantity, an amber line that states both numbers: "Requested 5 · Available 2 — you can issue 2, and the request completes as 2 of 5." This line is what unlocks the quantity field.
+- If on-hand is 0, a red line: "Nothing on hand. This request can only be denied." The approve form is not rendered at all, so there is no button that would have to fail.
 - A link to the lot's movement history.
-- **Approve** form: hidden `expectedModAt`, optional officer note (≤255), confirm button.
+- **Approve** form, in two shapes decided by the lot alone:
+  - *Stock covers the request* (`on-hand >= requested`): hidden `expectedModAt`, an optional officer note (≤255), and a button labelled "Approve and issue 5 × Cloak of Flames". There is **no quantity input** — the issued amount is the requested amount.
+  - *Stock is short* (`0 < on-hand < requested`): the same form plus an **Issue quantity** input, prefilled with `on-hand`, `min=1 max=on-hand`, with the amber line above it. Submitting the prefill issues everything the bank has; typing a smaller number records a deliberate smaller issue.
+
+OD-R13 confirmed both halves of this: automatic when covered, prompted only when short.
+
 - **Deny** form: required reason (≤255), confirm button.
 - History block: the `REQUEST_*` audit rows for this request with actor and timestamp.
 
@@ -561,10 +627,11 @@ Shows everything needed to decide without a second click:
 
 Approval issues. It is one POST, one transaction, one audit chain (§9). The officer sees the outcome immediately:
 
-- Success → `303 /admin/requests/:id?notice=completed`; the page shows "Issued 3 × [item] to Icefear — movement #412" with links to the movement and the issued rows.
-- `409 insufficient_stock` → re-rendered page: "The stock changed. Only N remained." The officer then denies with a reason.
+- Success → `303 /admin/requests/:id?notice=completed`; the page shows "Issued 5 × [item] to Icefear — movement #412", or "Issued 2 of the 5 requested × [item] to Icefear — movement #412 · 3 not issued" when the officer accepted a shortfall. Both link to the movement and the issued rows.
+- `409 insufficient_stock` → the stock shrank below what the officer submitted (or below the request, when no quantity was posted): re-rendered page "The stock changed. Only N remained." with the form switching to its short-stock shape, the issue quantity prefilled at N (approve hidden if N is 0) and the deny form still available. The officer decides again; nothing is issued silently.
 - `409 request_not_pending` → re-rendered page: "Another officer already decided this request."
 - `409 stale_item` → the lot was edited since the page loaded; re-render with the new lot state and ask for confirmation again.
+- Short stock that the officer *saw and accepted* is not an error at all — it is a normal `Completed` with a smaller `IssuedQuantity` (§4.4).
 - Replaying the same approve (double click, back button) does not error: the request is already `Completed` by that movement, so the officer lands on the completed page (§9.4).
 
 ### 8.5 Deny behaviour
@@ -573,15 +640,16 @@ Approval issues. It is one POST, one transaction, one audit chain (§9). The off
 - No inventory change; no movement is created; the request is terminal.
 - `303 /admin/requests/:id?notice=denied`.
 
-### 8.6 Self-decision prohibition
+### 8.6 Self-approval is permitted
 
-An officer may not approve or deny **their own** request:
+An officer may approve or deny **their own** request. This is an owner decision, recorded explicitly so implementation does not add a rule nobody asked for:
 
-- Enforced in the service (`Approve`/`Deny` compare `request.RequesterUserID` with `actor.UserID`) → `403 own_request`.
-- Enforced in the UI (buttons hidden for own requests, with an explanatory line).
-- This matters because an Officer can both request and issue: without the rule, the ledger would show a self-issued item whose approving signature proves nothing.
+- The handler performs **no** `requesterUserId == decidedByUserId` comparison, and there is no `403 own_request` code.
+- The provenance that matters already exists in the data: `RequesterUserID`/`RequesterUserName` and `DecidedByUserID`/`DecidedByName` are separate snapshots, and the two audit rows written by one approval each name their actor (`REQUEST_COMPLETED` on the request, `ITEM_ISSUED` on the lot).
+- The UI shows a neutral line on the officer's own request — "You requested this" — not a block. It informs whoever reads the history later; it does not restrict anyone now.
+- The trade being accepted knowingly: for a self-issued item the approval signature proves the officer agrees with their own request. With a small volunteer officer corps that is a reasonable cost, and the audit trail still answers "who did what".
 
-Administrators are subject to the same rule. If a lone Administrator needs the item, another Administrator must act (OD-R5 asks whether to allow an exception with an explicit acknowledgement checkbox; recommendation: no).
+Administrators are subject to nothing extra here either: the same rule applies to every role that holds `CanManageInventory()`.
 
 ### 8.7 Historical view
 
@@ -620,6 +688,11 @@ func (s *AdminInventoryService) issueLocked(
 
 `issueLocked` does **not** commit and does **not** own the transaction — that is what lets approval add the request transition to the same atomic unit.
 
+Two consequences worth stating before implementation:
+
+- **The two quantity cases need no new inventory logic.** `IssueItemInput.Quantity` is already an explicit amount, and `issueAttempt` already branches on `in.Quantity < current.Quantity` (partial issue reduces the lot; a whole-stack issue soft-deletes it and records `GivenTo`). Approval passes the requested quantity when the lot covers it, or the prompted reduced quantity when it does not — so "requested 5, on hand 4" is today's manual partial issue with a request attached (§4.4). Nothing in the lot arithmetic changes.
+- **The extraction is the only risk in this design**, which is why it lands as its own phase with a byte-identical-movement test as its gate (§16, Phase 2).
+
 ### 9.2 What approval writes, in order
 
 ```
@@ -629,11 +702,18 @@ BEGIN (connection + transaction, via BeginAdminWrite)
        lock the request row FIRST, then the lot: stable, documented order
   2. LockInventory(current.GuildBankItemID)                        -- existing helper
        same checks as a manual issue (removed, recipient-set, ExpectedModAt)
-       quantity bound: requested <= on-hand                        -- 409 insufficient_stock
+       resolve the issue quantity, in this order:
+         no IssueQuantity posted (0)      → issued = min(RequestedQuantity, on-hand)
+         IssueQuantity posted, on-hand < requested → 1 <= issued <= on-hand
+         IssueQuantity posted, on-hand >= requested → 422 validation_error
+                                                     (field "issuedQuantity", §4.4)
+       issued > on-hand   → 409 insufficient_stock  (stock moved since the page loaded)
+       issued == 0        → 409 insufficient_stock  (the lot emptied; nothing to issue)
   3. UpdateInventory / SetDeleted                                  -- existing
-  4. InsertMovement(ISSUE, Recipient = CharacterName,
+     (issued < on-hand → lot shrinks; issued == on-hand → whole stack)
+  4. InsertMovement(ISSUE, Quantity = issued, Recipient = CharacterName,
                     RequestID = ?, IdempotencyKey = "req-<RequestID>")
-  5. CompleteRequest(RequestID, movementID, qty, actor, at, note)   -- guarded UPDATE
+  5. CompleteRequest(RequestID, movementID, issued, actor, at, note) -- guarded UPDATE
   6. InsertAudit(REQUEST_COMPLETED)                                -- TableName='InventoryRequest'
      (ITEM_ISSUED was already written inside issueLocked)
 COMMIT
@@ -643,9 +723,9 @@ Notes:
 
 - **Lock order is request → lot.** Every request-path writer follows it. The manual issue path touches only the lot, so there is no cycle. Deny and cancel touch only the request row and take no inventory lock.
 - **Deadlocks** are already handled by `withDeadlockRetry`; `approveAttempt` is wrapped in it exactly like `issueAttempt`.
-- **Two audit rows, deliberately**: `ITEM_ISSUED` on `GuildBankItems` (the ledger's own event, unchanged, so inventory history reads identically) and `REQUEST_COMPLETED` on `InventoryRequest` (the workflow event). Both share the request's `CorrelationID`, so the audit viewer shows them together; `REQUEST_COMPLETED.NewValues` carries `movementId`, `issuedQuantity` and `remainingQuantity`.
+- **Two audit rows, deliberately**: `ITEM_ISSUED` on `GuildBankItems` (the ledger's own event, unchanged, so inventory history reads identically) and `REQUEST_COMPLETED` on `InventoryRequest` (the workflow event). Both share the request's `CorrelationID`, so the audit viewer shows them together; `REQUEST_COMPLETED.NewValues` carries `requestedQuantity`, `issuedQuantity`, `movementId` and `remainingQuantity`, which is what makes a short issue self-explanatory in the log.
 - **Recipient** is `CharacterName` verbatim, so movement-derived issued rows display the requesting character and the admin issued view needs no new join.
-- **Movement note** = the officer's note when supplied, otherwise the requester's note (OD-R9 covers adding a prefix).
+- **Movement note** = `request #<RequestID>: ` + the officer's note when supplied, otherwise the requester's note, truncated to the ledger's 255-rune bound; when `issued < requested` the shortfall is stated first (`request #123: 4 of 5 — for raid`), so a movement history read without following links still explains the smaller number. The prefix itself is confirmed (OD-R9).
 
 ### 9.3 The completion update (guarded, single statement)
 
@@ -677,7 +757,7 @@ UPDATE InventoryRequest
 | Manual `ISSUE` from the admin screen | None — creates a movement with `RequestID = NULL` |
 | Lot soft-deleted or consolidated later | None; `CompletedMovementID` keeps provenance, `ItemName` keeps the label |
 
-Reopening a request on return would silently double-issue the item on a second approve, which is why the design forbids it. "They got it, gave it back, and want it again" is a new request (OD-R12).
+Reopening a request on return would silently double-issue the item on a second approve, which is why the design forbids it — confirmed (OD-R12). "They got it, gave it back, and want it again" is a new request.
 
 ### 9.6 Repository surface to add
 
@@ -688,7 +768,8 @@ Extend the existing `AdminStore` / `AdminWriteTx` rather than adding a second tr
 GetRequest(ctx context.Context, id int64) (domain.InventoryRequest, error)
 ListRequests(ctx context.Context, f domain.RequestFilter) (domain.RequestPage, error)
 CountPendingRequests(ctx context.Context, requesterUserID int64) (int, error)
-PendingRequestForLot(ctx context.Context, lotID, requesterUserID int64) (int64, error)
+PendingRequestForCharacter(ctx context.Context, lotID int64, characterName string) (int64, error)
+PendingCharactersForLot(ctx context.Context, lotID, requesterUserID int64) ([]string, error)
 PendingRequestsForLot(ctx context.Context, lotID int64, limit int) ([]domain.InventoryRequest, error)
 
 // added to AdminWriteTx
@@ -709,7 +790,7 @@ Creation does **not** need an inventory transaction: it reads the lot without a 
 | Event type | Table | RecordID | OldValues | NewValues | When |
 |---|---|---|---|---|---|
 | `REQUEST_CREATED` | `InventoryRequest` | request ID | `null` | item, quantity, character, kind, note (public: handle present, IP not) | creation, member or public |
-| `REQUEST_COMPLETED` | `InventoryRequest` | request ID | `{status:"Pending"}` | `{status:"Completed", movementId, issuedQuantity, remainingQuantity, note}` | approval, inside the issue transaction |
+| `REQUEST_COMPLETED` | `InventoryRequest` | request ID | `{status:"Pending"}` | `{status:"Completed", requestedQuantity, issuedQuantity, movementId, remainingQuantity, note}` | approval, inside the issue transaction |
 | `REQUEST_DENIED` | `InventoryRequest` | request ID | `{status:"Pending"}` | `{status:"Denied", reason}` | officer deny |
 | `REQUEST_CANCELLED` | `InventoryRequest` | request ID | `{status:"Pending"}` | `{status:"Cancelled", reason}` | requester cancel |
 
@@ -765,7 +846,8 @@ Insert order inside the approval transaction is: request already exists → move
 Two engine-level guarantees worth calling out in the migration header:
 
 - `uq_request_movement` plus `ck_request_completed` mean one movement can complete at most one request, and a `Completed` request must name its movement.
-- `uq_request_pending` on `(GuildBankItemID, PendingUserKey)` is how "one Pending request per member per lot" survives two concurrent submissions. MariaDB has no partial indexes, so the STORED generated column is the mechanism; any equivalent must be tested with two real concurrent inserts, not just sequential ones.
+- `ck_request_issued_le` means no request can ever record more issued than requested, whatever a future caller does.
+- `uq_request_pending` on `(GuildBankItemID, PendingCharacterKey)` is how "one Pending request per character per item" survives two concurrent submissions, for members and public visitors alike. MariaDB has no partial indexes, so the STORED generated column is the mechanism; any equivalent must be tested with two real concurrent inserts, not just sequential ones.
 
 Migration test expectations:
 
@@ -773,7 +855,9 @@ Migration test expectations:
 - Inserting a request with a non-existent `GuildBankItemID` fails.
 - Deleting a lot referenced by a request fails (`ON DELETE RESTRICT`).
 - Two movements with the same `RequestID` fail; two with `NULL` succeed.
-- Two `Pending` rows for the same `(GuildBankItemID, RequesterUserID)` fail; a second one after the first is `Cancelled` succeeds.
+- Two `Pending` rows for the same `(GuildBankItemID, CharacterName)` fail — including when one is a member request and one is public — while the same item for two different characters succeeds.
+- A second `Pending` row for the same pair succeeds once the first is `Completed`, `Denied` or `Cancelled` (the generated column is `NULL` for every non-pending row).
+- `IssuedQuantity > RequestedQuantity` fails (`ck_request_issued_le`); `IssuedQuantity = 0` fails (`ck_request_issued`).
 
 ### 11.2 SQLite (accounts) — no migration
 
@@ -789,7 +873,7 @@ Settings are rows in the existing SQLite `Settings` table, so adding a key is co
 
 Add one `SettingDefinition` in `service/settings.go` plus its validation case; the settings page renders it automatically because `settingViews` iterates the definitions. Default **off** makes public submission an explicit owner decision rather than a launch accident.
 
-Optional, only if OD-R6/R7 require them: `RequestMaxPendingPerUser` and `RequestPublicPerIPHour` as settings instead of constants. Recommendation: keep them constants for v1 — every setting is a support surface.
+Both limits stay constants for v1 — no new settings. With auto-expiry declined (OD-R7) there is no knob to expose, and every setting is a support surface.
 
 ---
 
@@ -807,7 +891,7 @@ Optional, only if OD-R6/R7 require them: `RequestMaxPendingPerUser` and `Request
 | POST | `/my/requests/:id/cancel` | `requestHandler.cancel` | `classMember` | CSRF; own Pending only |
 | GET | `/admin/requests` | `adminRequestHandler.queue` | `classOfficer` | filters, paging |
 | GET | `/admin/requests/:id` | `adminRequestHandler.detail` | `classOfficer` | decision page |
-| POST | `/admin/requests/:id/approve` | `adminRequestHandler.approve` | `classOfficer` | CSRF; issues |
+| POST | `/admin/requests/:id/approve` | `adminRequestHandler.approve` | `classOfficer` | CSRF; no quantity field when stock covers the request; reduced quantity only when short |
 | POST | `/admin/requests/:id/deny` | `adminRequestHandler.deny` | `classOfficer` | CSRF; reason required |
 | GET | `/api/v1/requests` | `requestAPI.list` | `classMember` | own requests, JSON |
 | GET | `/api/v1/requests/:id` | `requestAPI.get` | `classMember` | own only |
@@ -817,7 +901,7 @@ Optional, only if OD-R6/R7 require them: `RequestMaxPendingPerUser` and `Request
 | POST | `/api/v1/admin/requests/:id/approve` | `adminRequestAPI.approve` | `classOfficer` | |
 | POST | `/api/v1/admin/requests/:id/deny` | `adminRequestAPI.deny` | `classOfficer` | |
 
-`/request/:id/confirm` is the route that needs the most care: it is `classPublic` and renders only the item name, quantity and character name for the ID supplied, with `Cache-Control: no-store` and `X-Robots-Tag: noindex`. An enumerating visitor can therefore learn that a request number existed — acceptable, because the receipt carries nothing else (OD-R3 revisits this).
+`/request/:id/confirm` is the route that needs the most care: it is `classPublic` and renders only the item name, quantity and character name for the ID supplied, with `Cache-Control: no-store` and `X-Robots-Tag: noindex`. An enumerating visitor can therefore learn that a request number existed — acceptable, because the receipt carries nothing else. The tokenised alternative was declined for v1 (OD-R3).
 
 Every route must be added to `routeMatrix` in `authorization_matrix_test.go`, and nav entries to `navigation_role_test.go`, in the same commit as the handler.
 
@@ -829,7 +913,8 @@ Every route must be added to `routeMatrix` in `authorization_matrix_test.go`, an
   "id": 123,
   "status": "Pending",
   "item": { "lotId": 42, "equid": 12345, "name": "Cloak of Flames" },
-  "quantity": 1,
+  "quantity": 5,
+  "issuedQuantity": null,
   "character": "Icefear",
   "note": "for raid",
   "decisionNote": null,
@@ -846,7 +931,9 @@ Every route must be added to `routeMatrix` in `authorization_matrix_test.go`, an
 {
   "id": 123,
   "status": "Completed",
-  "issuedQuantity": 1,
+  "requestedQuantity": 5,
+  "issuedQuantity": 2,
+  "shortIssued": true,
   "movementId": 412,
   "remainingQuantity": 3,
   "decidedAt": "2026-11-26T18:20:02Z",
@@ -856,6 +943,8 @@ Every route must be added to `routeMatrix` in `authorization_matrix_test.go`, an
 
 Field rules, following the existing admin DTO discipline:
 
+- `issuedQuantity` equals `requestedQuantity` unless the lot was short; `shortIssued` is `true` only in that case, and it is derived (`issuedQuantity < requestedQuantity`), never a stored flag.
+- The approve request body carries `issuedQuantity` **only** when the approver was prompted — sending it while stock covers the request is a `422` (§12.3), and omitting it is the normal call.
 - The member/public DTO is an **explicit allowlist**; it never includes `requesterUserId`, another requester's `contactDiscord`, `createdByUserId`, `decidedByUserId` or `correlationId`.
 - The officer DTO adds `requesterKind`, `requesterUserName`, `contactDiscord`, `onHandAtCreate`, `currentOnHand`, `lotActive`.
 - No `SELECT *` in either path (the PD5-25 convention).
@@ -867,11 +956,14 @@ Field rules, following the existing admin DTO discipline:
 | Validation failure (quantity, note, character, handle) | 422 | `validation_error` + field map |
 | Character not owned by the caller | 422 | `character_invalid` |
 | Lot missing or removed | 409 | `item_unavailable` |
-| Requested quantity above on-hand | 409 | `insufficient_stock` |
-| Duplicate Pending for the same lot by the same user | 409 | `request_already_pending` |
+| Requested quantity above on-hand at creation | 409 | `insufficient_stock` |
+| Issue quantity above what is on hand at approval (stock moved since the page loaded) | 409 | `insufficient_stock` |
+| On-hand is 0 by the time approval runs | 409 | `insufficient_stock` (nothing to issue) |
+| Reduced issue quantity posted while on-hand covers the request | 422 | `validation_error` + `issuedQuantity` field — the UI never offers a reduction in that case (§4.4) |
+| Issue quantity above the requested quantity, or below 1 when a reduction was offered | 422 | `validation_error` + `issuedQuantity` field |
+| Same character already holds a Pending request for this item | 409 | `request_already_pending` |
 | Pending budget exceeded | 429 | `too_many_pending` |
-| Request already decided (by anyone, including a replay of the same approval) | 409 | `request_not_pending` — except a replay whose movement matches, which returns 303 to the completed page (§9.4) |
-| Officer deciding their own request | 403 | `own_request` |
+| Request already decided (by anyone, including the same officer, including a replay of the same approval) | 409 | `request_not_pending` — except a replay whose movement matches, which returns 303 to the completed page (§9.4) |
 | Stale `expectedModAt` on approve | 409 | `stale_item` |
 | Public rate limit / honeypot / time-trap | 429, or a silent success page | `rate_limited` / no signal |
 | `PublicRequestsEnabled` off | 404 | — (the route must not advertise itself) |
@@ -957,38 +1049,39 @@ No Discord handle field for members: the account already carries the linked Disc
 ```
 Your requests                                  [Newest first ▼]
 
- #123  Cloak of Flames      1   Icefear   Pending     2 hours ago
+ #123  Cloak of Flames      5   Icefear   Pending     2 hours ago
  #118  Flask of the Titans  5   Raidshaman Completed  3 days ago → movement #389
+ #115  Flask of the Titans  5   Raidshaman Completed · 3 of 5  4 days ago
  #110  Arcanite Bar         2   Banktoon  Denied     1 week ago  (reason…)
 ```
 
-- Status uses a badge partial with distinct colours and text (never colour alone): `Pending`, `Completed`, `Denied`, `Cancelled`.
+- Status uses a badge partial with distinct colours and text (never colour alone): `Pending`, `Completed`, `Denied`, `Cancelled`, plus the short-issue variant `Completed · 3 of 5`.
 - A `Pending` row whose lot is gone shows `Pending · item unavailable`.
 - Filters: status; paging at 25.
 
-Detail page: request facts, decision block (who/when/reason), the linked movement when `Completed` (link to `/admin/inventory/:id/history` for officers; for members a read-only summary), and a **Cancel request** form with a confirm step, shown only for `Pending`.
+Detail page: request facts (including `Requested 5 · Issued 3` when the two differ), decision block (who/when/reason), the linked movement when `Completed` (link to `/admin/inventory/:id/history` for officers; for members a read-only summary), and a **Cancel request** form with a confirm step, shown only for `Pending`.
 
 ### 13.6 Officer queue and decision page
 
 - Queue: dense table, sticky filter bar, `Requests` nav item with a Pending badge. Age column bands at 2 days (amber) and 7 days (red).
 - Row actions: **Approve** (opens the decision page rather than acting inline — an irreversible issue deserves a confirmation surface, not a table button) and **Deny**.
 - Decision page: two stacked cards.
-  - "Why this can be issued" — live lot state, quantity check, links.
-  - Decision block — approve (optional note) / deny (required reason) as separate forms, both with hidden `expectedModAt`.
+  - "Why this can be issued" — live lot state, the `Requested 5 · Available 2` comparison, links.
+  - Decision block — approve form (no quantity field when the lot covers the request; a prefilled *Issue quantity* only when it is short, per §8.3, plus an optional note) and deny form (required reason) as separate forms, both with hidden `expectedModAt`.
 - Precedent from the existing admin pages: irreversible writes confirm on a dedicated page rather than via JS dialogs (`admin_remove.html`, `admin_inventory_issue.html`), so this matches.
 
 ### 13.7 Notices
 
 Notice codes go through the existing message-partial mechanism, one fixed code per outcome:
 
-`created`, `cancelled`, `completed`, `denied`, `insufficient-stock`, `already-decided`, `stale-item`, `own-request`, `public-disabled`.
+`created`, `cancelled`, `completed`, `short-issued`, `denied`, `insufficient-stock`, `already-decided`, `stale-item`, `public-disabled`.
 
 No notice ever echoes user-entered text; the templates read the row instead.
 
 ### 13.8 Accessibility and copy rules
 
 - Every status badge carries a text label, not just colour.
-- The approve/deny buttons state the consequence in the label: "Approve and issue 1 × Cloak of Flames" rather than "Approve".
+- The approve/deny buttons state the consequence in the label: "Approve and issue 5 × Cloak of Flames", or, when stock is short, "Approve and issue 4 of 5 × Cloak of Flames" — never a bare "Approve".
 - Deny requires the reason field to be filled; the form says why ("Members see this reason").
 - Age and timestamps use `<time datetime="…">` with a human-readable value.
 
@@ -1024,7 +1117,7 @@ Plus, on the public create path only:
 - `ContactDiscord` is required for public requests and is **never** rendered on any public page or in the public receipt. It appears only in the officer queue/detail and the officer JSON DTO.
 - The public request's IP and User-Agent are **not** stored on the request row. The audit row for `REQUEST_CREATED` carries the standard nullable `SourceIP` that every write in the app already records (`Audit.SourceIP`, populated from request context), and nothing else — so abuse is investigable without turning the request table into a personal-data store.
 - Log lines for creation record the request ID, item ID, quantity and requester kind — never the note or the handle. Existing logging discipline is kept: identifiers, not payloads.
-- `Note` and `DecisionNote` are capped (255 / 500) and rendered as text, never as HTML.
+- `Note` and `DecisionNote` are both capped at 255 runes and rendered as text, never as HTML.
 
 ### 14.4 Character ownership re-validation (server-side)
 
@@ -1042,11 +1135,13 @@ Consequences that make this necessary:
 
 Public requests are exempt from this rule by definition (no account), which is exactly why they carry a required Discord handle and are visually distinct in the queue (`requesterKind = Public`).
 
-### 14.5 Self-decision and privilege boundaries
+### 14.5 Privilege boundaries
 
-- An officer may not approve, deny or otherwise decide their own request: the handler compares `decidedByUserId` against `requesterUserId` before opening any transaction and returns `403 own_request`.
+- **No self-decision rule exists, by owner decision (§8.6).** There is no `requesterUserId == decidedByUserId` check and no `own_request` error code; adding one later would be a behaviour change requiring its own decision.
 - Officers hold `CanManageInventory()`, so no new permission flag is introduced. Members cannot reach `/admin/requests` at all; the route returns 404 rather than 403 for non-officers, consistent with existing admin routes.
-- Members can cancel only their own `Pending` request; "own" is resolved by `requesterUserId`, never by a posted value.
+- Members can cancel only their own `Pending` request; "own" is resolved from `requesterUserId` in the session, never from a posted value.
+- Public requesters have no account and therefore no way to cancel: the cancel route is unreachable for them, and an officer denies the request instead.
+- The compensating control for self-approval is disclosure, not prevention: `RequesterUserID` and `DecidedByUserID` are both stored, both audit rows name their actor, and the officer queue shows "You requested this" on such rows.
 
 ### 14.6 Enumeration and disclosure
 
@@ -1057,11 +1152,11 @@ Public requests are exempt from this rule by definition (no account), which is e
 | `/admin/requests/:id` | Full requester data | Officer-only, 404 for members |
 | Approve/deny errors | Stock levels | `insufficient_stock` says nothing about other requests; the lot page already shows on-hand publicly |
 
-Request numbers are sequential and therefore guessable, which is why the receipt is deliberately thin. A tokenised public status page is deferred (OD-R3).
+Request numbers are sequential and therefore guessable, which is why the receipt is deliberately thin. A tokenised public status page is deferred by decision (OD-R3).
 
 ### 14.7 Idempotency and duplicate protection
 
-- Create: `Idempotency-Key` honoured when present (existing convention), plus `uq_request_pending` on `(GuildBankItemID, PendingUserKey)` for members (§2.2). A double-submitted form returns the first request's receipt rather than creating a second row; the duplicate-key error is translated to `409 request_already_pending`. Public requests have `RequesterUserID = NULL`, so the index does not constrain them — their volume is governed by the rate limits in §14.2 instead.
+- Create: `Idempotency-Key` honoured when present (existing convention), plus `uq_request_pending` on `(GuildBankItemID, PendingCharacterKey)` (§2.2). A double-submitted form returns the first request's receipt rather than creating a second row; the duplicate-key error is translated to `409 request_already_pending`. Because the key is the **character**, this covers public rows too (they have no `RequesterUserID`), and it is what makes "same item for a second character" a legal request rather than a clobbered one.
 - Approve: the deterministic key `req-<RequestID>` on the movement, plus the guarded `UPDATE … WHERE Status='Pending'`. Two concurrent approvals cannot both issue.
 - Cancel: guarded `UPDATE … WHERE Status='Pending'`; a second cancel is a no-op with `request_not_pending`.
 
@@ -1079,13 +1174,13 @@ Request numbers are sequential and therefore guessable, which is why the receipt
 
 | Area | Cases |
 |---|---|
-| Creation (member) | happy path; quantity 0, negative, above on-hand, above `RequestedQuantity` cap; note length; character not owned → `character_invalid`; character owned but different case → accepted; lot removed → `item_unavailable`; Pending budget at 5 → `too_many_pending`; duplicate Pending for same lot → `request_already_pending`; idempotency key replay → same ID |
-| Creation (public) | happy path; `PublicRequestsEnabled` off → 404; missing Discord handle → `validation_error`; honeypot filled → no row written, success page shown; sub-2-second submit → same; rate limit 5/hour/IP → 429 |
-| Approval | happy path issues exactly `RequestedQuantity`; movement `Recipient` equals `CharacterName`; `Movement.RequestID` set; `CompletedMovementID` set; `IssuedQuantity` set; lot `OnHand` decremented by exactly the issued amount; both audit rows share `CorrelationID`; lot with fewer units than requested → `insufficient_stock` and **no** movement |
-| Approval failures | already `Completed` → `request_not_pending`; `Denied`/`Cancelled` → same; missing lot → `item_unavailable`; stale `expectedModAt` → `stale_item`; self-decision → `own_request`; replay of the same approve → one movement only |
+| Creation (member) | happy path; quantity 0, negative, above on-hand, above `RequestedQuantity` cap; note length; character not owned → `character_invalid`; character owned but different case → accepted; lot removed → `item_unavailable`; Pending budget at 5 → `too_many_pending`; same character + same item already Pending → `request_already_pending`; same item for a **second** character → allowed; same character + same item after the first was `Completed`/`Denied`/`Cancelled` → allowed; idempotency key replay → same ID |
+| Creation (public) | happy path; `PublicRequestsEnabled` off → 404; missing Discord handle → `validation_error`; same character + same item already Pending → `request_already_pending` even though `RequesterUserID` is `NULL`; honeypot filled → no row written, success page shown; sub-2-second submit → same; rate limit 5/hour/IP → 429 |
+| Approval | happy path issued with **no** `IssueQuantity` posted, so exactly `RequestedQuantity` leaves the lot; the rendered page has no quantity input when on-hand ≥ requested; movement `Recipient` equals `CharacterName`; `Movement.RequestID` set; `CompletedMovementID` set; `IssuedQuantity` set; lot `OnHand` decremented by exactly the issued amount; both audit rows share `CorrelationID`; **short stock**: requested 5, on hand 4 → the page renders one issue-quantity input prefilled at 4; approving the prefill issues 4, request `Completed` with `IssuedQuantity = 4`, badge shows `4 of 5`, movement note reads `request #id: 4 of 5`; **short stock, reduced further** (requested 5, on hand 4, officer types 3) → issues 3 and the lot drops by 3; **on hand 0** → no approve form rendered, forced approve returns `insufficient_stock`, no movement, request still `Pending` |
+| Approval failures | already `Completed` → `request_not_pending`; `Denied`/`Cancelled` → same; missing lot → `item_unavailable`; stale `expectedModAt` → `stale_item`; `IssueQuantity = 0` → treated as "none posted" and issues `min(requested, on-hand)`, never zero; **reduced `IssueQuantity` while on-hand covers the request → `validation_error` on `issuedQuantity`**; `IssueQuantity` above `RequestedQuantity` → `validation_error`; `IssueQuantity` above on-hand → `insufficient_stock`; replay of the same approve → one movement only; **officer approving their own request → succeeds** (asserted deliberately, so the absence of a self-decision rule is covered rather than assumed) |
 | Deny / cancel | deny writes reason and audit; deny without reason → validation error; cancel by owner; cancel by another member → 404; cancel of a `Completed` → `request_not_pending`; cancel writes no movement |
-| Concurrency | two approvals of the same request in parallel → one movement; two creates for the same lot by one member in parallel → one row; approve racing a manual issue that empties the lot → one wins, the other gets `insufficient_stock` |
-| Projections | `available` flag; `currentOnHand` vs `onHandAtCreate`; `lotActive` after soft delete; queue filters by status/kind/age; `PendingRequestForLot` returns the member's ID |
+| Concurrency | two approvals of the same request in parallel → one movement; two creates for the same character + lot in parallel → one row, while two different characters in parallel → two rows; approve racing a manual issue that empties the lot → the approval gets `insufficient_stock` and issues nothing |
+| Projections | `available` flag; `currentOnHand` vs `onHandAtCreate`; `lotActive` after soft delete; queue filters by status/kind/age; `PendingRequestForCharacter` returns the request ID for the right character only; `PendingCharactersForLot` lists the caller's pending characters |
 
 ### 15.2 Integration and migration tests
 
@@ -1105,15 +1200,21 @@ Request numbers are sequential and therefore guessable, which is why the receipt
 1. Public item page with the setting off shows no button; turn it on, button appears.
 2. Submit a public request; officer sees it in the queue with the handle; member pages cannot see it.
 3. Approve it; lot on-hand drops by the requested amount; movement history shows the issue; audit correlation shows both rows.
-4. Approve a request for an item another officer just emptied; the error is `insufficient_stock` and nothing is issued.
-5. Cancel a member request; it leaves the queue; the member sees `Cancelled`.
-6. Deny with a reason; the member sees the reason on their detail page.
+4. Request 5 of a lot that holds 4; the decision page warns `Requested 5 · Available 4` and shows one prefilled issue-quantity field at 4; approve issues 4, the request reads `Completed · 4 of 5`, and the movement note says `request #id: 4 of 5`.
+5. Request 5 of a lot that holds 9; the decision page shows **no** quantity field and a button reading "Approve and issue 5 × …"; approving sends no quantity and the lot drops by exactly 5.
+6. Request an item whose lot is at 0; the approve form is absent and the only action is deny.
+7. Approve a request for an item another officer just emptied; the error is `insufficient_stock` and nothing is issued.
+8. Request the same item for two different characters as one member; both are accepted and both appear in the queue.
+9. Cancel a member request; it leaves the queue; the member sees `Cancelled`.
+10. Deny with a reason; the member sees the reason on their detail page.
+11. As an officer, request an item and then approve it yourself; it succeeds and both audit rows name the same user.
+12. Post a reduced `issueQuantity` by hand against a lot that covers the request; the response is `422 validation_error` on that field and nothing is issued.
 
 ---
 
 ## 16. Implementation phases
 
-Each phase is independently releasable and leaves the app in a consistent state. Later phases only add; nothing in an earlier phase is reworked.
+Each phase is independently releasable and leaves the app in a consistent state. Later phases only add; nothing in an earlier phase is reworked. Every phase is unblocked: the design decisions C1–C10 and the recommendations OD-R1…R13 are confirmed (§17.1, §17.2), and the one open decision (OD-R14) affects nothing before Phase 5, which ships with the public surface disabled (OD-R1).
 
 ### Phase 1 — Schema and domain (no routes)
 
@@ -1136,9 +1237,9 @@ Each phase is independently releasable and leaves the app in a consistent state.
 
 ### Phase 4 — Officer flow
 
-- `/admin/requests` queue, detail, approve, deny; `approveAttempt` calling `issueLocked`.
+- `/admin/requests` queue, detail, approve (automatic quantity when covered, prefilled reduced quantity when short), deny; `approveAttempt` calling `issueLocked`.
 - Pending panel on `admin_inventory_detail.html`; nav entry; badge.
-- Ship gate: approval issues through the ledger exactly like a manual issue, verified against the existing history views.
+- Ship gate: approval issues through the ledger exactly like a manual issue, verified against the existing history views; a short issue produces the same lot arithmetic as the equivalent manual partial issue.
 
 ### Phase 5 — Public flow
 
@@ -1148,37 +1249,67 @@ Each phase is independently releasable and leaves the app in a consistent state.
 
 ### Deferred (documented, not planned)
 
-JSON API (§12.1 lists it for completeness), tokenised public status page (OD-R3), CSV export (OD-R11), Discord DM (OD-R10), auto-expiry (OD-R7), partial fulfilment (OD-R4).
+JSON API (§12.1 lists it for completeness), tokenised public status page (OD-R3), CSV export (OD-R11), Discord DM (OD-R10), auto-expiry (OD-R7). Partial fulfilment is **not** deferred: it is part of Phase 4 as a reduced issue quantity offered only when the lot cannot cover the request (C8, C10).
 
 ---
 
 ## 17. Owner decisions
 
-Each decision can be answered "yes/no to the recommendation" without further reading. Recommendations follow from the constraints above; where a recommendation contradicts something an owner might reasonably want, the cost of the alternative is stated.
+### 17.1 Confirmed design decisions
+
+These are settled. Implementation follows them exactly; no later phase reopens them.
+
+| ID | Decision | What the document now says |
+|---|---|---|
+| **C1** | One request = one inventory item | `RequestedQuantity` against a single `GuildBankItemID`; no line-item table, no cart. Wanting three items means three requests (§0, §2.2) |
+| **C2** | Character attribution | Members with profile characters pick from a dropdown; members without one, and every public visitor, type the name under the profile's 3–15 letter rule. The chosen name is stored on the request as a snapshot, so history survives profile edits and deletions (§5, §2.6) |
+| **C3** | Four statuses | `Pending`, `Completed`, `Denied`, `Cancelled`. No `Approved` state (§4) |
+| **C4** | Approve performs issuance | Approve = issue = complete in one transaction: lot update, `ISSUE` movement, request transition and both audit rows commit together, or nothing does (§9.1, §9.2) |
+| **C5** | Duplicate rule | Rejected only for same character + same item + `Pending`, enforced by `uq_request_pending (GuildBankItemID, PendingCharacterKey)`. Same item for a different character is allowed; the same character may request the item again once the earlier request is terminal (§2.2, §7.4) |
+| **C6** | Only the creator cancels | Cancel applies to the caller's own `Pending` request. `Completed`, `Denied` and `Cancelled` are immutable. A public requester has no account, so an officer denies instead (§3.1, §14.5) |
+| **C7** | Officers may approve their own requests | No separation-of-duties rule and no `own_request` code. Requester and approver are both recorded, and the UI marks the row "You requested this" — this **supersedes** the earlier OD-R5 recommendation (§8.6, §14.5) |
+| **C8** | Short stock: approve what exists | The warned officer issues the available quantity or denies. The request still ends `Completed` with `IssuedQuantity < RequestedQuantity`, and no remainder is tracked — this **supersedes** the earlier OD-R4 recommendation (§4.4, §8.4) |
+| **C9** | Historical fidelity | `EQUID`, `ItemName`, `CharacterName`, `RequesterUserName`, `OnHandAtCreate` and the actor names are request-time snapshots. No read path joins to SQLite or requires the lot to still exist (§2.6) |
+| **C10** | Issue quantity follows stock | When the lot covers the request, approve issues `RequestedQuantity` automatically and the form has **no** quantity field. A reduced quantity is offered only when on-hand is below the request, prefilled with everything available. A reduced issue posted while stock covers the request is rejected, not honoured. This **supersedes** the earlier OD-R13 recommendation of an always-editable quantity (§4.4, §8.3, §9.2) |
+
+### 17.2 Confirmed recommendations
+
+Every open recommendation was accepted as written. The table records the answer and where it lives in the document, so implementation treats all thirteen as settled rather than as proposals.
+
+| ID | Confirmed answer | Where it lands |
+|---|---|---|
+| **OD-R1** | `PublicRequestsEnabled` defaults to **off**; enabling public submission is a deliberate owner action | §11.3, §16 Phase 5 |
+| **OD-R2** | A Discord handle is **mandatory** on public requests | §6.2, §14.3 |
+| **OD-R3** | **No** tokenised public status page in v1; the receipt plus the Discord contact is the whole public surface | §6.5, §12.1, §14.6 |
+| **OD-R4** | *Resolved earlier → C8.* Partial fulfilment: approval issues `min(requested, on-hand)` and the request still completes; no new status, no remainder tracked | §4.4 |
+| **OD-R5** | *Resolved earlier → C7.* Officers and Administrators may approve their own requests | §8.6 |
+| **OD-R6** | *Resolved earlier → C2.* No profile character is auto-created from a typed name | §5.3 |
+| **OD-R7** | **No** automatic expiry; age banding makes staleness visible and denial always carries a reason | §3.2, §8.2 |
+| **OD-R8** | `DecisionNote` **is** visible to the requester; required for denial, capped at 255 runes | §2.3, §8.5 |
+| **OD-R9** | The approval movement's note **is** prefixed `request #123: `, with the shortfall stated first | §9.2 |
+| **OD-R10** | **No** Discord DM or e-mail notifications in v1 | §7.5 |
+| **OD-R11** | **No** CSV export in v1 | §8.7, §16 |
+| **OD-R12** | **Neither** reopen nor re-approve after a return; the member creates a new request | §9.5 |
+| **OD-R13** | *Superseded by C10.* Issue quantity is automatic when the lot covers the request and offered only when stock is short; the earlier "always editable" recommendation was overruled | §4.4, §8.3, §9.2 |
+
+### 17.3 Still open
 
 | ID | Question | Recommendation | Cost of the alternative |
 |---|---|---|---|
-| **OD-R1** | Should `PublicRequestsEnabled` default to off? | **Yes, off.** Public submission changes the guild's exposure (unknown requesters, spam surface, PII). Turning it on should be deliberate, and it is one checkbox on the existing settings page | If it defaults on, a fresh deployment exposes a public write endpoint to bots before an officer has seen the queue |
-| **OD-R2** | Is the Discord handle mandatory for public requests? | **Yes, in v1.** Without it an officer cannot contact an unauthenticated requester, and a request nobody can follow up is a dead row. If owners want a public form with no contact field, the cleaner answer is to leave public requests disabled | An optional handle forces officers to guess or deny for lack of contact — worse than not accepting the request |
-| **OD-R3** | Should requesters get a tokenised public status page instead of only the receipt? | **No for v1.** The receipt plus the Discord contact covers the expected volume. A token URL adds a bearer credential to protect, a second lookup path, and an outbound-link problem (people paste it into Discord) | Without it a public requester cannot self-serve status and must ask an officer. Acceptable at low volume |
-| **OD-R4** | Should partial fulfilment be supported (request 5, issue 3)? | **No for v1.** `IssuedQuantity` exists so it needs no migration later, but supporting it now means a new status, a second decision surface and a rule for the remainder. Strict `issued == requested` keeps one decision, one movement, one end state | Members who ask for too many units are denied and re-request the right number — a visible, coachable outcome |
-| **OD-R5** | May an Administrator approve their own request? | **No.** The rule is separation of duties, not trust in a person: the request-to-movement chain is the guild's audit story, and "I approved myself" weakens it even when honest | An exception puts an asterisk on every future audit review of that administrator's requests |
-| **OD-R6** | Should a member with no profile characters have one auto-created from the typed name? | **No.** The profile is the member's own data; writing to it from a request form surprises people and lets a typo become a permanent character. The form links to `/account/profile` instead | Auto-creation saves one click, costs a confusing profile edit plus a delete flow for the mistake |
-| **OD-R7** | Should stale `Pending` requests expire automatically? | **No.** A timer that silently moves requests to `Cancelled` hides work from officers and gives requesters no reason. Age banding in the queue (§13.6) makes staleness visible, and denial carries a reason | Auto-expiry avoids a slowly growing queue but produces "why was my request cancelled?" questions and untraceable outcomes |
-| **OD-R8** | Is `DecisionNote` visible to the requester? | **Yes.** A denial reason is the difference between "the guild refused me" and "the guild wants one, not five". Capped at 255, required for denial, rendered as text | Hiding it turns every denial into a support ticket to an officer |
-| **OD-R9** | Should the approval movement's note be prefixed with the request ID (`request #123: for raid`)? | **Yes.** `InventoryMovement.RequestID` records the link structurally, but the note is what officers read in a history list without following links. Keep the prefix short and never duplicate the requester's note into it | Without it, an issue history gives no hint which issues came from requests |
-| **OD-R10** | Should approving or denying send a Discord DM (or e-mail) to the requester? | **No for v1.** No outbound messaging infrastructure exists, and adding one brings token management, retries, delivery state and a new failure mode into an inventory feature | Members must check `/my/requests`; consistent with the "no notifications" position already taken in §7.5 |
-| **OD-R11** | Is a CSV export of requests needed? | **Not for v1.** Reporting is served by the audit correlation filter and the queue filters. The app's CSV patterns exist for inventory import, not reporting | Officers who want a spreadsheet must copy from the queue; revisit when someone asks |
-| **OD-R12** | After a `Completed` request's item is returned, should the request reopen or allow a re-approve? | **Neither.** The return is an inventory movement (§9.5); the item goes back into the lot and the member creates a new request. One request = one issue, permanently | Reopening lets a second approve issue against a stale row and makes `CompletedMovementID` non-final |
+| **OD-R14** | Public duplicates key on the character name, which an anonymous visitor can invent freely. Should public creation also be capped per Discord handle? | **No for v1.** The per-IP and global limits plus the officer's deny button already bound the damage, and a handle-keyed index would reject two guildmates who share a handle or two visitors who leave none | A determined visitor can queue several invented characters' worth of requests for the same item until an officer denies them — bounded by 5/hour/IP, and visible in the queue as several `Public` rows |
 
-### 17.1 Decisions that are not owner-facing
+OD-R14 is the only decision left, and it gates nothing: it touches Phase 5 alone, and Phase 5 ships with public requests disabled until an owner turns them on (OD-R1). Keeping the recommendation costs an officer at most a deny click per junk row.
+
+### 17.4 Decisions that are not owner-facing
 
 Settled by the existing codebase; recorded so implementation does not reopen them:
 
 - Approval goes through `issueLocked` (§9.1) — no second issue path.
 - Lock order is request row, then lot row (§9.2); deny and cancel take no inventory lock.
-- Requests live in MariaDB with snapshots instead of cross-database FKs (§2.1).
-- Four statuses, no `Approved` (§4).
+- Requests live in MariaDB with snapshots instead of cross-database FKs (§2.1, §2.6).
+- The duplicate rule is enforced by a STORED generated column plus a unique index, because MariaDB has no partial indexes (§2.2).
+- A short issue reuses the existing partial-issue branch of `issueLocked`; the lot arithmetic is not new (§9.1).
+- No self-decision check is written anywhere, not even commented out — its absence is deliberate (§8.6).
 - New routes are classified in the authorization and navigation tests in the same commit (§15.3).
 - The public surface stays off until an owner enables it (OD-R1).
 

@@ -1,0 +1,64 @@
+{{define "request_mine_detail.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card">
+    <p class="eyebrow">Request #{{.Request.ID}}</p>
+    <h1>{{.Request.ItemName}}</h1>
+    <p>{{template "requestStatusBadge" .Request}}</p>
+
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <dl class="detail-list">
+      <div><dt>Requested quantity</dt><dd>{{.RequestedQuantity}}</dd></div>
+      {{if .ShortIssued}}
+        <div><dt>Issued quantity</dt><dd>{{.IssuedQuantity}} of {{.RequestedQuantity}}</dd></div>
+      {{else if .IssuedQuantity}}
+        <div><dt>Issued quantity</dt><dd>{{.IssuedQuantity}}</dd></div>
+      {{end}}
+      <div><dt>Character</dt><dd>{{.Request.Character}}</dd></div>
+      <div><dt>Requested</dt><dd><time datetime="{{.Request.CreatedAtISO}}">{{.Request.CreatedAtText}}</time></dd></div>
+      {{if .Note}}<div><dt>Your note</dt><dd>{{.Note}}</dd></div>{{end}}
+      {{if .MovementID}}
+        <div><dt>Movement</dt><dd>Issued as movement #{{.MovementID}}</dd></div>
+      {{end}}
+    </dl>
+
+    {{if .DecidedAtText}}
+      <h2>Decision</h2>
+      <dl class="detail-list">
+        <div><dt>Decided by</dt><dd>{{.DecidedByName}}</dd></div>
+        <div><dt>Decided</dt><dd>{{.DecidedAtText}}</dd></div>
+        {{if .DecisionNote}}<div><dt>Reason</dt><dd>{{.DecisionNote}}</dd></div>{{end}}
+      </dl>
+    {{end}}
+
+    {{if .CanCancel}}
+      <h2>Cancel request</h2>
+      <div class="alert alert-warn" role="status">
+        Cancelling withdraws this request permanently. If you want the item later you will need to request it again.
+      </div>
+      <form method="post" action="/my/requests/{{.Request.ID}}/cancel" class="stack">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <label>
+          Reason (optional)
+          <textarea name="reason" rows="3" maxlength="255"></textarea>
+          <span class="help">Up to 255 characters. Officers see this reason.</span>
+        </label>
+        {{with index .ErrorFields "reason"}}<p class="field-error">{{.}}</p>{{end}}
+        <div class="wizard-actions">
+          <button type="submit" class="danger">Cancel this request</button>
+          <a class="link" href="/my/requests">Keep it</a>
+        </div>
+      </form>
+    {{end}}
+
+    <p><a href="/my/requests">Back to your requests</a></p>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

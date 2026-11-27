@@ -185,34 +185,35 @@ func (s *AdminInventoryService) Issue(ctx context.Context, in domain.IssueItemIn
 	})
 }
 
-func (s *AdminInventoryService) issueAttempt(ctx context.Context, in domain.IssueItemInput) (AdminWriteResult, error) {
-	tx, err := s.store.BeginAdminWrite(ctx)
-	if err != nil {
-		return AdminWriteResult{}, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
+// issueLocked performs the issue sequence inside an already-open admin write
+// transaction. It performs the lot lock, the removed/recipient checks, the
+// stale-version check, the partial/full-stack decision, the lot update, the
+// ledger row and its audit row. It never begins, commits or rolls back the
+// transaction: the caller owns it, which is what lets request approval add the
+// request transition to the same atomic unit (design section 9.1). The returned
+// item is the locked snapshot; the returned movement carries the inserted
+// MovementID.
+func (s *AdminInventoryService) issueLocked(ctx context.Context, tx AdminWriteTx,
+	in domain.IssueItemInput) (domain.AdminInventoryItem, domain.InventoryMovement, error) {
 	current, err := tx.LockInventory(ctx, in.GuildBankItemID)
 	if err != nil {
-		return AdminWriteResult{}, err
+		return domain.AdminInventoryItem{}, domain.InventoryMovement{}, err
 	}
 	if current.DeletedFg {
-		return AdminWriteResult{}, fmt.Errorf("%w: inventory row is removed", domain.ErrConflict)
+		return domain.AdminInventoryItem{}, domain.InventoryMovement{},
+			fmt.Errorf("%w: inventory row is removed", domain.ErrConflict)
 	}
 	if strings.TrimSpace(current.GivenTo) != "" {
-		return AdminWriteResult{}, fmt.Errorf("%w: an active row cannot carry a recipient", domain.ErrConflict)
+		return domain.AdminInventoryItem{}, domain.InventoryMovement{},
+			fmt.Errorf("%w: an active row cannot carry a recipient", domain.ErrConflict)
 	}
 	if !sameModAt(current.ModAt, in.ExpectedModAt) {
-		return AdminWriteResult{}, fmt.Errorf("%w: the record changed since it was loaded", domain.ErrConflict)
+		return domain.AdminInventoryItem{}, domain.InventoryMovement{},
+			fmt.Errorf("%w: the record changed since it was loaded", domain.ErrConflict)
 	}
 	if in.Quantity > current.Quantity {
-		return AdminWriteResult{}, domain.NewValidationError("quantity",
-			"quantity cannot exceed the on-hand quantity")
+		return domain.AdminInventoryItem{}, domain.InventoryMovement{},
+			domain.NewValidationError("quantity", "quantity cannot exceed the on-hand quantity")
 	}
 
 	// Partial issuance is governed by the on-hand lot quantity, not by EQUID
@@ -240,11 +241,11 @@ func (s *AdminInventoryService) issueAttempt(ctx context.Context, in domain.Issu
 		row.GivenTo = in.Recipient
 	}
 	if err := tx.UpdateInventory(ctx, row); err != nil {
-		return AdminWriteResult{}, err
+		return domain.AdminInventoryItem{}, domain.InventoryMovement{}, err
 	}
 	if !partial {
 		if err := tx.SetDeleted(ctx, current.ID, true, at, in.Actor); err != nil {
-			return AdminWriteResult{}, err
+			return domain.AdminInventoryItem{}, domain.InventoryMovement{}, err
 		}
 	}
 
@@ -253,14 +254,35 @@ func (s *AdminInventoryService) issueAttempt(ctx context.Context, in domain.Issu
 		in.CorrelationID, in.IdempotencyKey)
 	movementID, err := tx.InsertMovement(ctx, movement)
 	if err != nil {
-		return AdminWriteResult{}, err
+		return domain.AdminInventoryItem{}, domain.InventoryMovement{}, err
 	}
 	movement.MovementID = movementID
 	entry, err := movementAudit(current, movement, "ITEM_ISSUED", "", in.SourceIP)
 	if err != nil {
-		return AdminWriteResult{}, err
+		return domain.AdminInventoryItem{}, domain.InventoryMovement{}, err
 	}
 	if err := tx.InsertAudit(ctx, entry); err != nil {
+		return domain.AdminInventoryItem{}, domain.InventoryMovement{}, err
+	}
+	return current, movement, nil
+}
+
+// issueAttempt is the manual Issue wrapper: it owns the transaction, delegates
+// the sequence to issueLocked and builds the view result after the commit.
+func (s *AdminInventoryService) issueAttempt(ctx context.Context, in domain.IssueItemInput) (AdminWriteResult, error) {
+	tx, err := s.store.BeginAdminWrite(ctx)
+	if err != nil {
+		return AdminWriteResult{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	current, movement, err := s.issueLocked(ctx, tx, in)
+	if err != nil {
 		return AdminWriteResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -269,14 +291,14 @@ func (s *AdminInventoryService) issueAttempt(ctx context.Context, in domain.Issu
 	committed = true
 
 	updated := current
-	if partial {
-		updated.Quantity = remaining
+	if in.Quantity < current.Quantity {
+		updated.Quantity = movement.RemainingQuantity
 	}
-	updated.ModAt = at
+	updated.ModAt = movement.OccurredAt
 	updated.ModBy = in.Actor.UserName
 	actorID := in.Actor.UserID
 	updated.ModByUserID = &actorID
-	if !partial {
+	if in.Quantity == current.Quantity {
 		updated.DeletedFg = true
 		updated.GivenTo = in.Recipient
 	}

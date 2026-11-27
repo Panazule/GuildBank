@@ -134,6 +134,12 @@ type inventoryListPageData struct {
 type inventoryDetailPageData struct {
 	pageData
 	Item inventoryItemView
+	// CanRequest shows the member "Request this item" entry point. It is false
+	// for anonymous visitors, whose flow arrives in Phase 5.
+	CanRequest bool
+	// PendingNote names the caller's characters that already hold a Pending
+	// request for this lot.
+	PendingNote string
 }
 
 // adminItemView is the shared administrative presentation of one row. The list,
@@ -660,6 +666,18 @@ func (v *views) inventoryList(c *gin.Context, status int, data inventoryListPage
 
 func (v *views) inventoryDetail(c *gin.Context, status int, data inventoryDetailPageData) {
 	v.render(c, status, "inventory_detail.html", data)
+}
+
+func (v *views) requestForm(c *gin.Context, status int, data requestFormPageData) {
+	v.render(c, status, "request_form.html", data)
+}
+
+func (v *views) requestsMine(c *gin.Context, status int, data requestsMinePageData) {
+	v.render(c, status, "requests_mine.html", data)
+}
+
+func (v *views) requestMineDetail(c *gin.Context, status int, data requestDetailPageData) {
+	v.render(c, status, "request_mine_detail.html", data)
 }
 
 func (v *views) adminInventoryList(c *gin.Context, status int, data adminListPageData) {

@@ -28,6 +28,13 @@
       <p><a class="link primary" href="{{.Item.EQResourceURL}}" target="_blank" rel="noopener noreferrer" aria-label="Open {{.Item.Name}} on EQResource (new tab)">Open on EQResource (new tab)</a></p>
     {{end}}
 
+    {{if .CanRequest}}
+      <p><a class="link primary" href="/request/new?item={{.Item.ID}}">Request this item</a></p>
+      {{if .PendingNote}}<div class="alert alert-warn" role="status">{{.PendingNote}}</div>{{end}}
+    {{else}}
+      <p class="muted">Requests are currently limited to guild members. <a href="/login">Sign in</a> to request this item.</p>
+    {{end}}
+
     <p><a href="/">Back to guild inventory</a></p>
   </main>
   {{template "footer" .}}

@@ -155,16 +155,19 @@ func Run(ctx context.Context, opts Options) error {
 	var importService *service.ImportService
 	var inventoryService *service.InventoryService
 	var adminService *service.AdminInventoryService
+	var requestService *service.RequestService
 	if guildStore != nil {
 		metadata := service.NewItemMetadataService(guildStore)
 		itemNames := service.NewItemNameResolver(guildStore)
 		importService = service.NewImportService(guildStore, metadata, settingsService, time.Now, logger)
 		inventoryService = service.NewInventoryService(guildStore, settingsService, time.Now, logger)
 		adminService = service.NewAdminInventoryService(guildStore, settingsService, metadata, itemNames, time.Now, logger)
+		requestService = service.NewRequestService(guildStore, characterService, time.Now, logger)
 	} else {
 		importService = service.NewImportService(nil, nil, settingsService, time.Now, logger)
 		inventoryService = service.NewInventoryService(nil, settingsService, time.Now, logger)
 		adminService = service.NewAdminInventoryService(nil, settingsService, nil, nil, time.Now, logger)
+		requestService = service.NewRequestService(nil, characterService, time.Now, logger)
 	}
 
 	purgeCtx, stopPurge := context.WithCancel(ctx)
@@ -199,6 +202,7 @@ func Run(ctx context.Context, opts Options) error {
 		Settings:       settingsService,
 		Imports:        importService,
 		Inventory:      inventoryService,
+		Requests:       requestService,
 		Admin:          adminService,
 		Users:          userAdminService,
 		Characters:     characterService,

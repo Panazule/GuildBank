@@ -22,6 +22,7 @@ var expectedMigrationHashes = map[string]string{
 	"migrations/0005_item_quantity_model.sql":       "c7de158df2f218a9222cc3be6eae1d7ec23e2e9cad44ef38a197e1384dbdce99",
 	"migrations/0006_inventory_movement.sql":        "f8e54995c21ad24b5cc04e0f63ddaea95c2a04eb4624445c89b9f530bc30807e",
 	"migrations/0007_movement_related_movement.sql": "1b3d78fbfa4583a7cf155c838d874ab83f0afb4f42fce60eda5064d75dfb0c40",
+	"migrations/0008_inventory_request.sql":         "e109f3599803018e857c90b081ad7d772363136b32d80c575743dbf61cc066ba",
 }
 
 func TestMigrationManifest(t *testing.T) {
@@ -173,6 +174,53 @@ func TestMigrationManifest(t *testing.T) {
 	for _, forbidden := range []string{"DELIMITER", "TRIGGER", "PROCEDURE", "CREATE FUNCTION", "DROP"} {
 		if strings.Contains(strings.ToUpper(text), forbidden) {
 			t.Fatalf("0007 must not contain %s", forbidden)
+		}
+	}
+
+	// 0008 is additive only: one new table plus one nullable ledger column and
+	// its unique index. It must not rebuild either table, so DROP and MODIFY are
+	// forbidden and the column is added without an AFTER clause (MariaDB adds a
+	// trailing InnoDB column instantly; anchoring it would copy the ledger).
+	body, err = migrationFiles.ReadFile("migrations/0008_inventory_request.sql")
+	if err != nil {
+		t.Fatalf("read 0008: %v", err)
+	}
+	text = string(body)
+	if got := strings.Count(text, "CREATE TABLE IF NOT EXISTS InventoryRequest"); got != 1 {
+		t.Fatalf("0008 CREATE TABLE InventoryRequest count = %d, want 1", got)
+	}
+	if got := strings.Count(text, "ALTER TABLE InventoryMovement"); got != 2 {
+		t.Fatalf("0008 ALTER TABLE InventoryMovement count = %d, want 2", got)
+	}
+	for _, required := range []string{
+		"InventoryRequest",
+		"PendingCharacterKey",
+		"uq_request_pending",
+		"uq_request_movement",
+		"uq_request_idempotency",
+		"ix_request_status_time",
+		"ix_request_requester_time",
+		"ix_request_kind_time",
+		"ix_request_lot_time",
+		"ix_request_character_time",
+		"ck_request_quantity",
+		"ck_request_issued",
+		"ck_request_issued_le",
+		"ck_request_completed",
+		"ck_request_decided",
+		"fk_request_lot",
+		"fk_request_movement",
+		"ADD COLUMN RequestID BIGINT UNSIGNED NULL",
+		"uq_movement_request",
+		"fk_movement_request",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("0008 is missing %s", required)
+		}
+	}
+	for _, forbidden := range []string{"DELIMITER", "TRIGGER", "PROCEDURE", "CREATE FUNCTION", "DROP", "MODIFY"} {
+		if strings.Contains(strings.ToUpper(text), forbidden) {
+			t.Fatalf("0008 must not contain %s", forbidden)
 		}
 	}
 }

@@ -20,17 +20,19 @@ import (
 // movementFakeStore is a minimal in-memory AdminStore used to exercise the
 // movement handlers end to end without a database.
 type movementFakeStore struct {
-	items        map[int64]domain.AdminInventoryItem
-	movements    []domain.InventoryMovement
-	audits       []domain.AuditEntry
-	stackability map[uint64]domain.Stackability
-	nextItemID   int64
-	nextMoveID   int64
+	items         map[int64]domain.AdminInventoryItem
+	movements     []domain.InventoryMovement
+	audits        []domain.AuditEntry
+	requests      []domain.InventoryRequest
+	stackability  map[uint64]domain.Stackability
+	nextItemID    int64
+	nextMoveID    int64
+	nextRequestID int64
 }
 
 func newMovementFakeStore() *movementFakeStore {
 	return &movementFakeStore{
-		items: map[int64]domain.AdminInventoryItem{}, nextItemID: 1, nextMoveID: 1,
+		items: map[int64]domain.AdminInventoryItem{}, nextItemID: 1, nextMoveID: 1, nextRequestID: 1,
 	}
 }
 
@@ -159,6 +161,114 @@ func (f *movementFakeStore) GetAudit(ctx context.Context, id int64) (domain.Audi
 	return domain.AuditEntry{}, domain.ErrNotFound
 }
 
+func (f *movementFakeStore) GetRequest(ctx context.Context, requestID int64) (domain.InventoryRequest, error) {
+	for _, request := range f.requests {
+		if request.RequestID == requestID {
+			return f.projectRequest(request), nil
+		}
+	}
+	return domain.InventoryRequest{}, domain.ErrNotFound
+}
+
+// projectRequest mirrors the repository's lot join: CurrentOnHand and LotActive
+// are derived from the lot, never stored on the request.
+func (f *movementFakeStore) projectRequest(request domain.InventoryRequest) domain.InventoryRequest {
+	item, ok := f.items[request.GuildBankItemID]
+	if !ok {
+		request.CurrentOnHand, request.LotActive = 0, false
+		return request
+	}
+	request.CurrentOnHand, request.LotActive = item.Quantity, !item.DeletedFg
+	return request
+}
+
+func (f *movementFakeStore) RequestByIdempotencyKey(ctx context.Context, key string) (domain.InventoryRequest, error) {
+	for _, request := range f.requests {
+		if key != "" && request.IdempotencyKey == key {
+			return request, nil
+		}
+	}
+	return domain.InventoryRequest{}, domain.ErrNotFound
+}
+
+func (f *movementFakeStore) ListRequests(ctx context.Context, filter domain.RequestFilter) (domain.RequestPage, error) {
+	matches := make([]domain.InventoryRequest, 0, len(f.requests))
+	for _, request := range f.requests {
+		if filter.Status != "" && request.Status != filter.Status {
+			continue
+		}
+		if filter.RequesterKind != "" && request.RequesterKind != filter.RequesterKind {
+			continue
+		}
+		if filter.RequesterUserID > 0 &&
+			(request.RequesterUserID == nil || *request.RequesterUserID != filter.RequesterUserID) {
+			continue
+		}
+		if filter.GuildBankItemID > 0 && request.GuildBankItemID != filter.GuildBankItemID {
+			continue
+		}
+		matches = append(matches, f.projectRequest(request))
+	}
+	page := domain.RequestPage{
+		Requests: matches, Total: len(matches), Page: filter.Page, PageSize: filter.PageSize,
+		Filter: filter,
+	}
+	if page.PageSize > 0 {
+		page.TotalPages = (len(matches) + page.PageSize - 1) / page.PageSize
+	}
+	return page, nil
+}
+
+func (f *movementFakeStore) CountPendingRequests(ctx context.Context, requesterUserID int64) (int, error) {
+	count := 0
+	for _, request := range f.requests {
+		if request.Status == domain.RequestPending && request.RequesterUserID != nil &&
+			*request.RequesterUserID == requesterUserID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (f *movementFakeStore) PendingRequestForCharacter(ctx context.Context, guildBankItemID int64, characterName string) (int64, error) {
+	characterName = domain.NormalizeCharacterName(characterName)
+	for _, request := range f.requests {
+		if request.Status == domain.RequestPending && request.GuildBankItemID == guildBankItemID &&
+			request.CharacterName == characterName {
+			return request.RequestID, nil
+		}
+	}
+	return 0, nil
+}
+
+func (f *movementFakeStore) PendingCharactersForLot(ctx context.Context, guildBankItemID, requesterUserID int64) ([]string, error) {
+	names := make([]string, 0, 2)
+	for _, request := range f.requests {
+		if request.Status != domain.RequestPending || request.GuildBankItemID != guildBankItemID {
+			continue
+		}
+		if request.RequesterUserID == nil || *request.RequesterUserID != requesterUserID {
+			continue
+		}
+		names = append(names, request.CharacterName)
+	}
+	return names, nil
+}
+
+func (f *movementFakeStore) PendingRequestsForLot(ctx context.Context, guildBankItemID int64, limit int) ([]domain.InventoryRequest, error) {
+	requests := make([]domain.InventoryRequest, 0, 2)
+	for _, request := range f.requests {
+		if request.Status != domain.RequestPending || request.GuildBankItemID != guildBankItemID {
+			continue
+		}
+		requests = append(requests, request)
+	}
+	if limit > 0 && len(requests) > limit {
+		requests = requests[:limit]
+	}
+	return requests, nil
+}
+
 type movementFakeTx struct {
 	store *movementFakeStore
 }
@@ -281,6 +391,91 @@ func (t *movementFakeTx) EarliestOutstandingIssue(ctx context.Context, lotID int
 		}
 	}
 	return best, nil
+}
+
+func (t *movementFakeTx) LockRequest(ctx context.Context, requestID int64) (domain.InventoryRequest, error) {
+	for _, request := range t.store.requests {
+		if request.RequestID == requestID {
+			return request, nil
+		}
+	}
+	return domain.InventoryRequest{}, domain.ErrNotFound
+}
+
+func (t *movementFakeTx) InsertRequest(ctx context.Context, in domain.CreateRequestInput) (int64, error) {
+	if err := in.Validate(); err != nil {
+		return 0, err
+	}
+	characterName := domain.NormalizeCharacterName(in.CharacterName)
+	for _, existing := range t.store.requests {
+		if in.IdempotencyKey != "" && existing.IdempotencyKey == in.IdempotencyKey {
+			return 0, domain.ErrConflict
+		}
+		if existing.Status == domain.RequestPending && existing.GuildBankItemID == in.GuildBankItemID &&
+			existing.CharacterName == characterName {
+			return 0, domain.ErrConflict
+		}
+	}
+	request := domain.InventoryRequest{
+		RequestID: t.store.nextRequestID, GuildBankItemID: in.GuildBankItemID, EQUID: in.EQUID,
+		ItemName: in.ItemName, RequestedQuantity: in.Quantity, OnHandAtCreate: in.OnHandAtCreate,
+		CharacterName: characterName, RequesterKind: in.Kind, ContactDiscord: in.ContactDiscord,
+		Note: in.Note, Status: domain.RequestPending, CorrelationID: in.CorrelationID,
+		IdempotencyKey: in.IdempotencyKey, CreatedAt: in.CreatedAt,
+		CreatedByName: domain.RequestPublicActorName,
+	}
+	if in.Kind == domain.RequesterMember {
+		userID := in.Actor.UserID
+		request.RequesterUserID = &userID
+		request.RequesterUserName = in.Actor.UserName
+		request.CreatedByUserID = &userID
+		request.CreatedByName = in.Actor.UserName
+	}
+	t.store.nextRequestID++
+	t.store.requests = append(t.store.requests, request)
+	return request.RequestID, nil
+}
+
+func (t *movementFakeTx) CompleteRequest(ctx context.Context, p domain.CompleteRequestParams) error {
+	for i := range t.store.requests {
+		request := &t.store.requests[i]
+		if request.RequestID != p.RequestID {
+			continue
+		}
+		if request.Status != domain.RequestPending {
+			return domain.ErrConflict
+		}
+		issued := p.IssuedQuantity
+		movementID := p.MovementID
+		request.Status = domain.RequestCompleted
+		request.IssuedQuantity = &issued
+		request.CompletedMovementID = &movementID
+		request.DecisionNote = p.DecisionNote
+		request.DecidedAt = &p.DecidedAt
+		request.DecidedByUserID = &p.Actor.UserID
+		request.DecidedByName = p.Actor.UserName
+		return nil
+	}
+	return domain.ErrNotFound
+}
+
+func (t *movementFakeTx) DecideRequest(ctx context.Context, p domain.DecideRequestParams) error {
+	for i := range t.store.requests {
+		request := &t.store.requests[i]
+		if request.RequestID != p.RequestID {
+			continue
+		}
+		if request.Status != domain.RequestPending {
+			return domain.ErrConflict
+		}
+		request.Status = p.Status
+		request.DecisionNote = p.DecisionNote
+		request.DecidedAt = &p.DecidedAt
+		request.DecidedByUserID = &p.Actor.UserID
+		request.DecidedByName = p.Actor.UserName
+		return nil
+	}
+	return domain.ErrNotFound
 }
 
 func (t *movementFakeTx) Commit() error   { return nil }

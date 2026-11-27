@@ -63,6 +63,9 @@ var OfficerAuditEventTypes = []string{
 	"ITEM_CREATED", "ITEM_UPDATED", "ITEM_REMOVED", "IMPORT_CREATED", "IMPORT_COMMITTED",
 	"ITEM_ISSUED", "ITEM_RETURNED", "ITEM_RECEIVED", "ITEM_WRITTEN_OFF",
 	"ITEM_MOVED", "ITEM_MERGED",
+	// Request lifecycle. Phase 3 writes creation and cancellation; Phase 4
+	// adds the two officer decision events.
+	"REQUEST_CREATED", "REQUEST_CANCELLED",
 }
 
 // UserAuditEventTypes are the account-administration and profile events. They
@@ -103,6 +106,15 @@ type AdminStore interface {
 	BeginAdminWrite(ctx context.Context) (AdminWriteTx, error)
 	ListAudit(ctx context.Context, filter domain.AuditFilter) (domain.AuditPage, error)
 	GetAudit(ctx context.Context, id int64) (domain.AuditEntry, error)
+	// Request workflow reads: the officer queue, the member's own list, the
+	// pending-budget check and the duplicate guard all read through here.
+	GetRequest(ctx context.Context, requestID int64) (domain.InventoryRequest, error)
+	RequestByIdempotencyKey(ctx context.Context, key string) (domain.InventoryRequest, error)
+	ListRequests(ctx context.Context, filter domain.RequestFilter) (domain.RequestPage, error)
+	CountPendingRequests(ctx context.Context, requesterUserID int64) (int, error)
+	PendingRequestForCharacter(ctx context.Context, guildBankItemID int64, characterName string) (int64, error)
+	PendingCharactersForLot(ctx context.Context, guildBankItemID, requesterUserID int64) ([]string, error)
+	PendingRequestsForLot(ctx context.Context, guildBankItemID int64, limit int) ([]domain.InventoryRequest, error)
 }
 
 // AdminWriteTx is the transaction-bound write surface. The repository
@@ -122,6 +134,13 @@ type AdminWriteTx interface {
 	// EarliestOutstandingIssue attributes a lot-level return to the earliest
 	// outstanding ISSUE movement on the lot (FIFO), or 0 when none exists.
 	EarliestOutstandingIssue(ctx context.Context, lotID int64) (int64, error)
+	// Request lifecycle writes. Approval locks the request first and the lot
+	// second, inserts the ISSUE movement, then completes the request, all in
+	// one transaction; denial and cancellation only move the status.
+	LockRequest(ctx context.Context, requestID int64) (domain.InventoryRequest, error)
+	InsertRequest(ctx context.Context, in domain.CreateRequestInput) (int64, error)
+	CompleteRequest(ctx context.Context, p domain.CompleteRequestParams) error
+	DecideRequest(ctx context.Context, p domain.DecideRequestParams) error
 	InsertAudit(ctx context.Context, entry domain.AuditEntry) error
 	Commit() error
 	Rollback() error

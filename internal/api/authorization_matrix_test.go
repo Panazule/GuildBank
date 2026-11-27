@@ -65,6 +65,14 @@ var routeMatrix = map[string]routeClass{
 	"DELETE /api/v1/me/characters/:id":      classMember,
 	"POST /api/v1/me/characters/:id/delete": classMember,
 
+	// Member request workflow (Phase 3). /request/new is member-only until the
+	// public flow arrives in Phase 5.
+	"GET /request/new":             classMember,
+	"POST /request/new":            classMember,
+	"GET /my/requests":             classMember,
+	"GET /my/requests/:id":         classMember,
+	"POST /my/requests/:id/cancel": classMember,
+
 	// Discord account linking (Phase B). The browser uses GET for the start so the
 	// cross-origin redirect is a navigation, not a form submission (CSP
 	// form-action 'self' cancels form redirects to discord.com). POST stays for

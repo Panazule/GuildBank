@@ -1,0 +1,91 @@
+{{define "requests_mine.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card">
+    <p class="eyebrow">Member requests</p>
+    <h1>Your requests</h1>
+    <p class="muted">Newest first. A character may hold one pending request per item.</p>
+
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <form method="get" action="/my/requests" class="filter-grid">
+      <label>
+        Status
+        <select name="status">
+          {{range .StatusOptions}}
+            <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+          {{end}}
+        </select>
+      </label>
+      <div class="wizard-actions">
+        <button type="submit" class="primary">Apply</button>
+      </div>
+    </form>
+
+    {{if .Empty}}
+      <p class="muted">
+        {{if .Filtered}}No requests match this status.{{else}}You have not requested anything yet.{{end}}
+        <a href="/">Browse the guild inventory</a>.
+      </p>
+    {{else}}
+      {{if .BeyondLast}}
+        <div class="alert alert-warn" role="status">
+          That page is beyond the end of your requests.
+          <a href="{{.LastPageURL}}">Go to the last page</a>.
+        </div>
+      {{end}}
+      <div class="table-scroll" role="region" aria-label="Your requests" tabindex="0">
+        <table class="inventory-table">
+          <thead>
+            <tr>
+              <th scope="col">Request</th>
+              <th scope="col">Item</th>
+              <th scope="col">Quantity</th>
+              <th scope="col">Character</th>
+              <th scope="col">Status</th>
+              <th scope="col">Requested</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Requests}}
+              <tr>
+                <td><a href="/my/requests/{{.ID}}">#{{.ID}}</a></td>
+                <td>{{.ItemName}}</td>
+                <td>{{.Quantity}}</td>
+                <td>{{.Character}}</td>
+                <td>
+                  {{template "requestStatusBadge" .}}
+                  {{if .MovementID}}<span class="muted">→ movement #{{.MovementID}}</span>{{end}}
+                </td>
+                <td><time datetime="{{.CreatedAtISO}}">{{.CreatedAtText}}</time></td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+
+      {{if gt .TotalPages 1}}
+        <nav class="inventory-pager" aria-label="Request pages">
+          {{if .FirstURL}}<a href="{{.FirstURL}}">First</a>{{end}}
+          {{if .PrevURL}}<a href="{{.PrevURL}}" rel="prev">Previous</a>{{end}}
+          {{range .PageLinks}}
+            {{if .Current}}
+              <span class="current" aria-current="page">{{.Page}}</span>
+            {{else}}
+              <a href="{{.URL}}">{{.Page}}</a>
+            {{end}}
+          {{end}}
+          {{if .NextURL}}<a href="{{.NextURL}}" rel="next">Next</a>{{end}}
+          {{if .LastURL}}<a href="{{.LastURL}}">Last</a>{{end}}
+        </nav>
+      {{end}}
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

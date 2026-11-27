@@ -1,0 +1,76 @@
+{{define "request_form.html"}}
+<!doctype html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <main class="card">
+    <p class="eyebrow">Member request</p>
+    <h1>Request: {{.Item.Name}}</h1>
+    <p class="muted">
+      Available: {{.Item.Quantity}}
+      {{if .Item.Location}} · {{.Item.Location}}{{end}}
+    </p>
+
+    {{if .Notice}}<div class="alert alert-ok" role="status">{{.Notice}}</div>{{end}}
+    {{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+    <form method="post" action="/request/new" class="stack">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="item" value="{{.Item.ID}}">
+      <input type="hidden" name="expectedModAt" value="{{.ExpectedModAt}}">
+      <input type="hidden" name="idempotencyKey" value="{{.IdempotencyKey}}">
+
+      <label>
+        Quantity
+        <input type="number" name="quantity" value="{{.Quantity}}" min="1" max="{{.Item.Quantity}}"
+               inputmode="numeric" required>
+        <span class="help">1–{{.Item.Quantity}}</span>
+      </label>
+      {{with index .ErrorFields "quantity"}}<p class="field-error">{{.}}</p>{{end}}
+
+      {{if eq .Picker.Mode "select"}}
+        <label>
+          Character
+          <select name="characterName" required>
+            {{range .Picker.Options}}
+              <option value="{{.}}"{{if eq . $.Picker.Selected}} selected{{end}}>{{.}}</option>
+            {{end}}
+          </select>
+          <span class="help">From your profile.</span>
+        </label>
+      {{else}}
+        <label>
+          Character Name
+          <input type="text" name="characterName" value="{{.Picker.Value}}" minlength="3" maxlength="15"
+                 pattern="[A-Za-z]{3,15}" autocomplete="off" required>
+          <span class="help">3–15 letters, exactly as it appears in game.</span>
+        </label>
+        {{if .Picker.HelpLink}}
+          <p class="help">
+            Add characters to your profile so you can pick them from a list next time.
+            <a href="{{.Picker.HelpLink}}">Add characters</a>
+          </p>
+        {{end}}
+      {{end}}
+      {{with index .ErrorFields "characterName"}}<p class="field-error">{{.}}</p>{{end}}
+
+      <label>
+        Note (optional)
+        <textarea name="note" rows="4" maxlength="255">{{.Note}}</textarea>
+        <span class="help">Up to 255 characters. Officers see this note.</span>
+      </label>
+      {{with index .ErrorFields "note"}}<p class="field-error">{{.}}</p>{{end}}
+
+      {{with index .ErrorFields "expectedModAt"}}<p class="field-error">{{.}}</p>{{end}}
+
+      <div class="wizard-actions">
+        <button type="submit" class="primary">Submit request</button>
+        <a class="link" href="/inventory/{{.Item.ID}}">Cancel</a>
+      </div>
+    </form>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

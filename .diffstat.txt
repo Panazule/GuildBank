@@ -1,0 +1,8 @@
+warning: in the working copy of 'Docs/RequestSystemDesign.md', CRLF will be replaced by LF the next time Git touches it
+ Docs/RequestSystemDesign.md                    | 343 +++++++++++++++++--------
+ internal/api/admin_movements_test.go           | 185 ++++++++++++-
+ internal/domain/movement.go                    |   9 +-
+ internal/repository/mariadb/movement.go        |  14 +-
+ internal/service/admin_inventory.go            |  16 ++
+ internal/service/admin_inventory_fakes_test.go | 258 ++++++++++++++++++-
+ 6 files changed, 712 insertions(+), 113 deletions(-)

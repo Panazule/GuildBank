@@ -22,9 +22,13 @@ const publicInventoryTimeout = 5 * time.Second
 
 type inventoryHandler struct {
 	inventory *service.InventoryService
-	auth      *service.AuthService
-	views     *views
-	logger    *slog.Logger
+	// requests backs the member entry point on the item page: the button and
+	// the "you already have a pending request" note. It is nil in tests that do
+	// not exercise the request workflow.
+	requests *service.RequestService
+	auth     *service.AuthService
+	views    *views
+	logger   *slog.Logger
 }
 
 type publicInventoryItemResponse struct {
@@ -129,12 +133,24 @@ func (h *inventoryHandler) detailPage(c *gin.Context) {
 		h.respondInventoryPageError(c, err)
 		return
 	}
-	h.views.inventoryDetail(c, http.StatusOK, inventoryDetailPageData{
-		pageData: pageData{
-			Title: item.Name, CSRF: CSRF(c), User: h.publicUser(c),
-		},
-		Item: inventoryItemViewOf(item, true),
-	})
+	user := h.publicUser(c)
+	data := inventoryDetailPageData{
+		pageData: pageData{Title: item.Name, CSRF: CSRF(c), User: user},
+		Item:     inventoryItemViewOf(item, true),
+	}
+	// An authenticated member may request the item for any of their profile
+	// characters; the note names the ones that already hold a Pending request
+	// so the duplicate is not attempted through the UI (design section 7.1).
+	if user != nil {
+		data.CanRequest = true
+		if h.requests != nil && h.requests.Ready() {
+			if names, err := h.requests.PendingCharacters(ctx, item.ID, user.ID); err == nil && len(names) > 0 {
+				data.PendingNote = "You already have a pending request for this item (" +
+					strings.Join(names, ", ") + ")."
+			}
+		}
+	}
+	h.views.inventoryDetail(c, http.StatusOK, data)
 }
 
 func (h *inventoryHandler) publicUser(c *gin.Context) *domain.User {

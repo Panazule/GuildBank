@@ -17,6 +17,7 @@
       <a href="/login">Login</a>
     {{end}}
     {{if .User}}
+      <a href="/my/requests">My requests</a>
       <a href="/account/profile">Profile</a>
       {{if .User.CanAdministerInventory}}
         <a href="/admin/inventory">Admin inventory</a>
@@ -36,6 +37,10 @@
     {{end}}
   </nav>
 </header>
+{{end}}
+
+{{define "requestStatusBadge"}}
+<span class="status-badge status-{{.StatusClass}} request-status-{{.StatusClass}}" role="status">{{.StatusLabel}}</span>
 {{end}}
 
 {{define "footer"}}
