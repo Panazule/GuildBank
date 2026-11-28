@@ -103,6 +103,7 @@
               <th scope="col">Name</th>
               <th scope="col">Type</th>
               <th scope="col">Qty</th>
+              <th scope="col">Availability</th>
               <th scope="col">Location</th>
               <th scope="col">Group</th>
               <th scope="col">Recipient</th>
@@ -120,6 +121,7 @@
               <td class="cell-nowrap"><a href="/admin/inventory/{{.ID}}?returnTo={{$.SelfURL | urlquery}}">{{.Name}}</a>{{if .UnresolvedIdentity}} <span class="identity-badge" title="No item metadata match; the stored name is authoritative">Unresolved identity</span>{{end}}</td>
               <td class="cell-nowrap">{{.ItemType}}</td>
               <td class="cell-nowrap">{{.Quantity}}</td>
+              <td class="cell-nowrap"><span class="availability-badge availability-{{.Availability}}">{{.AvailabilityLabel}}</span></td>
               <td class="cell-nowrap">{{if .SourceLocation}}{{.SourceLocation}}{{else}}<span class="muted" aria-label="No source location">—</span>{{end}}</td>
               <td class="cell-nowrap"><span class="group-badge">{{.LocationGroupLabel}}</span></td>
               <td class="cell-nowrap">{{if .IssuedURL}}<a href="{{.IssuedURL}}">{{.GivenTo}}</a>{{else}}{{if .GivenTo}}{{.GivenTo}}{{else}}<span class="muted" aria-label="No recipient">—</span>{{end}}{{end}}</td>

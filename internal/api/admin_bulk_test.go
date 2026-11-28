@@ -50,7 +50,7 @@ func TestAdminInventoryPageRendersBulkSelectionAndOtherLabel(t *testing.T) {
 	for _, want := range []string{
 		`action="/admin/inventory/bulk-remove"`,
 		`name="remove" value="5|2026-11-22T10:00:00Z"`,
-		`>Other (not a bank location)<`,
+		`<option value="Unspecified">Other</option>`,
 		`Remove selected…`,
 	} {
 		if !strings.Contains(body, want) {

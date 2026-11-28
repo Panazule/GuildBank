@@ -23,10 +23,10 @@ func availabilityLabel(state domain.AvailabilityState) string {
 	}
 }
 
-// adminOtherGroupLabel is the IMP-02 presentation of the persisted
-// "Unspecified" group. The stored value and the API contract keep
-// "Unspecified"; only the rendered label changes.
-const adminOtherGroupLabel = "Other (not a bank location)"
+// adminOtherGroupLabel is the presentation of the persisted "Unspecified"
+// group. The stored value and the API contract keep "Unspecified"; only the
+// rendered label changes.
+const adminOtherGroupLabel = "Other"
 
 func adminGroupLabel(group string) string {
 	if group == "Unspecified" {

@@ -111,6 +111,84 @@ func TestAdminListRendersIssuedBadgeAndContextLinks(t *testing.T) {
 	}
 }
 
+// TestAdminListRendersAvailabilityAfterQuantity pins the shared availability
+// presentation on the administrative grid: the column follows Qty, every badge
+// carries the same state and label the public grid renders, and the persisted
+// "Unspecified" group is presented as "Other".
+func TestAdminListRendersAvailabilityAfterQuantity(t *testing.T) {
+	v, err := newViews(web.Templates)
+	if err != nil {
+		t.Fatalf("newViews: %v", err)
+	}
+	other := movementTestItem(11, 4)
+	other.LocationGroup = "Unspecified"
+	other.LocationSort = "unspecified"
+	other.DateOpen = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	other.DateBazaar = time.Date(2000, 2, 1, 0, 0, 0, 0, time.UTC)
+	upcoming := movementTestItem(12, 2)
+	upcoming.DateOpen = time.Date(2999, 1, 1, 0, 0, 0, 0, time.UTC)
+	upcoming.DateBazaar = time.Date(2999, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	page := domain.AdminInventoryPage{
+		Records: []domain.AdminInventoryItem{other, upcoming},
+		Total:   2, Page: 1, PageSize: 50, TotalPages: 1,
+		Filter: domain.AdminInventoryFilter{
+			Status: domain.AdminStatusAll, Sort: domain.AdminSortModifiedNewest,
+			LocationGroup: "Unspecified", Page: 1, PageSize: 50,
+		},
+	}
+	data := adminListPageOf(page, []string{"General 1", "Unspecified"})
+	data.pageData = pageData{Title: "Admin inventory", CSRF: "csrf-token"}
+	var buf bytes.Buffer
+	if err := v.templates.ExecuteTemplate(&buf, "admin_inventory.html", data); err != nil {
+		t.Fatalf("render admin list: %v", err)
+	}
+	body := buf.String()
+
+	// Availability is the column immediately after Qty.
+	qtyHeader := `<th scope="col">Qty</th>`
+	qty := strings.Index(body, qtyHeader)
+	if qty < 0 {
+		t.Fatalf("admin list has no Qty header\n%s", body)
+	}
+	rest := body[qty+len(qtyHeader):]
+	next := strings.Index(rest, "<th ")
+	if next < 0 || !strings.HasPrefix(rest[next:], `<th scope="col">Availability</th>`) {
+		t.Fatalf("the column after Qty is not Availability\n%s", rest)
+	}
+
+	// Every badge is the public calculation and label mapping, not a copy.
+	today := time.Now().UTC()
+	for _, item := range []domain.AdminInventoryItem{other, upcoming} {
+		state := service.Availability(today, item.DateOpen, item.DateBazaar)
+		want := `<span class="availability-badge availability-` + string(state) + `">` +
+			availabilityLabel(state) + `</span>`
+		if !strings.Contains(body, want) {
+			t.Fatalf("admin list missing %q\n%s", want, body)
+		}
+	}
+	for _, want := range []string{
+		`<span class="availability-badge availability-bazaar">Bazaar</span>`,
+		`<span class="availability-badge availability-upcoming">Mains</span>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("admin list missing the public label %q\n%s", want, body)
+		}
+	}
+
+	// Unspecified renders as Other in the group cell and in the filter, and the
+	// long label is gone.
+	if !strings.Contains(body, `<span class="group-badge">Other</span>`) {
+		t.Fatalf("the Unspecified row is not labelled Other\n%s", body)
+	}
+	if !strings.Contains(body, `<option value="Unspecified" selected>Other</option>`) {
+		t.Fatalf("the Unspecified filter option is not labelled Other\n%s", body)
+	}
+	if strings.Contains(body, "not a bank location") {
+		t.Fatalf("the long group label is still rendered\n%s", body)
+	}
+}
+
 // TestCreateFormRedirectsWithNameMismatchAdvisory asserts the advisory is
 // surfaced after a successful create without blocking the write.
 func TestCreateFormRedirectsWithNameMismatchAdvisory(t *testing.T) {

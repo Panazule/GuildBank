@@ -7,9 +7,8 @@ import (
 
 const (
 	// UnspecifiedLocationGroup is the canonical D-05 group for a raw location
-	// that is not a bank location. The persisted value never changes; the UI
-	// presents it as "Other (not a bank location)" and never auto-selects it
-	// (IMP-02).
+	// that is not a bank location. The persisted value never changes; the admin
+	// UI presents it as "Other" and never auto-selects it (IMP-02).
 	UnspecifiedLocationGroup = "Unspecified"
 	// HoardLocationGroup is the single canonical AM-04 hoard group. Hoard rows
 	// are a special location family: they are always selected by default, even
