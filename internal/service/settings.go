@@ -31,6 +31,19 @@ type SettingDefinition struct {
 	Help    string
 }
 
+const (
+	// sessionAbsoluteKey is the persisted key for the absolute session
+	// lifetime. The name is historical: PD-15 originally stored a number of
+	// hours and the same row is now read as a number of DAYS. The key is kept
+	// unchanged so no migration is required and no compatibility conversion is
+	// performed; the stored value is simply interpreted as days.
+	sessionAbsoluteKey = "SessionAbsoluteHours"
+	// sessionAbsoluteMinDays and sessionAbsoluteMaxDays bound the editable
+	// value: one day up to two years.
+	sessionAbsoluteMinDays = 1
+	sessionAbsoluteMaxDays = 730
+)
+
 // SettingDefinitions is the ordered allowlist. Unknown keys are rejected.
 var SettingDefinitions = []SettingDefinition{
 	{Key: "GuildName", Label: "Guild name", Type: domain.SettingString, Default: "Aeternus", Help: "1–64 characters"},
@@ -43,7 +56,7 @@ var SettingDefinitions = []SettingDefinition{
 	{Key: "MariaDbUsername", Label: "MariaDB username", Type: domain.SettingString, Default: "", Help: "Dedicated application account"},
 	{Key: "MariaDbPassword", Label: "MariaDB password", Type: domain.SettingSecret, Secret: true, Default: "", Help: "Stored in SQLite; blank keeps the existing value"},
 	{Key: "SessionIdleMinutes", Label: "Session idle timeout", Type: domain.SettingInteger, Default: "30", Help: "5–1440 minutes"},
-	{Key: "SessionAbsoluteHours", Label: "Session absolute lifetime", Type: domain.SettingInteger, Default: "8", Help: "1–168 hours"},
+	{Key: sessionAbsoluteKey, Label: "Session absolute lifetime (days)", Type: domain.SettingInteger, Default: "8", Help: "1–730 days; caps every session regardless of activity"},
 	{Key: "PublicBaseUrl", Label: "Public base URL", Type: domain.SettingURL, Default: "", Help: "Public origin used to build the Discord redirect URI, e.g. https://guildbank.example.com"},
 	{Key: "DiscordEnabled", Label: "Discord account linking", Type: domain.SettingBoolean, Default: "false", Help: "true or false; requires the client ID, client secret and public base URL"},
 	{Key: "DiscordClientId", Label: "Discord client ID", Type: domain.SettingString, Default: "", Help: "Application ID from the Discord developer portal"},
@@ -146,8 +159,10 @@ func (s *SettingsService) SessionPolicy(ctx context.Context) (domain.SessionPoli
 	if n, err := strconv.Atoi(values["SessionIdleMinutes"]); err == nil && n >= 5 && n <= 1440 {
 		policy.Idle = time.Duration(n) * time.Minute
 	}
-	if n, err := strconv.Atoi(values["SessionAbsoluteHours"]); err == nil && n >= 1 && n <= 168 {
-		policy.Absolute = time.Duration(n) * time.Hour
+	if n, err := strconv.Atoi(values[sessionAbsoluteKey]); err == nil && n >= sessionAbsoluteMinDays && n <= sessionAbsoluteMaxDays {
+		// The setting is a number of days: 24 hours per day is the only
+		// conversion between the stored value and the session duration.
+		policy.Absolute = time.Duration(n) * 24 * time.Hour
 	}
 	return policy, nil
 }
@@ -202,10 +217,10 @@ func validateSettingValue(def SettingDefinition, value string) string {
 		if err != nil || n < 5 || n > 1440 {
 			return "must be a whole number from 5 to 1440"
 		}
-	case "SessionAbsoluteHours":
+	case sessionAbsoluteKey:
 		n, err := strconv.Atoi(strings.TrimSpace(value))
-		if err != nil || n < 1 || n > 168 {
-			return "must be a whole number from 1 to 168"
+		if err != nil || n < sessionAbsoluteMinDays || n > sessionAbsoluteMaxDays {
+			return "must be a whole number from 1 to 730 days"
 		}
 	case "PublicBaseUrl":
 		if value == "" {

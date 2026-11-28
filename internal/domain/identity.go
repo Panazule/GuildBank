@@ -312,10 +312,11 @@ type SessionPolicy struct {
 }
 
 // DefaultSessionPolicy applies the proposed E-08 defaults until Settings are
-// changed through the administration surface.
+// changed through the administration surface. Absolute matches the
+// SessionAbsoluteHours setting, which is stored as days (8-day default).
 var DefaultSessionPolicy = SessionPolicy{
 	Idle:     30 * time.Minute,
-	Absolute: 8 * time.Hour,
+	Absolute: 8 * 24 * time.Hour,
 }
 
 // Get retrieves a value by key from a settings snapshot.

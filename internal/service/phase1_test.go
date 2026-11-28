@@ -493,10 +493,130 @@ func TestSettingsUpdateValidatesAndPreservesBlankSecret(t *testing.T) {
 		t.Fatalf("blank secret overwrote stored value: %q", v)
 	}
 	policy, err := settings.SessionPolicy(context.Background())
-	if err != nil || policy.Idle != 30*time.Minute || policy.Absolute != 8*time.Hour {
+	if err != nil || policy.Idle != 30*time.Minute || policy.Absolute != 8*24*time.Hour {
 		t.Fatalf("policy = %+v, %v", policy, err)
 	}
 	if _, err := settings.Update(context.Background(), map[string]string{"Unknown": "x"}, "admin"); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("unknown key err = %v", err)
+	}
+}
+
+func settingsStoreWithAbsolute(value string) *fakeSettingsStore {
+	return &fakeSettingsStore{rows: []domain.Setting{
+		{Key: "SessionIdleMinutes", Value: "30", Type: domain.SettingInteger},
+		{Key: sessionAbsoluteKey, Value: value, Type: domain.SettingInteger},
+	}}
+}
+
+// TestSessionAbsoluteLifetimeIsDays pins the setting's unit: the stored number
+// is a number of days, so 1 becomes 24h and the idle timeout is untouched.
+func TestSessionAbsoluteLifetimeIsDays(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  time.Duration
+	}{
+		{"1", 24 * time.Hour},
+		{"8", 8 * 24 * time.Hour},
+		{"30", 30 * 24 * time.Hour},
+		{"730", 730 * 24 * time.Hour},
+	} {
+		policy, err := NewSettingsService(settingsStoreWithAbsolute(tc.value)).SessionPolicy(context.Background())
+		if err != nil {
+			t.Fatalf("value %q: SessionPolicy: %v", tc.value, err)
+		}
+		if policy.Absolute != tc.want {
+			t.Fatalf("value %q: Absolute = %v, want %v (days, not hours)", tc.value, policy.Absolute, tc.want)
+		}
+		if policy.Idle != 30*time.Minute {
+			t.Fatalf("value %q: Idle = %v, want 30m", tc.value, policy.Idle)
+		}
+	}
+}
+
+// TestSessionAbsoluteLifetimeFallsBackWhenOutOfRange keeps the old defensive
+// behaviour: an unreadable or out-of-range stored value uses the default
+// policy instead of a nonsensical duration.
+func TestSessionAbsoluteLifetimeFallsBackWhenOutOfRange(t *testing.T) {
+	for _, value := range []string{"0", "731", "-1", "abc", ""} {
+		policy, err := NewSettingsService(settingsStoreWithAbsolute(value)).SessionPolicy(context.Background())
+		if err != nil {
+			t.Fatalf("value %q: SessionPolicy: %v", value, err)
+		}
+		if policy.Absolute != domain.DefaultSessionPolicy.Absolute {
+			t.Fatalf("value %q: Absolute = %v, want default %v", value, policy.Absolute, domain.DefaultSessionPolicy.Absolute)
+		}
+	}
+}
+
+// TestSessionExpiryWithDayBasedSetting drives the real SettingsService into
+// AuthService: a 2-day absolute lifetime creates a two-day session and the
+// absolute cap still ends it even while the session stays active.
+func TestSessionExpiryWithDayBasedSetting(t *testing.T) {
+	settings := NewSettingsService(&fakeSettingsStore{rows: []domain.Setting{
+		{Key: "SessionIdleMinutes", Value: "1440", Type: domain.SettingInteger},
+		{Key: sessionAbsoluteKey, Value: "2", Type: domain.SettingInteger},
+	}})
+	users := &fakeUsers{users: map[string]domain.User{
+		"admin": {ID: 1, UserName: "admin", PasswordHash: testHash("a long enough password"),
+			AccessLevel: domain.AccessAdmin, HasPassword: true},
+	}}
+	sessions := newFakeSessions()
+	auth := NewAuthService(users, sessions, settings)
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	auth.now = func() time.Time { return now }
+
+	ctx := context.Background()
+	result, err := auth.Login(ctx, LoginInput{UserName: "admin", Password: "a long enough password"})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if want := now.Add(48 * time.Hour); !result.AbsoluteExpiresAt.Equal(want) {
+		t.Fatalf("AbsoluteExpiresAt = %v, want %v (2 days)", result.AbsoluteExpiresAt, want)
+	}
+
+	now = now.Add(23 * time.Hour)
+	if _, err := auth.Authenticate(ctx, result.Token); err != nil {
+		t.Fatalf("authenticate at +23h: %v", err)
+	}
+
+	// Activity keeps the idle window open, but the refreshed expiry may never
+	// pass the day-based absolute cap.
+	now = now.Add(23*time.Hour + 55*time.Minute)
+	if _, err := auth.Authenticate(ctx, result.Token); err != nil {
+		t.Fatalf("authenticate at +46h55m: %v", err)
+	}
+	stored := sessions.byHash[hashToken(result.Token)]
+	if !stored.ExpiresAt.Equal(result.AbsoluteExpiresAt) {
+		t.Fatalf("refreshed idle expiry = %v, want the absolute cap %v", stored.ExpiresAt, result.AbsoluteExpiresAt)
+	}
+
+	now = now.Add(1*time.Hour + 5*time.Minute)
+	if _, err := auth.Authenticate(ctx, result.Token); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("authenticate at +48h err = %v, want unauthorized", err)
+	}
+}
+
+// TestSessionAbsoluteLifetimeValidationRange pins the accepted day range.
+func TestSessionAbsoluteLifetimeValidationRange(t *testing.T) {
+	settings := NewSettingsService(settingsStoreWithAbsolute("8"))
+	ctx := context.Background()
+	for _, value := range []string{"0", "731", "-1", "1.5", "days", ""} {
+		_, err := settings.Update(ctx, map[string]string{sessionAbsoluteKey: value}, "admin")
+		var validation *domain.ValidationError
+		if !errors.As(err, &validation) {
+			t.Fatalf("value %q err = %v, want a validation error", value, err)
+		}
+		if got := validation.Fields[sessionAbsoluteKey]; got != "must be a whole number from 1 to 730 days" {
+			t.Fatalf("value %q message = %q", value, got)
+		}
+	}
+	for _, value := range []string{"1", "730"} {
+		rows, err := settings.Update(ctx, map[string]string{sessionAbsoluteKey: value}, "admin")
+		if err != nil {
+			t.Fatalf("value %q rejected: %v", value, err)
+		}
+		if got, _ := domain.GetSetting(rows, sessionAbsoluteKey); got != value {
+			t.Fatalf("stored value = %q, want %q", got, value)
+		}
 	}
 }

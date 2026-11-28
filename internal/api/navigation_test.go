@@ -67,10 +67,17 @@ func TestAdministratorNavigationAndSettingsPage(t *testing.T) {
 		`name="MariaDbPort" value="3306" type="number" min="1" max="65535"`,
 		`name="EQResourceBaseUrl" value="https://items.eqresource.com/items.php?id=" type="url"`,
 		`name="MariaDbPassword" type="password"`,
+		// The absolute session lifetime is expressed in days (1–730).
+		`Session absolute lifetime (days)`,
+		`name="SessionAbsoluteHours" value="8" type="number" min="1" max="730"`,
+		`1–730 days`,
 	} {
 		if !bytes.Contains(body, []byte(want)) {
 			t.Fatalf("settings page missing %q\n%s", want, body)
 		}
+	}
+	if bytes.Contains(body, []byte("1–168")) {
+		t.Fatalf("settings page still advertises the retired hour-based range\n%s", body)
 	}
 	if bytes.Contains(body, []byte(`href="/login"`)) {
 		t.Fatalf("authenticated navigation still offers login: %s", body)

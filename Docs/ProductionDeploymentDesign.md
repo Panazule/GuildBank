@@ -928,7 +928,7 @@ from `service/settings.go`:
 | `MariaDbUsername` | string | empty | **Must equal** `GUILDBANK_MARIADB_USERNAME` |
 | `MariaDbPassword` | secret | empty | Must authenticate; blank in the form keeps the stored value |
 | `SessionIdleMinutes` | int | `30` | 5–1440 |
-| `SessionAbsoluteHours` | int | `8` | 1–168 |
+| `SessionAbsoluteHours` | int | `8` | days; 1–730 (key name is historical) |
 | `PublicBaseUrl` | URL | empty | Required for Discord: the exact public origin, e.g. `https://guildbank.example.com` |
 | `DiscordEnabled` | bool | `false` | Enable only after ID, secret and public URL are set |
 | `DiscordClientId` | string | empty | From the Discord developer portal |

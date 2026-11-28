@@ -92,7 +92,7 @@ therefore deferred with the audit recorder.
 | bcrypt password hashing | Complete | `golang.org/x/crypto/bcrypt` cost 10; round-trip and timing-equalizer tests |
 | Login | Complete | Generic failure for unknown/wrong/disabled; `LastLogin`; fifth failure `429`; `HttpOnly` `SameSite=Lax` cookie |
 | Logout | Complete | Revokes the row, clears cookie, CSRF-protected; live `204` then `401` |
-| Session management | Complete | 32-byte token, SHA-256 hash, 30-min idle / 8-hour absolute, one-minute touch throttle, hourly purge, disable check per request |
+| Session management | Complete | 32-byte token, SHA-256 hash, 30-min idle / 8-day absolute (setting stored in days, 1–730), one-minute touch throttle, hourly purge, disable check per request |
 | Authentication middleware | Complete | Default-deny admin group; API `401`, HTML redirect; admin-only access |
 | Settings persistence | Complete | Admin UI + `GET/PUT` API; secrets redacted; blank MariaDB password preserves the stored secret; invalid values `422` |
 | CSRF | Complete | Signed double-submit cookie; login, setup and every write; `403` without a token |
@@ -761,7 +761,7 @@ No requirement is classed **Missing** after v1.6.1. The former contradictions ar
 | E-05 | Spell merge provenance/concurrency | **Resolved for imports; later phases TBD** | PD3-03/PD3-04: active targets only, aggregate by EQUID, lowest active ID, advisory lock; PD3-14 writes `ITEM_UPDATED` provenance |
 | E-06 | Unknown location patterns/vocabulary | **Resolved for imports and admin writes** | PD3-01: equipment/blank/unknown → `Unspecified` with warnings; all `Hoard<n>` → `Hoard` (AM-04); PD5 shared normalization adds `location_unrecognized` for admin writes; IMP-01 ignores nested-slot contents before staging; IMP-02 presents `Unspecified` as "Other (not a bank location)" without changing the stored value |
 | E-07 | Authorization matrix/projections | Partial | Admin-only routes enforced (setup/auth/settings/imports/inventory/audit); public inventory projection implemented in Phase 4; the user-management routes remain a later phase |
-| E-08 | Session lifecycle | **Implemented; approved as PD-15** | 8 h absolute, 30 min idle, sliding refresh, purge; lifecycle review may refine values |
+| E-08 | Session lifecycle | **Implemented; approved as PD-15** | 8-day absolute default (`SessionAbsoluteHours` is read as days, 1–730), 30 min idle, sliding refresh, purge; lifecycle review may refine values |
 | E-09 | Audit taxonomy closure | Partial | Import and inventory-admin subsets closed by PD3-14/PD5 (`IMPORT_CREATED`, `IMPORT_COMMITTED`, `ITEM_CREATED`, `ITEM_UPDATED`, `ITEM_REMOVED`) with a filterable viewer; IMP-01 adds `ignoredRows` to `IMPORT_CREATED`; AI-01/AI-02 reuse the existing event types (one `ITEM_REMOVED` per bulk record; `ITEM_UPDATED` + `ITEM_REMOVED` for a combined edit/remove); general taxonomy/`AuditOutbox` open |
 | E-10 | Date comparison semantics | **Resolved by PD-11/PD4-11/PD5-27/PD5-40** | UTC date boundaries; `DateOpen <= today < DateBazaar` means open and `today >= DateBazaar` means bazaar (both thresholds inclusive, PD5-40); `DateOpen <= DateBazaar` enforced for all new admin writes |
 | E-11 | Settings validation/secrets | **Implemented; PD-11/PD-18 approved** | Typed settings, redaction, volume-permission reliance; secret-at-rest review remains |

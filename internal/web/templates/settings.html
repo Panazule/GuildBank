@@ -26,7 +26,7 @@
         {{else if eq .Key "SessionIdleMinutes"}}
           <input name="{{.Key}}" value="{{index $.Form .Key}}" type="number" min="5" max="1440">
         {{else if eq .Key "SessionAbsoluteHours"}}
-          <input name="{{.Key}}" value="{{index $.Form .Key}}" type="number" min="1" max="168">
+          <input name="{{.Key}}" value="{{index $.Form .Key}}" type="number" min="1" max="730">
         {{else if eq .Key "EQResourceBaseUrl"}}
           <input name="{{.Key}}" value="{{index $.Form .Key}}" type="url">
         {{else if or (eq .Key "DiscordEnabled") (eq .Key "SelfRegistrationEnabled")}}

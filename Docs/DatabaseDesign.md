@@ -162,7 +162,7 @@ Seed rows (idempotent `INSERT ... ON CONFLICT(SettingKey) DO NOTHING`):
 | `MariaDbPassword` | *(setup)* | secret | **yes** | non-empty |
 | `SetupComplete` | `0` | boolean | no | must be `1` before setup routes close |
 | `SessionIdleMinutes` | `30` | integer | no | `5–1440` (APPROVED PD-15) |
-| `SessionAbsoluteHours` | `8` | integer | no | `1–168` (APPROVED PD-15) |
+| `SessionAbsoluteHours` | `8` | integer | no | days; `1–730` (2 years). The key name is historical: PD-15 originally stored hours, and the same row is now read as days (no migration) |
 | `PublicBaseUrl` | *(empty)* | url | no | http(s) origin only; no path, query or fragment. Used to build the Discord redirect URI (P3 Phase B) |
 | `DiscordEnabled` | `false` | boolean | no | `true`/`false`; linking also requires the client ID, secret and public base URL |
 | `DiscordClientId` | *(empty)* | string | no | 15–25 digits (Discord snowflake) |
