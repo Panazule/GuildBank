@@ -79,6 +79,14 @@ func TestAdministratorNavigationAndSettingsPage(t *testing.T) {
 	if bytes.Contains(body, []byte("1–168")) {
 		t.Fatalf("settings page still advertises the retired hour-based range\n%s", body)
 	}
+	// The informational storage footer was removed; the footer element itself
+	// stays so page spacing is unchanged.
+	if bytes.Contains(body, []byte("Application data stays in SQLite")) || bytes.Contains(body, []byte("Guild data stays in MariaDB")) {
+		t.Fatalf("settings page still renders the retired storage footer\n%s", body)
+	}
+	if !bytes.Contains(body, []byte(`<footer class="site-footer"></footer>`)) {
+		t.Fatalf("settings page lost the footer container\n%s", body)
+	}
 	if bytes.Contains(body, []byte(`href="/login"`)) {
 		t.Fatalf("authenticated navigation still offers login: %s", body)
 	}
